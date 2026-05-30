@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Task Dispatcher</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, system-ui, sans-serif; background: #0d1117; color: #c9d1d9; }
+  header { padding: 12px 18px; background: #161b22; border-bottom: 1px solid #30363d; font-weight: 600; }
+  .wrap { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 49px); }
+  .side { border-right: 1px solid #30363d; overflow-y: auto; padding: 14px; }
+  .main { display: flex; flex-direction: column; min-width: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: #8b949e; margin: 18px 0 8px; }
+  input, select, textarea, button { font: inherit; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 6px 8px; width: 100%; margin-bottom: 6px; }
+  button { background: #238636; border-color: #238636; cursor: pointer; font-weight: 600; }
+  button.sec { background: #21262d; border-color: #30363d; }
+  button.danger { background: #b62324; border-color: #b62324; }
+  button:hover { filter: brightness(1.1); }
+  .row { display: flex; gap: 6px; }
+  .card { border: 1px solid #30363d; border-radius: 8px; padding: 10px; margin-bottom: 8px; background: #161b22; }
+  .card .t { font-weight: 600; }
+  .muted { color: #8b949e; font-size: 12px; }
+  .pill { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid #30363d; }
+  .pill.live { background: #1f6feb33; border-color: #1f6feb; color: #79c0ff; }
+  .pill.ready { background: #23863633; border-color: #238636; color: #7ee787; }
+  .pill.error { background: #b6232433; border-color: #b62324; color: #ffa198; }
+  .pill.cleaned, .pill.cloning { color: #8b949e; }
+  #term { flex: 1; padding: 6px; min-height: 0; }
+  .termbar { padding: 8px 14px; border-bottom: 1px solid #30363d; background: #161b22; display: flex; align-items: center; gap: 10px; }
+  .termbar code { background: #0d1117; padding: 2px 6px; border-radius: 4px; border: 1px solid #30363d; }
+  a { color: #58a6ff; }
+  .hint { font-size: 11px; color: #6e7681; }
+</style>
+</head>
+<body>
+<header>🛰️ Task Dispatcher</header>
+<div class="wrap">
+  <div class="side">
+    <h2>新建仓库</h2>
+    <input id="r-name" placeholder="名称 (例: ug)" />
+    <input id="r-url" placeholder="git url (https/ssh)" />
+    <input id="r-token" placeholder="token (https 私有库可选)" />
+    <input id="r-project" placeholder="gitlab project path (group/repo, 提 MR 用)" />
+    <input id="r-default" placeholder="默认分支 (默认 main)" />
+    <button onclick="addRepo()">注册并克隆</button>
+    <div class="hint">克隆为 mirror，后续 worktree 共享对象库</div>
+
+    <h2>仓库</h2>
+    <div id="repos"></div>
+
+    <h2>派发任务</h2>
+    <select id="t-repo" onchange="loadBranches()"></select>
+    <select id="t-base"></select>
+    <input id="t-title" placeholder="任务标题" />
+    <textarea id="t-prompt" rows="3" placeholder="给 claude 的初始指令 (可选)"></textarea>
+    <button onclick="addTask()">建 worktree + 起会话</button>
+  </div>
+
+  <div class="main">
+    <div class="termbar">
+      <span id="term-title" class="muted">未连接</span>
+      <span style="flex:1"></span>
+      <code id="term-attach"></code>
+    </div>
+    <div id="term"></div>
+  </div>
+</div>
+
+<h2 style="padding:0 18px">任务</h2>
+<div id="tasks" style="padding: 0 18px 24px; display:grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap:10px"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const api = (u, opt) => fetch(u, opt).then(async r => { const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||r.status); return j; });
+
+let term, fit, ws, repos = [];
+
+function initTerm() {
+  term = new Terminal({ fontSize: 13, fontFamily: "Menlo, monospace", theme: { background: "#0d1117" }, cursorBlink: true });
+  fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open($("term"));
+  fit.fit();
+  window.addEventListener("resize", () => { try { fit.fit(); sendResize(); } catch {} });
+  term.onData(d => ws && ws.readyState === 1 && ws.send(d));
+}
+function sendResize() {
+  if (ws && ws.readyState === 1) ws.send("\x00resize:" + term.cols + "x" + term.rows);
+}
+function connect(session, title) {
+  if (ws) { ws.close(); ws = null; }
+  term.reset();
+  $("term-title").textContent = title;
+  $("term-attach").textContent = "tmux attach -t " + session;
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/pty?session=${encodeURIComponent(session)}`);
+  ws.onopen = () => { fit.fit(); sendResize(); };
+  ws.onmessage = (e) => term.write(typeof e.data === "string" ? e.data : "");
+  ws.onclose = () => term.write("\r\n\x1b[90m[已断开]\x1b[0m\r\n");
+}
+
+async function addRepo() {
+  const body = {
+    name: $("r-name").value.trim(), git_url: $("r-url").value.trim(),
+    token: $("r-token").value.trim(), project_path: $("r-project").value.trim(),
+    default_branch: $("r-default").value.trim() || "main",
+  };
+  if (!body.name || !body.git_url) return alert("名称和 git url 必填");
+  await api("/api/repos", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
+  ["r-name","r-url","r-token","r-project","r-default"].forEach(i => $(i).value = "");
+  loadRepos();
+}
+
+async function loadRepos() {
+  repos = await api("/api/repos");
+  $("repos").innerHTML = repos.map(r => `
+    <div class="card">
+      <div class="t">${r.name} <span class="pill ${r.status}">${r.status}</span></div>
+      <div class="muted">${r.git_url}</div>
+      ${r.error ? `<div class="muted" style="color:#ffa198">${r.error}</div>` : ""}
+      <div class="row" style="margin-top:6px">
+        <button class="sec" onclick="fetchRepo(${r.id})">fetch</button>
+        <button class="danger" onclick="delRepo(${r.id})">删除</button>
+      </div>
+    </div>`).join("") || `<div class="muted">暂无</div>`;
+  const sel = $("t-repo");
+  sel.innerHTML = repos.filter(r=>r.status==="ready").map(r => `<option value="${r.id}">${r.name}</option>`).join("");
+  loadBranches();
+}
+async function fetchRepo(id){ try{ await api(`/api/repos/${id}/fetch`,{method:"POST"}); loadBranches(); alert("fetched"); }catch(e){ alert(e.message);} }
+async function delRepo(id){ if(!confirm("删除仓库镜像?"))return; await api(`/api/repos/${id}`,{method:"DELETE"}); loadRepos(); }
+
+async function loadBranches() {
+  const id = $("t-repo").value;
+  if (!id) { $("t-base").innerHTML = ""; return; }
+  try {
+    const branches = await api(`/api/repos/${id}/branches`);
+    const repo = repos.find(r=>r.id==id);
+    $("t-base").innerHTML = branches.map(b => `<option ${b===repo?.default_branch?"selected":""}>${b}</option>`).join("");
+  } catch(e){ $("t-base").innerHTML = `<option>${e.message}</option>`; }
+}
+
+async function addTask() {
+  const body = {
+    repo_id: Number($("t-repo").value), base_branch: $("t-base").value,
+    title: $("t-title").value.trim(), prompt: $("t-prompt").value,
+  };
+  if (!body.repo_id || !body.base_branch || !body.title) return alert("仓库/分支/标题必填");
+  const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
+  $("t-title").value = ""; $("t-prompt").value = "";
+  loadTasks();
+  connect(r.session, body.title);
+}
+
+async function loadTasks() {
+  const tasks = await api("/api/tasks");
+  $("tasks").innerHTML = tasks.map(t => `
+    <div class="card">
+      <div class="t">#${t.id} ${t.title}
+        ${t.alive ? `<span class="pill live">live</span>` : `<span class="pill ${t.status}">${t.status}</span>`}
+      </div>
+      <div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>
+      ${t.mr_url ? `<div><a href="${t.mr_url}" target="_blank">MR ↗</a></div>` : ""}
+      <div class="row" style="margin-top:6px">
+        <button onclick="connect('${t.session}','#${t.id} ${t.title.replace(/'/g,"")}')">进终端</button>
+        <button class="sec" onclick="mr(${t.id})">提 MR</button>
+        <button class="danger" onclick="cleanup(${t.id})">清理</button>
+      </div>
+    </div>`).join("") || `<div class="muted">暂无任务</div>`;
+}
+async function mr(id){
+  const target = prompt("目标分支?", repos.find(r=>true)?.default_branch || "main");
+  if(target===null) return;
+  try{ const r = await api(`/api/tasks/${id}/mr`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({target_branch:target})}); alert("MR: "+r.url); loadTasks(); }
+  catch(e){ alert("失败: "+e.message); }
+}
+async function cleanup(id){ if(!confirm("杀会话 + 删 worktree?"))return; await api(`/api/tasks/${id}/cleanup`,{method:"POST"}); loadTasks(); }
+
+initTerm();
+loadRepos();
+loadTasks();
+setInterval(loadTasks, 4000);
+</script>
+</body>
+</html>

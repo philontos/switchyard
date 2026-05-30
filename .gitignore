@@ -1,0 +1,7 @@
+node_modules/
+data/mirrors/
+data/worktrees/
+data/dispatcher.db
+data/dispatcher.db-*
+*.log
+.DS_Store
