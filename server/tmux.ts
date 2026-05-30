@@ -33,3 +33,13 @@ export async function hasSession(session: string): Promise<boolean> {
 export async function killSession(session: string) {
   await tmux(["kill-session", "-t", session]).catch(() => {});
 }
+
+/** List all dispatcher-owned tmux sessions (named task-<id>). */
+export async function listSessions(): Promise<string[]> {
+  try {
+    const out = await tmux(["list-sessions", "-F", "#{session_name}"]);
+    return out.split("\n").map((s) => s.trim()).filter((s) => /^(tdsp|task)-\d+(-[a-z0-9-]+)?$/.test(s));
+  } catch {
+    return []; // no server / no sessions
+  }
+}

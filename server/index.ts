@@ -6,12 +6,29 @@ import fs from "node:fs";
 import path from "node:path";
 import { db, Repo, Task } from "./db.js";
 import {
-  cloneMirror, fetchMirror, listBranches, addWorktree, removeWorktree,
-  pushBranch, mirrorPath,
+  initMirror, fetchMirror, fetchBranch, listBranches, addWorktree, removeWorktree,
+  mirrorPath,
 } from "./git.js";
-import { startSession, hasSession, killSession } from "./tmux.js";
-import { createMR } from "./mr.js";
+import { startSession, hasSession, killSession, listSessions } from "./tmux.js";
 import { WEB_DIR } from "./paths.js";
+
+// ensure child processes (git/tmux/glab/pty) find Homebrew/usr-local binaries
+// regardless of how the server was launched (a stripped PATH otherwise breaks
+// tmux/pty with "posix_spawnp failed").
+for (const p of ["/opt/homebrew/bin", "/usr/local/bin"]) {
+  if (!(process.env.PATH || "").split(":").includes(p)) {
+    process.env.PATH = `${p}:${process.env.PATH || ""}`;
+  }
+}
+// never let a single bad pty/connection take down the whole server
+process.on("uncaughtException", (e) => console.error("[uncaught]", e));
+process.on("unhandledRejection", (e) => console.error("[unhandledRejection]", e));
+
+// resolve tmux to an absolute path — node-pty's spawn-helper does not honor a
+// mutated PATH, so a bare "tmux" fails with posix_spawnp on stripped envs.
+const TMUX_BIN =
+  ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"].find((p) => fs.existsSync(p)) ||
+  "tmux";
 
 const app = express();
 app.use(express.json());
@@ -23,6 +40,9 @@ const getTask = db.prepare("SELECT * FROM tasks WHERE id = ?");
 function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "task";
 }
+
+// matches dispatcher-owned sessions (new tdsp-* scheme + legacy task-N)
+const SESSION_RE = /^(tdsp|task)-\d+(-[a-z0-9-]+)?$/;
 
 // ---------- repos ----------
 app.get("/api/repos", (_req, res) => {
@@ -39,10 +59,10 @@ app.post("/api/repos", (req, res) => {
   const dest = mirrorPath(id, name);
   db.prepare("UPDATE repos SET mirror_path = ? WHERE id = ?").run(dest, id);
 
-  // clone in background
+  // register in background: init bare repo + validate connectivity (no download)
   (async () => {
     try {
-      await cloneMirror(git_url, token || null, dest);
+      await initMirror(git_url, token || null, dest);
       db.prepare("UPDATE repos SET status='ready', error=NULL WHERE id=?").run(id);
     } catch (e: any) {
       db.prepare("UPDATE repos SET status='error', error=? WHERE id=?").run(String(e.message || e), id);
@@ -88,7 +108,11 @@ app.delete("/api/repos/:id", (req, res) => {
 app.get("/api/tasks", async (_req, res) => {
   const tasks = db.prepare("SELECT * FROM tasks ORDER BY id DESC").all() as Task[];
   const withLive = await Promise.all(
-    tasks.map(async (t) => ({ ...t, alive: t.status === "cleaned" ? false : await hasSession(t.session) }))
+    tasks.map(async (t) => ({
+      ...t,
+      alive: t.status === "cleaned" ? false : await hasSession(t.session),
+      hasWorktree: !!t.worktree_path && fs.existsSync(t.worktree_path),
+    }))
   );
   res.json(withLive);
 });
@@ -106,12 +130,15 @@ app.post("/api/tasks", async (req, res) => {
     "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status) VALUES (?,?,?,?,?,?,?,?)"
   ).run(repo_id, base_branch, "", title, prompt || null, "", "", "creating");
   const id = Number(info.lastInsertRowid);
-  const workBranch = `feat/${id}-${slug(title)}`;
+  const s = slug(title);
+  const workBranch = `feat/${id}-${s}`;
   const worktree = path.join(path.dirname(repo.mirror_path), "..", "worktrees", `${repo.id}-${id}`);
   const wtAbs = path.resolve(worktree);
-  const session = `task-${id}`;
+  // distinctive name so it never collides with unrelated tmux sessions
+  const session = `tdsp-${id}-${slug(repo.name)}-${s}`;
 
   try {
+    await fetchBranch(repo.mirror_path, base_branch); // pull latest of base branch now
     await addWorktree(repo.mirror_path, wtAbs, workBranch, base_branch);
     await startSession(session, wtAbs, prompt);
     db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
@@ -123,27 +150,20 @@ app.post("/api/tasks", async (req, res) => {
   }
 });
 
-app.post("/api/tasks/:id/mr", async (req, res) => {
+// archive: end the tmux session but KEEP the worktree (moves task to archived tab)
+app.post("/api/tasks/:id/archive", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: "not found" });
-  const repo = getRepo.get(task.repo_id) as Repo | undefined;
-  const { target_branch, title } = req.body ?? {};
   try {
-    await pushBranch(task.worktree_path, task.work_branch);
-    const url = await createMR({
-      worktree: task.worktree_path,
-      projectPath: repo?.project_path,
-      source: task.work_branch,
-      target: target_branch || repo?.default_branch || "main",
-      title: title || task.title,
-    });
-    db.prepare("UPDATE tasks SET mr_url=? WHERE id=?").run(url, task.id);
-    res.json({ url });
+    await killSession(task.session);
+    db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+    res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
   }
 });
 
+// remove the worktree (frees disk) without deleting the task record
 app.post("/api/tasks/:id/cleanup", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: "not found" });
@@ -158,9 +178,45 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
   }
 });
 
+// delete the task record — refused while its worktree still exists on disk
 app.delete("/api/tasks/:id", (req, res) => {
+  const task = getTask.get(req.params.id) as Task | undefined;
+  if (task && task.worktree_path && fs.existsSync(task.worktree_path)) {
+    return res.status(409).json({ error: "worktree 仍存在，请先删除 worktree" });
+  }
   db.prepare("DELETE FROM tasks WHERE id=?").run(req.params.id);
   res.json({ ok: true });
+});
+
+// ---------- sessions (raw tmux, incl. orphans) ----------
+app.get("/api/sessions", async (_req, res) => {
+  const names = await listSessions();
+  const known = new Set(
+    (db.prepare("SELECT session FROM tasks WHERE status != 'cleaned'").all() as { session: string }[])
+      .map((r) => r.session)
+  );
+  res.json(names.map((name) => ({ name, orphan: !known.has(name) })));
+});
+
+app.post("/api/sessions/:name/kill", async (req, res) => {
+  const name = req.params.name;
+  if (!SESSION_RE.test(name)) return res.status(400).json({ error: "invalid session" });
+  const removeWt = req.body?.removeWorktree !== false; // default: also delete worktree
+  await killSession(name);
+
+  const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(name) as Task | undefined;
+  let removedWorktree = false;
+  if (task) {
+    if (removeWt) {
+      const repo = getRepo.get(task.repo_id) as Repo | undefined;
+      if (repo?.mirror_path) await removeWorktree(repo.mirror_path, task.worktree_path, task.work_branch);
+      db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+      removedWorktree = true;
+    } else {
+      db.prepare("UPDATE tasks SET status='done' WHERE id=?").run(task.id);
+    }
+  }
+  res.json({ ok: true, removedWorktree });
 });
 
 // ---------- pty bridge ----------
@@ -170,18 +226,26 @@ const wss = new WebSocketServer({ server, path: "/pty" });
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url || "", "http://localhost");
   const session = url.searchParams.get("session");
-  if (!session || !/^task-\d+$/.test(session)) {
+  if (!session || !SESSION_RE.test(session)) {
     ws.close(1008, "invalid session");
     return;
   }
   // attach to the tmux session; multiple clients can attach independently
-  const term = pty.spawn("tmux", ["attach", "-t", session], {
-    name: "xterm-256color",
-    cols: 120,
-    rows: 32,
-    cwd: process.env.HOME,
-    env: process.env as Record<string, string>,
-  });
+  let term: pty.IPty;
+  try {
+    term = pty.spawn(TMUX_BIN, ["attach", "-t", session], {
+      name: "xterm-256color",
+      cols: 120,
+      rows: 32,
+      cwd: process.env.HOME,
+      env: process.env as Record<string, string>,
+    });
+  } catch (e: any) {
+    // spawn failure must not crash the server — report on the socket and bail
+    try { ws.send(`\r\n\x1b[31m无法连接会话 ${session}: ${e.message}\x1b[0m\r\n`); } catch {}
+    ws.close();
+    return;
+  }
 
   term.onData((data) => {
     if (ws.readyState === ws.OPEN) ws.send(data);

@@ -8,18 +8,23 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.5 -apple-system, system-ui, sans-serif; background: #0d1117; color: #c9d1d9; }
-  header { padding: 12px 18px; background: #161b22; border-bottom: 1px solid #30363d; font-weight: 600; }
-  .wrap { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 49px); }
+  body { margin: 0; font: 13px/1.55 -apple-system, "SF Pro Text", system-ui, "PingFang SC", sans-serif; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; -webkit-font-smoothing: antialiased; letter-spacing: .1px; }
+  header { padding: 12px 18px; background: #161b22; border-bottom: 1px solid #30363d; font-weight: 600; flex: none; }
+  .wrap { display: grid; grid-template-columns: 320px 1fr; flex: 1; min-height: 0; }
   .side { border-right: 1px solid #30363d; overflow-y: auto; padding: 14px; }
-  .main { display: flex; flex-direction: column; min-width: 0; }
+  .main { min-width: 0; overflow-y: auto; padding: 0 18px 24px; }
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: #8b949e; margin: 18px 0 8px; }
-  input, select, textarea, button { font: inherit; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 6px 8px; width: 100%; margin-bottom: 6px; }
-  button { background: #238636; border-color: #238636; cursor: pointer; font-weight: 600; }
-  button.sec { background: #21262d; border-color: #30363d; }
-  button.danger { background: #b62324; border-color: #b62324; }
-  button:hover { filter: brightness(1.1); }
-  .row { display: flex; gap: 6px; }
+  input, select, textarea { font: inherit; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 6px 9px; width: 100%; margin-bottom: 7px; }
+  input::placeholder, textarea::placeholder { color: #525a63; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: #4b93f0; }
+  button { font: inherit; font-size: 12.5px; font-weight: 500; line-height: 1.4; padding: 4px 11px; border-radius: 6px; cursor: pointer; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; transition: background .12s, border-color .12s; }
+  button:hover { background: #2a313a; }
+  button.primary { background: #238636; border-color: #2ea04355; color: #fff; }
+  button.primary:hover { background: #2ea043; }
+  button.sec { background: #21262d; }
+  button.danger { background: #21262d; border-color: #30363d; color: #f0837c; }
+  button.danger:hover { background: #f8514914; border-color: #f85149aa; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
   .card { border: 1px solid #30363d; border-radius: 8px; padding: 10px; margin-bottom: 8px; background: #161b22; }
   .card .t { font-weight: 600; }
   .muted { color: #8b949e; font-size: 12px; }
@@ -28,55 +33,191 @@
   .pill.ready { background: #23863633; border-color: #238636; color: #7ee787; }
   .pill.error { background: #b6232433; border-color: #b62324; color: #ffa198; }
   .pill.cleaned, .pill.cloning { color: #8b949e; }
+  /* bottom terminal dock (secondary display, collapsible) */
+  .dock { flex: none; height: 320px; border-top: 1px solid #30363d; background: #0d1117; display: flex; flex-direction: column; transition: height .15s ease; }
+  .dock.collapsed { height: 38px; }
+  .dock.collapsed #term { display: none; }
+  #tasks, #archived { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  #tasks[hidden], #archived[hidden] { display: none; }
+  #archived .card { opacity: .6; }
+  .tabs { display: flex; align-items: center; gap: 2px; margin: 14px 0 12px; border-bottom: 1px solid #30363d; }
+  .tab { width: auto; margin: 0; background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: #8b949e; padding: 7px 13px; font-weight: 600; font-size: 13px; }
+  .tab:hover { color: #c9d1d9; filter: none; }
+  .tab.active { color: #c9d1d9; border-bottom-color: #58a6ff; }
+  .empty { grid-column: 1 / -1; text-align: center; color: #6e7681; padding: 56px 16px; }
+  .empty-ic { font-size: 34px; margin-bottom: 10px; opacity: .7; }
+  .empty-hint { font-size: 12px; margin-top: 6px; color: #586069; }
   #term { flex: 1; padding: 6px; min-height: 0; }
-  .termbar { padding: 8px 14px; border-bottom: 1px solid #30363d; background: #161b22; display: flex; align-items: center; gap: 10px; }
+  .termbar { padding: 6px 12px; border-bottom: 1px solid #30363d; background: #161b22; display: flex; align-items: center; gap: 10px; flex: none; }
   .termbar code { background: #0d1117; padding: 2px 6px; border-radius: 4px; border: 1px solid #30363d; }
+  .termbar #dock-toggle { width: auto; margin: 0; padding: 3px 10px; font-size: 12px; background: #21262d; border-color: #30363d; }
   a { color: #58a6ff; }
   .hint { font-size: 11px; color: #6e7681; }
+  .modal-bg { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .modal { width: 420px; max-width: 92vw; background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 18px; }
+  .modal h2 { margin-top: 0; }
+  .sessrow { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 5px 0; border-bottom: 1px solid #21262d; }
+  .sessrow code { background: #0d1117; padding: 1px 6px; border-radius: 4px; }
+  .sessrow button { width: auto; padding: 2px 8px; margin: 0; font-size: 11px; }
+  .sessrow label { display: inline-flex; align-items: center; gap: 3px; color: #8b949e; cursor: pointer; white-space: nowrap; }
+  .sessrow input[type=checkbox] { width: auto; margin: 0; }
+
+  /* toast */
+  #toasts { position: fixed; top: 14px; right: 14px; z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+  .toast { min-width: 220px; max-width: 360px; padding: 10px 14px; border-radius: 8px; background: #1c2128;
+    border: 1px solid #30363d; border-left: 3px solid #6e7681; box-shadow: 0 6px 24px #0008;
+    font-size: 13px; animation: tin .18s ease; word-break: break-word; }
+  .toast.success { border-left-color: #2ea043; }
+  .toast.error { border-left-color: #f85149; }
+  .toast.info { border-left-color: #58a6ff; }
+  .toast.out { animation: tout .25s ease forwards; }
+  @keyframes tin { from { opacity: 0; transform: translateX(16px); } }
+  @keyframes tout { to { opacity: 0; transform: translateX(16px); } }
+  /* dialog */
+  .dlg-msg { margin: 6px 0 12px; white-space: pre-wrap; }
+  .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .dlg-actions button { width: auto; padding: 6px 16px; margin: 0; }
+  /* global loading */
+  #loading { position: fixed; inset: 0; background: #0d1117cc; z-index: 200; display: none;
+    flex-direction: column; align-items: center; justify-content: center; gap: 14px; backdrop-filter: blur(1px); }
+  #loading.on { display: flex; }
+  .spinner { width: 38px; height: 38px; border: 3px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin .8s linear infinite; }
+  #loading-text { color: #c9d1d9; font-size: 14px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 <header>🛰️ Task Dispatcher</header>
 <div class="wrap">
   <div class="side">
-    <h2>新建仓库</h2>
-    <input id="r-name" placeholder="名称 (例: ug)" />
-    <input id="r-url" placeholder="git url (https/ssh)" />
-    <input id="r-token" placeholder="token (https 私有库可选)" />
-    <input id="r-project" placeholder="gitlab project path (group/repo, 提 MR 用)" />
-    <input id="r-default" placeholder="默认分支 (默认 main)" />
-    <button onclick="addRepo()">注册并克隆</button>
-    <div class="hint">克隆为 mirror，后续 worktree 共享对象库</div>
-
+    <button class="primary" onclick="openRepoModal()">＋ 新建仓库</button>
     <h2>仓库</h2>
     <div id="repos"></div>
-
-    <h2>派发任务</h2>
-    <select id="t-repo" onchange="loadBranches()"></select>
-    <select id="t-base"></select>
-    <input id="t-title" placeholder="任务标题" />
-    <textarea id="t-prompt" rows="3" placeholder="给 claude 的初始指令 (可选)"></textarea>
-    <button onclick="addTask()">建 worktree + 起会话</button>
   </div>
 
   <div class="main">
-    <div class="termbar">
-      <span id="term-title" class="muted">未连接</span>
+    <div class="tabs">
+      <button class="tab active" data-tab="live" onclick="showTab('live')">并发 feature</button>
+      <button class="tab" data-tab="arch" onclick="showTab('arch')">已归档 <span id="arch-count" class="muted"></span></button>
       <span style="flex:1"></span>
-      <code id="term-attach"></code>
+      <button class="primary" onclick="openTaskModal()">＋ 派发任务</button>
     </div>
-    <div id="term"></div>
+    <div id="tasks"></div>
+    <div id="archived" hidden></div>
   </div>
 </div>
 
-<h2 style="padding:0 18px">任务</h2>
-<div id="tasks" style="padding: 0 18px 24px; display:grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap:10px"></div>
+<div id="dock" class="dock collapsed">
+  <div class="termbar">
+    <button id="dock-toggle" onclick="toggleDock()">▴ 终端</button>
+    <span id="term-title" class="muted">未连接</span>
+    <span style="flex:1"></span>
+    <code id="term-attach"></code>
+  </div>
+  <div id="term"></div>
+</div>
+
+<div id="loading"><div class="spinner"></div><div id="loading-text"></div></div>
+
+<div id="toasts"></div>
+
+<div id="dialog" class="modal-bg" style="display:none">
+  <div class="modal">
+    <h2 id="dlg-title" style="margin:0 0 4px"></h2>
+    <div id="dlg-msg" class="dlg-msg"></div>
+    <input id="dlg-input" style="display:none" />
+    <div class="dlg-actions">
+      <button id="dlg-cancel" class="sec">取消</button>
+      <button id="dlg-ok">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="task-modal" class="modal-bg" style="display:none">
+  <div class="modal">
+    <h2 style="margin-bottom:10px">派发任务</h2>
+    <select id="t-repo" onchange="loadBranches()"></select>
+    <select id="t-base"></select>
+    <input id="t-title" placeholder="任务标题" />
+    <textarea id="t-prompt" rows="3" placeholder="给 claude 的初始指令（可选）"></textarea>
+    <div class="dlg-actions">
+      <button class="sec" onclick="closeTaskModal()">取消</button>
+      <button class="primary" onclick="addTask()">建 worktree + 起会话</button>
+    </div>
+  </div>
+</div>
+
+<div id="repo-modal" class="modal-bg" style="display:none">
+  <div class="modal">
+    <h2 style="margin-bottom:10px">新建仓库</h2>
+    <input id="r-name" placeholder="名称 (例: ug)" />
+    <input id="r-url" placeholder="git url (https / ssh)" />
+    <input id="r-token" placeholder="token — https 私有库才填，SSH 留空" />
+    <input id="r-default" placeholder="默认分支 (默认 main)" />
+    <div class="dlg-actions">
+      <button class="sec" onclick="closeRepoModal()">取消</button>
+      <button class="primary" onclick="addRepo()">注册并克隆</button>
+    </div>
+    <div class="hint" style="margin-top:10px">克隆为 mirror，worktree 共享对象库。SSH 复用本地 ~/.ssh 与 glab 登录态，token 多半留空即可。</div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const api = (u, opt) => fetch(u, opt).then(async r => { const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||r.status); return j; });
+
+// ---- toast ----
+function toast(msg, type = "info", ms = 3500) {
+  const el = document.createElement("div");
+  el.className = "toast " + type;
+  el.textContent = msg;
+  $("toasts").appendChild(el);
+  const close = () => { el.classList.add("out"); setTimeout(() => el.remove(), 250); };
+  el.addEventListener("click", close);
+  setTimeout(close, ms);
+}
+
+// ---- global loading overlay ----
+function showLoading(text = "处理中…") { $("loading-text").textContent = text; $("loading").classList.add("on"); }
+function hideLoading() { $("loading").classList.remove("on"); }
+
+// ---- dialog (promise-based confirm / prompt) ----
+let dlgResolve = null;
+function openDialog({ title = "", message = "", input = false, value = "", okText = "确定", danger = false }) {
+  return new Promise((resolve) => {
+    dlgResolve = resolve;
+    $("dlg-title").textContent = title;
+    $("dlg-title").style.display = title ? "" : "none";
+    $("dlg-msg").textContent = message;
+    const inp = $("dlg-input");
+    inp.style.display = input ? "" : "none";
+    if (input) { inp.value = value; setTimeout(() => { inp.focus(); inp.select(); }, 30); }
+    const ok = $("dlg-ok");
+    ok.textContent = okText;
+    ok.className = danger ? "danger" : "";
+    $("dialog").style.display = "flex";
+  });
+}
+function closeDialog(result) {
+  $("dialog").style.display = "none";
+  const r = dlgResolve; dlgResolve = null;
+  if (r) r(result);
+}
+function confirmDialog(message, opts = {}) { return openDialog({ message, ...opts }).then(Boolean); }
+function promptDialog(message, value = "", opts = {}) {
+  return openDialog({ message, input: true, value, ...opts });
+}
+$("dlg-ok").onclick = () => closeDialog($("dlg-input").style.display === "none" ? true : $("dlg-input").value);
+$("dlg-cancel").onclick = () => closeDialog(null);
+$("dialog").addEventListener("click", (e) => { if (e.target.id === "dialog") closeDialog(null); });
+$("dlg-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("dlg-ok").click(); });
+
+// global safety net: surface uncaught API errors as toasts
+window.addEventListener("unhandledrejection", (e) => {
+  toast(String(e.reason?.message || e.reason || "操作失败"), "error");
+});
 
 let term, fit, ws, repos = [];
 
@@ -85,15 +226,27 @@ function initTerm() {
   fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open($("term"));
-  fit.fit();
+  try { fit.fit(); } catch {}
   window.addEventListener("resize", () => { try { fit.fit(); sendResize(); } catch {} });
   term.onData(d => ws && ws.readyState === 1 && ws.send(d));
 }
 function sendResize() {
   if (ws && ws.readyState === 1) ws.send("\x00resize:" + term.cols + "x" + term.rows);
 }
+function expandDock() {
+  $("dock").classList.remove("collapsed");
+  $("dock-toggle").textContent = "▾ 终端";
+  setTimeout(() => { try { fit.fit(); sendResize(); } catch {} }, 160);
+}
+function toggleDock() {
+  const d = $("dock");
+  if (d.classList.contains("collapsed")) expandDock();
+  else { d.classList.add("collapsed"); $("dock-toggle").textContent = "▴ 终端"; }
+}
+
 function connect(session, title) {
   if (ws) { ws.close(); ws = null; }
+  expandDock();
   term.reset();
   $("term-title").textContent = title;
   $("term-attach").textContent = "tmux attach -t " + session;
@@ -104,20 +257,34 @@ function connect(session, title) {
   ws.onclose = () => term.write("\r\n\x1b[90m[已断开]\x1b[0m\r\n");
 }
 
+function openRepoModal() { $("repo-modal").style.display = "flex"; $("r-name").focus(); }
+function closeRepoModal() { $("repo-modal").style.display = "none"; }
+function openTaskModal() {
+  if (!repos.some(r => r.status === "ready")) return toast("先注册一个仓库", "error");
+  $("task-modal").style.display = "flex";
+  loadBranches();
+  setTimeout(() => $("t-title").focus(), 30);
+}
+function closeTaskModal() { $("task-modal").style.display = "none"; }
+
 async function addRepo() {
   const body = {
     name: $("r-name").value.trim(), git_url: $("r-url").value.trim(),
-    token: $("r-token").value.trim(), project_path: $("r-project").value.trim(),
+    token: $("r-token").value.trim(),
     default_branch: $("r-default").value.trim() || "main",
   };
-  if (!body.name || !body.git_url) return alert("名称和 git url 必填");
+  if (!body.name || !body.git_url) return toast("名称和 git url 必填", "error");
   await api("/api/repos", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
-  ["r-name","r-url","r-token","r-project","r-default"].forEach(i => $(i).value = "");
+  ["r-name","r-url","r-token","r-default"].forEach(i => $(i).value = "");
+  closeRepoModal();
+  toast("仓库已注册，正在校验连接…", "success");
   loadRepos();
 }
 
 async function loadRepos() {
-  repos = await api("/api/repos");
+  const r = await api("/api/repos").catch(() => null);
+  if (!r) return; // server transiently down — stay quiet, poller will retry
+  repos = r;
   $("repos").innerHTML = repos.map(r => `
     <div class="card">
       <div class="t">${r.name} <span class="pill ${r.status}">${r.status}</span></div>
@@ -132,8 +299,8 @@ async function loadRepos() {
   sel.innerHTML = repos.filter(r=>r.status==="ready").map(r => `<option value="${r.id}">${r.name}</option>`).join("");
   loadBranches();
 }
-async function fetchRepo(id){ try{ await api(`/api/repos/${id}/fetch`,{method:"POST"}); loadBranches(); alert("fetched"); }catch(e){ alert(e.message);} }
-async function delRepo(id){ if(!confirm("删除仓库镜像?"))return; await api(`/api/repos/${id}`,{method:"DELETE"}); loadRepos(); }
+async function fetchRepo(id){ try{ await api(`/api/repos/${id}/fetch`,{method:"POST"}); loadBranches(); toast("已拉取最新分支","success"); }catch(e){ toast(e.message,"error"); } }
+async function delRepo(id){ if(!await confirmDialog("删除该仓库镜像？",{title:"删除仓库",okText:"删除",danger:true}))return; await api(`/api/repos/${id}`,{method:"DELETE"}); loadRepos(); }
 
 async function loadBranches() {
   const id = $("t-repo").value;
@@ -150,41 +317,87 @@ async function addTask() {
     repo_id: Number($("t-repo").value), base_branch: $("t-base").value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
   };
-  if (!body.repo_id || !body.base_branch || !body.title) return alert("仓库/分支/标题必填");
-  const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
-  $("t-title").value = ""; $("t-prompt").value = "";
-  loadTasks();
-  connect(r.session, body.title);
+  if (!body.repo_id || !body.base_branch || !body.title) return toast("仓库 / 分支 / 标题必填", "error");
+  showLoading("正在拉取分支并创建 worktree…");
+  try {
+    const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
+    $("t-title").value = ""; $("t-prompt").value = "";
+    closeTaskModal();
+    showTab("live");
+    toast("任务已派发：" + r.session, "success");
+    loadTasks();
+    connect(r.session, body.title);
+  } catch (e) {
+    toast("派发失败：" + e.message, "error", 6000);
+  } finally {
+    hideLoading();
+  }
+}
+
+function taskCard(t) {
+  const head = `<div class="t">#${t.id} ${t.title}
+    ${t.alive ? `<span class="pill live">live</span>` : `<span class="pill ${t.status}">${t.status}</span>`}</div>
+    <div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>
+    ${t.mr_url ? `<div><a href="${t.mr_url}" target="_blank">MR ↗</a></div>` : ""}`;
+  const safe = t.title.replace(/'/g, "");
+  let actions;
+  if (t.status !== "cleaned") {
+    actions = `<button onclick="connect('${t.session}','#${t.id} ${safe}')">进终端</button>
+       <button class="danger" onclick="archive(${t.id})">kill</button>`;
+  } else if (t.hasWorktree) {
+    actions = `<span class="muted" style="align-self:center">worktree 未删</span>
+       <span style="flex:1"></span>
+       <button class="danger" onclick="removeWt(${t.id})">删除 worktree</button>`;
+  } else {
+    actions = `<button class="danger" onclick="deleteTask(${t.id})">删除记录</button>`;
+  }
+  return `<div class="card">${head}<div class="row" style="margin-top:6px">${actions}</div></div>`;
 }
 
 async function loadTasks() {
-  const tasks = await api("/api/tasks");
-  $("tasks").innerHTML = tasks.map(t => `
-    <div class="card">
-      <div class="t">#${t.id} ${t.title}
-        ${t.alive ? `<span class="pill live">live</span>` : `<span class="pill ${t.status}">${t.status}</span>`}
-      </div>
-      <div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>
-      ${t.mr_url ? `<div><a href="${t.mr_url}" target="_blank">MR ↗</a></div>` : ""}
-      <div class="row" style="margin-top:6px">
-        <button onclick="connect('${t.session}','#${t.id} ${t.title.replace(/'/g,"")}')">进终端</button>
-        <button class="sec" onclick="mr(${t.id})">提 MR</button>
-        <button class="danger" onclick="cleanup(${t.id})">清理</button>
-      </div>
-    </div>`).join("") || `<div class="muted">暂无任务</div>`;
+  const tasks = await api("/api/tasks").catch(() => null);
+  if (!tasks) return;
+  const live = tasks.filter(t => t.status !== "cleaned");
+  const archived = tasks.filter(t => t.status === "cleaned");
+  $("tasks").innerHTML = live.map(taskCard).join("") ||
+    emptyState("🗂️", "还没有进行中的任务", "在左侧选择仓库和分支，派发一个吧");
+  $("archived").innerHTML = archived.map(taskCard).join("") ||
+    emptyState("📦", "暂无已归档任务", "归档进行中的任务后会出现在这里");
+  $("arch-count").textContent = archived.length ? `(${archived.length})` : "";
 }
-async function mr(id){
-  const target = prompt("目标分支?", repos.find(r=>true)?.default_branch || "main");
-  if(target===null) return;
-  try{ const r = await api(`/api/tasks/${id}/mr`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({target_branch:target})}); alert("MR: "+r.url); loadTasks(); }
-  catch(e){ alert("失败: "+e.message); }
+function emptyState(icon, title, hint) {
+  return `<div class="empty"><div class="empty-ic">${icon}</div><div>${title}</div>${hint ? `<div class="empty-hint">${hint}</div>` : ""}</div>`;
 }
-async function cleanup(id){ if(!confirm("杀会话 + 删 worktree?"))return; await api(`/api/tasks/${id}/cleanup`,{method:"POST"}); loadTasks(); }
-
+async function archive(id){
+  if(!await confirmDialog("kill 该任务的 tmux 会话？会话结束后自动归档（保留 worktree）。",{title:"kill 会话",okText:"kill",danger:true}))return;
+  await api(`/api/tasks/${id}/archive`,{method:"POST"});
+  toast("已 kill 并归档","success"); loadTasks();
+}
+async function removeWt(id){
+  if(!await confirmDialog("删除该任务的 worktree？释放磁盘，工作目录将移除（不可恢复）。",{title:"删除 worktree",okText:"删除",danger:true}))return;
+  await api(`/api/tasks/${id}/cleanup`,{method:"POST"});
+  toast("worktree 已删除","success"); loadTasks();
+}
+function deleteTask(id){ api(`/api/tasks/${id}`,{method:"DELETE"}).then(loadTasks).catch(e=>toast(e.message,"error")); }
+function showTab(tab){
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  $("tasks").hidden = tab !== "live";
+  $("archived").hidden = tab !== "arch";
+}
 initTerm();
 loadRepos();
 loadTasks();
 setInterval(loadTasks, 4000);
+// close modals on backdrop click / Esc
+$("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
+$("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if ($("dialog").style.display === "flex") closeDialog(null);
+  else { closeRepoModal(); closeTaskModal(); }
+});
+// poll repos so cloning -> ready (and clone errors) show up without manual refresh
+setInterval(() => { if (repos.some(r => r.status === "cloning")) loadRepos(); }, 2000);
 </script>
 </body>
 </html>

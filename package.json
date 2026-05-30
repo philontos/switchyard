@@ -6,7 +6,8 @@
   "description": "Web task dispatcher that drives Claude Code in tmux + git worktrees",
   "scripts": {
     "dev": "tsx watch server/index.ts",
-    "start": "tsx server/index.ts"
+    "start": "tsx server/index.ts",
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",

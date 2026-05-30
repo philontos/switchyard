@@ -7,7 +7,19 @@ import { MIRRORS_DIR, WORKTREES_DIR } from "./paths.js";
 const pexec = promisify(execFile);
 
 export async function git(cwd: string | null, args: string[]) {
-  const opts = { cwd: cwd ?? undefined, maxBuffer: 1024 * 1024 * 64 };
+  const opts = {
+    cwd: cwd ?? undefined,
+    maxBuffer: 1024 * 1024 * 64,
+    env: {
+      ...process.env,
+      // never hang the server on an interactive SSH/host-key/credential prompt;
+      // fail fast with a readable error instead.
+      GIT_SSH_COMMAND:
+        process.env.GIT_SSH_COMMAND ||
+        "ssh -o BatchMode=yes -o ConnectTimeout=15",
+      GIT_TERMINAL_PROMPT: "0",
+    },
+  };
   const { stdout } = await pexec("git", args, opts);
   return stdout;
 }
@@ -32,21 +44,42 @@ export function mirrorPath(repoId: number, name: string): string {
   return path.join(MIRRORS_DIR, `${repoId}-${safe}.git`);
 }
 
-export async function cloneMirror(gitUrl: string, token: string | null, dest: string) {
+/**
+ * Register a repo locally WITHOUT downloading any objects: create an empty
+ * bare repo, point it at origin, and validate connectivity via ls-remote.
+ * Objects for a branch are only fetched later, at dispatch time.
+ */
+export async function initMirror(gitUrl: string, token: string | null, dest: string) {
   fs.mkdirSync(MIRRORS_DIR, { recursive: true });
   if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-  await git(null, ["clone", "--mirror", authUrl(gitUrl, token), dest]);
+  await git(null, ["init", "--bare", dest]);
+  await git(dest, ["remote", "add", "origin", authUrl(gitUrl, token)]);
+  await git(dest, ["ls-remote", "--heads", "origin"]); // throws on bad url/auth/host
 }
 
+/** Live list of remote branches — always current, no local staleness. */
+export async function listBranches(mirror: string): Promise<string[]> {
+  const out = await git(mirror, ["ls-remote", "--heads", "origin"]);
+  return out
+    .split("\n")
+    .map((l) => l.trim().split("\t")[1])
+    .filter(Boolean)
+    .map((ref) => ref.replace(/^refs\/heads\//, ""));
+}
+
+/**
+ * Fetch just one branch's LATEST commit (shallow, depth 1) into the local bare
+ * repo at dispatch time. Shallow keeps it to a few MB / seconds instead of
+ * pulling the branch's full history. Push/MR still work against the remote.
+ */
+export async function fetchBranch(mirror: string, branch: string) {
+  await git(mirror, ["fetch", "--depth", "1", "origin", `+refs/heads/${branch}:refs/heads/${branch}`]);
+}
+
+/** Manual full refresh of all branches (the repo card's "fetch" button). */
 export async function fetchMirror(mirror: string, gitUrl: string, token: string | null) {
-  // refresh remote in case token rotated
   await git(mirror, ["remote", "set-url", "origin", authUrl(gitUrl, token)]).catch(() => {});
   await git(mirror, ["fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*"]);
-}
-
-export async function listBranches(mirror: string): Promise<string[]> {
-  const out = await git(mirror, ["for-each-ref", "--format=%(refname:short)", "refs/heads"]);
-  return out.split("\n").map((s) => s.trim()).filter(Boolean);
 }
 
 export async function addWorktree(mirror: string, dest: string, workBranch: string, baseBranch: string) {
@@ -63,9 +96,4 @@ export async function removeWorktree(mirror: string, dest: string, workBranch?: 
   if (workBranch) {
     await git(mirror, ["branch", "-D", workBranch]).catch(() => {});
   }
-}
-
-/** Push the work branch from a worktree to origin and return the pushed ref. */
-export async function pushBranch(worktree: string, workBranch: string) {
-  await git(worktree, ["push", "-u", "origin", `HEAD:refs/heads/${workBranch}`]);
 }
