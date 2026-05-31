@@ -1,11 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { Runner } from "./runner.js";
 
-const pexec = promisify(execFile);
-
-async function tmux(args: string[]) {
-  const { stdout } = await pexec("tmux", args);
-  return stdout;
+async function tmux(runner: Runner, args: string[]): Promise<string> {
+  return runner.exec("tmux", args);
 }
 
 /**
@@ -13,31 +9,31 @@ async function tmux(args: string[]) {
  * If a prompt is given it is passed as claude's initial message; the
  * session stays interactive (TUI), so permission prompts work normally.
  */
-export async function startSession(session: string, cwd: string, prompt?: string | null) {
+export async function startSession(runner: Runner, session: string, cwd: string, prompt?: string | null) {
   const cmd = ["new-session", "-d", "-s", session, "-c", cwd, "claude"];
   if (prompt && prompt.trim()) cmd.push(prompt);
-  await tmux(cmd);
+  await tmux(runner, cmd);
   // keep the pane around if claude exits so the user can read the result
-  await tmux(["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});
+  await tmux(runner, ["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});
 }
 
-export async function hasSession(session: string): Promise<boolean> {
+export async function hasSession(runner: Runner, session: string): Promise<boolean> {
   try {
-    await tmux(["has-session", "-t", session]);
+    await tmux(runner, ["has-session", "-t", session]);
     return true;
   } catch {
     return false;
   }
 }
 
-export async function killSession(session: string) {
-  await tmux(["kill-session", "-t", session]).catch(() => {});
+export async function killSession(runner: Runner, session: string) {
+  await tmux(runner, ["kill-session", "-t", session]).catch(() => {});
 }
 
 /** List all dispatcher-owned tmux sessions (named task-<id>). */
-export async function listSessions(): Promise<string[]> {
+export async function listSessions(runner: Runner): Promise<string[]> {
   try {
-    const out = await tmux(["list-sessions", "-F", "#{session_name}"]);
+    const out = await tmux(runner, ["list-sessions", "-F", "#{session_name}"]);
     return out.split("\n").map((s) => s.trim()).filter((s) => /^(tdsp|task)-\d+(-[a-z0-9-]+)?$/.test(s));
   } catch {
     return []; // no server / no sessions
