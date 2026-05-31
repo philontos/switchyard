@@ -11,6 +11,7 @@ import {
 } from "./git.js";
 import { startSession, hasSession, killSession, listSessions } from "./tmux.js";
 import { WEB_DIR } from "./paths.js";
+import { tr, langFromReq, langFromQuery } from "./i18n.js";
 
 // ensure child processes (git/tmux/glab/pty) find Homebrew/usr-local binaries
 // regardless of how the server was launched (a stripped PATH otherwise breaks
@@ -51,7 +52,7 @@ app.get("/api/repos", (_req, res) => {
 
 app.post("/api/repos", (req, res) => {
   const { name, git_url, token, default_branch, project_path } = req.body ?? {};
-  if (!name || !git_url) return res.status(400).json({ error: "name and git_url required" });
+  if (!name || !git_url) return res.status(400).json({ error: tr(langFromReq(req), "repo.fieldsRequired") });
   const info = db.prepare(
     "INSERT INTO repos (name, git_url, token, default_branch, project_path, status) VALUES (?,?,?,?,?,?)"
   ).run(name, git_url, token || null, default_branch || "main", project_path || null, "cloning");
@@ -74,7 +75,7 @@ app.post("/api/repos", (req, res) => {
 
 app.post("/api/repos/:id/fetch", async (req, res) => {
   const repo = getRepo.get(req.params.id) as Repo | undefined;
-  if (!repo || !repo.mirror_path) return res.status(404).json({ error: "not found" });
+  if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   try {
     await fetchMirror(repo.mirror_path, repo.git_url, repo.token);
     res.json({ ok: true });
@@ -85,8 +86,9 @@ app.post("/api/repos/:id/fetch", async (req, res) => {
 
 app.get("/api/repos/:id/branches", async (req, res) => {
   const repo = getRepo.get(req.params.id) as Repo | undefined;
-  if (!repo || !repo.mirror_path) return res.status(404).json({ error: "not found" });
-  if (repo.status !== "ready") return res.status(409).json({ error: `repo ${repo.status}` });
+  const lang = langFromReq(req);
+  if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
   try {
     res.json(await listBranches(repo.mirror_path));
   } catch (e: any) {
@@ -96,7 +98,7 @@ app.get("/api/repos/:id/branches", async (req, res) => {
 
 app.delete("/api/repos/:id", (req, res) => {
   const repo = getRepo.get(req.params.id) as Repo | undefined;
-  if (!repo) return res.status(404).json({ error: "not found" });
+  if (!repo) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   if (repo.mirror_path && fs.existsSync(repo.mirror_path)) {
     fs.rmSync(repo.mirror_path, { recursive: true, force: true });
   }
@@ -119,12 +121,13 @@ app.get("/api/tasks", async (_req, res) => {
 
 app.post("/api/tasks", async (req, res) => {
   const { repo_id, base_branch, title, prompt } = req.body ?? {};
+  const lang = langFromReq(req);
   if (!repo_id || !base_branch || !title) {
-    return res.status(400).json({ error: "repo_id, base_branch, title required" });
+    return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
   }
   const repo = getRepo.get(repo_id) as Repo | undefined;
-  if (!repo || !repo.mirror_path) return res.status(404).json({ error: "repo not found" });
-  if (repo.status !== "ready") return res.status(409).json({ error: `repo ${repo.status}` });
+  if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(lang, "repo.notFound") });
+  if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
 
   const info = db.prepare(
     "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status) VALUES (?,?,?,?,?,?,?,?)"
@@ -153,7 +156,7 @@ app.post("/api/tasks", async (req, res) => {
 // archive: end the tmux session but KEEP the worktree (moves task to archived tab)
 app.post("/api/tasks/:id/archive", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
-  if (!task) return res.status(404).json({ error: "not found" });
+  if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   try {
     await killSession(task.session);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
@@ -166,7 +169,7 @@ app.post("/api/tasks/:id/archive", async (req, res) => {
 // remove the worktree (frees disk) without deleting the task record
 app.post("/api/tasks/:id/cleanup", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
-  if (!task) return res.status(404).json({ error: "not found" });
+  if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   const repo = getRepo.get(task.repo_id) as Repo | undefined;
   try {
     await killSession(task.session);
@@ -182,7 +185,7 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
 app.delete("/api/tasks/:id", (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
   if (task && task.worktree_path && fs.existsSync(task.worktree_path)) {
-    return res.status(409).json({ error: "worktree 仍存在，请先删除 worktree" });
+    return res.status(409).json({ error: tr(langFromReq(req), "task.worktreeExists") });
   }
   db.prepare("DELETE FROM tasks WHERE id=?").run(req.params.id);
   res.json({ ok: true });
@@ -200,7 +203,7 @@ app.get("/api/sessions", async (_req, res) => {
 
 app.post("/api/sessions/:name/kill", async (req, res) => {
   const name = req.params.name;
-  if (!SESSION_RE.test(name)) return res.status(400).json({ error: "invalid session" });
+  if (!SESSION_RE.test(name)) return res.status(400).json({ error: tr(langFromReq(req), "session.invalid") });
   const removeWt = req.body?.removeWorktree !== false; // default: also delete worktree
   await killSession(name);
 
@@ -226,6 +229,7 @@ const wss = new WebSocketServer({ server, path: "/pty" });
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url || "", "http://localhost");
   const session = url.searchParams.get("session");
+  const lang = langFromQuery(url.searchParams.get("lang"));
   if (!session || !SESSION_RE.test(session)) {
     ws.close(1008, "invalid session");
     return;
@@ -242,7 +246,7 @@ wss.on("connection", (ws, req) => {
     });
   } catch (e: any) {
     // spawn failure must not crash the server — report on the socket and bail
-    try { ws.send(`\r\n\x1b[31m无法连接会话 ${session}: ${e.message}\x1b[0m\r\n`); } catch {}
+    try { ws.send(`\r\n\x1b[31m${tr(lang, "session.attachFailed", { session, error: e.message })}\x1b[0m\r\n`); } catch {}
     ws.close();
     return;
   }

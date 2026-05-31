@@ -9,7 +9,8 @@
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 13px/1.55 -apple-system, "SF Pro Text", system-ui, "PingFang SC", sans-serif; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; -webkit-font-smoothing: antialiased; letter-spacing: .1px; }
-  header { padding: 12px 18px; background: #161b22; border-bottom: 1px solid #30363d; font-weight: 600; flex: none; }
+  header { padding: 12px 18px; background: #161b22; border-bottom: 1px solid #30363d; font-weight: 600; flex: none; display: flex; align-items: center; gap: 10px; }
+  #lang-toggle { width: auto; margin: 0; padding: 3px 12px; font-size: 12px; background: #21262d; border-color: #30363d; }
   .wrap { display: grid; grid-template-columns: 320px 1fr; flex: 1; min-height: 0; }
   .side { border-right: 1px solid #30363d; overflow-y: auto; padding: 14px; }
   .main { min-width: 0; overflow-y: auto; padding: 0 18px 24px; }
@@ -142,18 +143,18 @@
 </style>
 </head>
 <body>
-<header>🛰️ Task Dispatcher</header>
+<header>🛰️ Task Dispatcher<span style="flex:1"></span><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
 <div class="wrap">
   <div class="side">
-    <button class="accent" style="width:100%;margin-bottom:14px" onclick="openRepoModal()">＋ 新建仓库</button>
-    <h2>仓库</h2>
+    <button class="accent" style="width:100%;margin-bottom:14px" data-i18n="repo.new" onclick="openRepoModal()"></button>
+    <h2 data-i18n="repo.heading"></h2>
     <div id="repos"></div>
   </div>
 
   <div class="main">
     <div class="tabs">
-      <button class="tab active" data-tab="live" onclick="showTab('live')">任务列表</button>
-      <button class="tab" data-tab="arch" onclick="showTab('arch')">已删除 <span id="arch-count" class="muted"></span></button>
+      <button class="tab active" data-tab="live" data-i18n="tab.live" onclick="showTab('live')"></button>
+      <button class="tab" data-tab="arch" onclick="showTab('arch')"><span data-i18n="tab.archived"></span> <span id="arch-count" class="muted"></span></button>
     </div>
     <div id="tasks"></div>
     <div id="archived" hidden></div>
@@ -162,10 +163,10 @@
 
 <div id="dock" class="dock collapsed">
   <div class="termbar">
-    <button id="dock-toggle" onclick="toggleDock()">▴ 终端</button>
-    <span id="term-title">未连接</span>
+    <button id="dock-toggle" onclick="toggleDock()"></button>
+    <span id="term-title" data-i18n="term.notConnected"></span>
     <span id="term-desc"></span>
-    <span class="hint" style="flex:none" title="终端开了鼠标模式,普通拖拽会发给会话;按住 Shift(或 mac 的 Option)拖拽即可选中,松手自动复制">⇧ 拖拽选中</span>
+    <span class="hint" style="flex:none" data-i18n="term.selectHint" data-i18n-title="term.selectHintTitle"></span>
     <code id="term-attach"></code>
   </div>
   <div id="term"></div>
@@ -181,46 +182,48 @@
     <div id="dlg-msg" class="dlg-msg"></div>
     <input id="dlg-input" style="display:none" />
     <div class="dlg-actions">
-      <button id="dlg-cancel" class="sec">取消</button>
-      <button id="dlg-ok">确定</button>
+      <button id="dlg-cancel" class="sec" data-i18n="dialog.cancel"></button>
+      <button id="dlg-ok" data-i18n="dialog.ok"></button>
     </div>
   </div>
 </div>
 
 <div id="task-modal" class="modal-bg" style="display:none">
   <div class="modal">
-    <h2 style="margin-bottom:12px">派发任务 · <span id="tm-repo" style="color:#79c0ff"></span></h2>
-    <label class="tm-lbl">基于分支</label>
-    <div id="t-base" class="cs" data-ph="选择分支"></div>
-    <input id="t-title" placeholder="任务标题" />
-    <textarea id="t-prompt" rows="3" placeholder="给 claude 的初始指令（可选）"></textarea>
+    <h2 style="margin-bottom:12px"><span data-i18n="task.modalTitle"></span> · <span id="tm-repo" style="color:#79c0ff"></span></h2>
+    <label class="tm-lbl" data-i18n="task.baseLabel"></label>
+    <div id="t-base" class="cs"></div>
+    <input id="t-title" data-i18n-ph="task.titlePh" />
+    <textarea id="t-prompt" rows="3" data-i18n-ph="task.promptPh"></textarea>
     <div class="dlg-actions">
-      <button class="sec" onclick="closeTaskModal()">取消</button>
-      <button class="primary" onclick="addTask()">建 worktree + 起会话</button>
+      <button class="sec" data-i18n="dialog.cancel" onclick="closeTaskModal()"></button>
+      <button class="primary" data-i18n="task.submit" onclick="addTask()"></button>
     </div>
   </div>
 </div>
 
 <div id="repo-modal" class="modal-bg" style="display:none">
   <div class="modal">
-    <h2 style="margin-bottom:10px">新建仓库</h2>
-    <input id="r-name" placeholder="名称 (例: ug)" />
-    <input id="r-url" placeholder="git url (https / ssh)" />
-    <input id="r-token" placeholder="token — https 私有库才填，SSH 留空" />
-    <input id="r-default" placeholder="默认分支 (默认 main)" />
+    <h2 style="margin-bottom:10px" data-i18n="repo.modalTitle"></h2>
+    <input id="r-name" data-i18n-ph="repo.namePh" />
+    <input id="r-url" data-i18n-ph="repo.urlPh" />
+    <input id="r-token" data-i18n-ph="repo.tokenPh" />
+    <input id="r-default" data-i18n-ph="repo.defaultPh" />
     <div class="dlg-actions">
-      <button class="sec" onclick="closeRepoModal()">取消</button>
-      <button class="primary" onclick="addRepo()">注册并克隆</button>
+      <button class="sec" data-i18n="dialog.cancel" onclick="closeRepoModal()"></button>
+      <button class="primary" data-i18n="repo.submit" onclick="addRepo()"></button>
     </div>
-    <div class="hint" style="margin-top:10px">克隆为 mirror，worktree 共享对象库。SSH 复用本地 ~/.ssh 与 glab 登录态，token 多半留空即可。</div>
+    <div class="hint" style="margin-top:10px" data-i18n="repo.hint"></div>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+<script src="/i18n.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
-const api = (u, opt) => fetch(u, opt).then(async r => { const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||r.status); return j; });
+const api = (u, opt = {}) => fetch(u, { ...opt, headers: { ...(opt.headers || {}), "X-Lang": I18N.lang } })
+  .then(async r => { const j = await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||r.status); return j; });
 
 // ---- toast ----
 function toast(msg, type = "info", ms = 3500) {
@@ -234,12 +237,13 @@ function toast(msg, type = "info", ms = 3500) {
 }
 
 // ---- global loading overlay ----
-function showLoading(text = "处理中…") { $("loading-text").textContent = text; $("loading").classList.add("on"); }
+function showLoading(text) { $("loading-text").textContent = text || t("loading.default"); $("loading").classList.add("on"); }
 function hideLoading() { $("loading").classList.remove("on"); }
 
 // ---- dialog (promise-based confirm / prompt) ----
 let dlgResolve = null;
-function openDialog({ title = "", message = "", input = false, value = "", okText = "确定", danger = false }) {
+function openDialog({ title = "", message = "", input = false, value = "", okText, danger = false }) {
+  okText = okText || t("dialog.ok");
   return new Promise((resolve) => {
     dlgResolve = resolve;
     $("dlg-title").textContent = title;
@@ -270,7 +274,7 @@ $("dlg-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("dl
 
 // global safety net: surface uncaught API errors as toasts
 window.addEventListener("unhandledrejection", (e) => {
-  toast(String(e.reason?.message || e.reason || "操作失败"), "error");
+  toast(String(e.reason?.message || e.reason || t("toast.opFailed")), "error");
 });
 
 let term, fit, ws, repos = [], branchReq = null, taskRepoId = null, tasksById = {}, selectedTaskId = null;
@@ -307,15 +311,19 @@ function initTerm() {
 function sendResize() {
   if (ws && ws.readyState === 1) ws.send("\x00resize:" + term.cols + "x" + term.rows);
 }
+function renderDockToggle() {
+  const collapsed = $("dock").classList.contains("collapsed");
+  $("dock-toggle").textContent = (collapsed ? "▴ " : "▾ ") + t("term.label");
+}
 function expandDock() {
   $("dock").classList.remove("collapsed");
-  $("dock-toggle").textContent = "▾ 终端";
+  renderDockToggle();
   setTimeout(() => { try { fit.fit(); sendResize(); } catch {} }, 160);
 }
 function toggleDock() {
   const d = $("dock");
   if (d.classList.contains("collapsed")) expandDock();
-  else { d.classList.add("collapsed"); $("dock-toggle").textContent = "▴ 终端"; }
+  else { d.classList.add("collapsed"); renderDockToggle(); }
 }
 
 // reflect the current selection onto the cards already in the DOM (no refetch)
@@ -333,23 +341,27 @@ function connect(id) {
   if (ws) { ws.close(); ws = null; }
   expandDock();
   term.reset();
+  // task-specific content, not a localized label — drop the static i18n binding
+  // so a language switch won't overwrite it back to "Not connected".
+  $("term-title").removeAttribute("data-i18n");
   $("term-title").textContent = `#${t.id} ${t.title}`;
   $("term-desc").textContent = t.prompt ? `· ${t.prompt}` : "";
   $("term-desc").title = t.prompt || "";   // full text on hover
   $("term-attach").textContent = "tmux attach -t " + t.session;
   const session = t.session;
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/pty?session=${encodeURIComponent(session)}`);
+  // NOTE: `t` here is the task (shadows the global t()), so use I18N.t for strings.
+  ws = new WebSocket(`${proto}://${location.host}/pty?session=${encodeURIComponent(session)}&lang=${I18N.lang}`);
   ws.onopen = () => { fit.fit(); sendResize(); };
   ws.onmessage = (e) => term.write(typeof e.data === "string" ? e.data : "");
-  ws.onclose = () => term.write("\r\n\x1b[90m[已断开]\x1b[0m\r\n");
+  ws.onclose = () => term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
 }
 
 function openRepoModal() { $("repo-modal").style.display = "flex"; $("r-name").focus(); }
 function closeRepoModal() { $("repo-modal").style.display = "none"; }
 function openTaskModal(repoId) {
   const repo = repos.find(r => r.id === repoId && r.status === "ready");
-  if (!repo) return toast("仓库尚未就绪", "error");
+  if (!repo) return toast(t("toast.repoNotReady"), "error");
   taskRepoId = repoId;
   $("tm-repo").textContent = repo.name;
   $("t-title").value = ""; $("t-prompt").value = "";   // fresh form each open
@@ -365,32 +377,34 @@ async function addRepo() {
     token: $("r-token").value.trim(),
     default_branch: $("r-default").value.trim() || "main",
   };
-  if (!body.name || !body.git_url) return toast("名称和 git url 必填", "error");
+  if (!body.name || !body.git_url) return toast(t("toast.repoFieldsRequired"), "error");
   await api("/api/repos", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
   ["r-name","r-url","r-token","r-default"].forEach(i => $(i).value = "");
   closeRepoModal();
-  toast("仓库已注册，正在校验连接…", "success");
+  toast(t("toast.repoRegistered"), "success");
   loadRepos();
 }
 
 // ---- minimal custom <select> ----
 const Selects = {};
 function csMount(id, onChange) {
-  const root = $(id), ph = root.dataset.ph || "请选择";
-  root.innerHTML = `<button type="button" class="cs-trigger"><span class="cs-label ph">${ph}</span><span class="cs-caret">▾</span></button><div class="cs-menu" hidden></div>`;
+  const root = $(id);
+  root.innerHTML = `<button type="button" class="cs-trigger"><span class="cs-label ph"></span><span class="cs-caret">▾</span></button><div class="cs-menu" hidden></div>`;
   const trigger = root.querySelector(".cs-trigger"),
         label = root.querySelector(".cs-label"),
         menu = root.querySelector(".cs-menu");
-  const self = { options: [], value: null, onChange };
+  // ph lives on self so a language switch can update it via repaint()
+  const self = { options: [], value: null, onChange, ph: root.dataset.ph || t("cs.placeholder") };
 
   function paint() {
     const cur = self.options.find(o => o.value === self.value);
-    label.textContent = cur ? cur.label : ph;
+    label.textContent = cur ? cur.label : self.ph;
     label.classList.toggle("ph", !cur);
     menu.innerHTML = self.options.length
       ? self.options.map(o => `<div class="cs-opt ${o.value === self.value ? "sel" : ""}" data-v="${encodeURIComponent(o.value)}">${o.label}<span class="ck">✓</span></div>`).join("")
-      : `<div class="cs-empty">无可选项</div>`;
+      : `<div class="cs-empty">${t("cs.empty")}</div>`;
   }
+  self.repaint = paint;
   function open() { if (!self.options.length) return; root.classList.add("open"); menu.hidden = false; }
   function close() { root.classList.remove("open"); menu.hidden = true; }
 
@@ -416,7 +430,7 @@ function csMount(id, onChange) {
   self.close = close;
   self.setLoading = text => {
     self.options = []; self.value = null; close();
-    label.innerHTML = `<span class="cs-spin"></span>${text || "加载中…"}`;
+    label.innerHTML = `<span class="cs-spin"></span>${text || t("cs.loading")}`;
     label.classList.add("ph");
   };
   paint();
@@ -431,25 +445,25 @@ async function loadRepos() {
   repos = r;
   $("repos").innerHTML = repos.map(r => `
     <div class="card repo">
-      <button class="repo-del" title="删除仓库" onclick="delRepo(${r.id})">✕</button>
+      <button class="repo-del" title="${t("repo.delTitle")}" onclick="delRepo(${r.id})">✕</button>
       <div class="t">${r.name} <span class="pill ${r.status}">${r.status}</span></div>
       <div class="muted url">${r.git_url}</div>
       ${r.error ? `<div class="muted err">${r.error}</div>` : ""}
-      ${r.status === "ready" ? `<button class="primary disp" onclick="openTaskModal(${r.id})">＋ 派发任务</button>` : ""}
+      ${r.status === "ready" ? `<button class="primary disp" onclick="openTaskModal(${r.id})">${t("task.dispatch")}</button>` : ""}
     </div>`).join("") || `<div class="repo-empty">
       <div class="ic">📦</div>
-      <div class="t">还没有仓库</div>
-      <div class="h">注册一个 Git 仓库<br><span class="link" onclick="openRepoModal()">＋ 新建仓库</span> 开始派发任务</div>
+      <div class="t">${t("repo.emptyTitle")}</div>
+      <div class="h">${t("repo.emptyHintPre")}<br><span class="link" onclick="openRepoModal()">${t("repo.new")}</span> ${t("repo.emptyHintPost")}</div>
     </div>`;
 }
-async function delRepo(id){ if(!await confirmDialog("删除该仓库镜像？",{title:"删除仓库",okText:"删除",danger:true}))return; await api(`/api/repos/${id}`,{method:"DELETE"}); loadRepos(); }
+async function delRepo(id){ if(!await confirmDialog(t("repo.delConfirm"),{title:t("repo.delTitle"),okText:t("common.delete"),danger:true}))return; await api(`/api/repos/${id}`,{method:"DELETE"}); loadRepos(); }
 
 async function loadBranches() {
   const id = taskRepoId;
   if (!id) { Selects["t-base"].setOptions([]); return; }
   branchReq?.abort();                         // drop any in-flight request from a previous switch
   const ctl = branchReq = new AbortController();
-  Selects["t-base"].setLoading("加载分支…");
+  Selects["t-base"].setLoading(t("task.loadingBranches"));
   try {
     const branches = await api(`/api/repos/${id}/branches`, { signal: ctl.signal });
     const repo = repos.find(r=>r.id==id);
@@ -465,18 +479,18 @@ async function addTask() {
     repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
   };
-  if (!body.repo_id || !body.base_branch || !body.title) return toast("仓库 / 分支 / 标题必填", "error");
-  showLoading("正在拉取分支并创建 worktree…");
+  if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
+  showLoading(t("loading.creatingWorktree"));
   try {
     const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
     $("t-title").value = ""; $("t-prompt").value = "";
     closeTaskModal();
     showTab("live");
-    toast("任务已派发：" + r.session, "success");
+    toast(t("toast.taskDispatched", { session: r.session }), "success");
     await loadTasks();
     connect(r.id);
   } catch (e) {
-    toast("派发失败：" + e.message, "error", 6000);
+    toast(t("toast.dispatchFailed", { error: e.message }), "error", 6000);
   } finally {
     hideLoading();
   }
@@ -485,14 +499,15 @@ async function addTask() {
 function taskCard(t) {
   const active = t.status !== "cleaned";
   // one corner action per state — stop (active) / cleanup (cleaned)
+  // NOTE: the param is `t` (the task), so it shadows the global t() — use I18N.t here.
   let icon, note = "";
   if (active) {
-    icon = { glyph: "⏹", title: "停止会话并归档", fn: `archive(${t.id})` };
+    icon = { glyph: "⏹", title: I18N.t("task.stopTitle"), fn: `archive(${t.id})` };
   } else if (t.hasWorktree) {
-    icon = { glyph: "🗑", title: "删除 worktree", fn: `removeWt(${t.id})` };
-    note = `<div class="muted">worktree 未删</div>`;
+    icon = { glyph: "🗑", title: I18N.t("task.removeWorktree"), fn: `removeWt(${t.id})` };
+    note = `<div class="muted">${I18N.t("task.worktreeKept")}</div>`;
   } else {
-    icon = { glyph: "🗑", title: "删除记录", fn: `deleteTask(${t.id})` };
+    icon = { glyph: "🗑", title: I18N.t("task.deleteRecord"), fn: `deleteTask(${t.id})` };
   }
   const head = `<div class="t">#${t.id} ${t.title}
     ${t.alive ? `<span class="pill live">live</span>` : `<span class="pill ${t.status}">${t.status}</span>`}</div>
@@ -513,24 +528,24 @@ async function loadTasks() {
   const live = tasks.filter(t => t.status !== "cleaned");
   const archived = tasks.filter(t => t.status === "cleaned");
   $("tasks").innerHTML = live.map(taskCard).join("") ||
-    emptyState("🗂️", "还没有进行中的任务", "在左侧仓库卡片点击「派发任务」开始");
+    emptyState("🗂️", t("empty.liveTitle"), t("empty.liveHint"));
   $("archived").innerHTML = archived.map(taskCard).join("") ||
-    emptyState("📦", "暂无已归档任务", "归档进行中的任务后会出现在这里");
+    emptyState("📦", t("empty.archTitle"), t("empty.archHint"));
   $("arch-count").textContent = archived.length ? `(${archived.length})` : "";
 }
 function emptyState(icon, title, hint) {
   return `<div class="empty"><div class="empty-ic">${icon}</div><div>${title}</div>${hint ? `<div class="empty-hint">${hint}</div>` : ""}</div>`;
 }
 async function archive(id){
-  if(!await confirmDialog("kill 该任务的 tmux 会话？会话结束后自动归档（保留 worktree）。",{title:"kill 会话",okText:"kill",danger:true}))return;
+  if(!await confirmDialog(t("task.killConfirm"),{title:t("task.killTitle"),okText:t("task.kill"),danger:true}))return;
   await api(`/api/tasks/${id}/archive`,{method:"POST"});
   if (id === selectedTaskId) selectedTaskId = null;
-  toast("已 kill 并归档","success"); loadTasks();
+  toast(t("toast.killed"),"success"); loadTasks();
 }
 async function removeWt(id){
-  if(!await confirmDialog("删除该任务的 worktree？释放磁盘，工作目录将移除（不可恢复）。",{title:"删除 worktree",okText:"删除",danger:true}))return;
+  if(!await confirmDialog(t("task.removeWtConfirm"),{title:t("task.removeWorktree"),okText:t("common.delete"),danger:true}))return;
   await api(`/api/tasks/${id}/cleanup`,{method:"POST"});
-  toast("worktree 已删除","success"); loadTasks();
+  toast(t("toast.worktreeRemoved"),"success"); loadTasks();
 }
 function deleteTask(id){ if (id === selectedTaskId) selectedTaskId = null; api(`/api/tasks/${id}`,{method:"DELETE"}).then(loadTasks).catch(e=>toast(e.message,"error")); }
 function showTab(tab){
@@ -538,7 +553,25 @@ function showTab(tab){
   $("tasks").hidden = tab !== "live";
   $("archived").hidden = tab !== "arch";
 }
+// ---- i18n wiring ----
+function renderSwitcher() { $("lang-toggle").textContent = I18N.lang === "zh" ? "EN" : "中"; }
+// re-render everything not covered by data-i18n attributes when the language flips
+I18N.onChange = () => {
+  renderSwitcher();
+  renderDockToggle();
+  const sel = Selects["t-base"];
+  if (sel) { sel.ph = t("task.branchPh"); sel.repaint && sel.repaint(); }
+  loadRepos();
+  loadTasks();
+};
+
+I18N.init();         // resolve locale from localStorage / browser before first t()
+I18N.applyStatic();  // fill all data-i18n / data-i18n-ph markup
+renderSwitcher();
+
 initTerm();
+renderDockToggle();
+$("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
 loadRepos();
 loadTasks();
