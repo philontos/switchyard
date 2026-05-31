@@ -509,14 +509,13 @@ async function loadRepos() {
   renderMachines();
 }
 function repoCard(r) {
-  const local = hostsById[r.host_id]?.kind === "local";
   return `
     <div class="card repo">
       <button class="repo-del" title="${t("repo.delTitle")}" onclick="delRepo(${r.id})">✕</button>
       <div class="t">${r.name} <span class="pill ${r.status}">${r.status}</span></div>
       <div class="muted url">${r.git_url}</div>
       ${r.error ? `<div class="muted err">${r.error}</div>` : ""}
-      ${r.status === "ready" && local ? `<button class="primary disp" onclick="openTaskModal(${r.id})">${t("task.dispatch")}</button>` : ""}
+      ${r.status === "ready" ? `<button class="primary disp" onclick="openTaskModal(${r.id})">${t("task.dispatch")}</button>` : ""}
     </div>`;
 }
 async function delRepo(id){ if(!await confirmDialog(t("repo.delConfirm"),{title:t("repo.delTitle"),okText:t("common.delete"),danger:true}))return; await api(`/api/repos/${id}`,{method:"DELETE"}); loadRepos(); }
