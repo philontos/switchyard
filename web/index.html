@@ -162,6 +162,7 @@
     <button id="dock-toggle" onclick="toggleDock()">▴ 终端</button>
     <span id="term-title">未连接</span>
     <span id="term-desc"></span>
+    <span class="hint" style="flex:none" title="终端开了鼠标模式,普通拖拽会发给会话;按住 Shift(或 mac 的 Option)拖拽即可选中,松手自动复制">⇧ 拖拽选中</span>
     <code id="term-attach"></code>
   </div>
   <div id="term"></div>
@@ -272,10 +273,30 @@ window.addEventListener("unhandledrejection", (e) => {
 let term, fit, ws, repos = [], branchReq = null, taskRepoId = null, tasksById = {};
 
 function initTerm() {
-  term = new Terminal({ fontSize: 13, fontFamily: "Menlo, monospace", theme: { background: "#0d1117" }, cursorBlink: true });
+  term = new Terminal({
+    fontSize: 13, fontFamily: "Menlo, monospace", theme: { background: "#0d1117" }, cursorBlink: true,
+    macOptionClickForcesSelection: true,   // mac: Option+拖拽 强制本地选区(绕开 TUI 鼠标模式)
+    rightClickSelectsWord: true,
+  });
   fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open($("term"));
+  // claude TUI 开了鼠标上报,普通拖拽会被转发给应用; Shift/Option 拖拽走本地选区,松手即复制
+  term.element.addEventListener("mouseup", () => {
+    const s = term.getSelection();
+    if (s) navigator.clipboard.writeText(s).catch(() => {});
+  });
+  // 键盘复制: mac=Cmd+C, 其他=Ctrl+Shift+C; 仅在有选区时拦截,避免吃掉 ^C(SIGINT)
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== "keydown") return true;
+    const isMac = navigator.platform.toUpperCase().includes("MAC");
+    const isCopy = isMac ? (e.metaKey && e.code === "KeyC") : (e.ctrlKey && e.shiftKey && e.code === "KeyC");
+    if (isCopy && term.hasSelection()) {
+      navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+      return false;
+    }
+    return true;
+  });
   try { fit.fit(); } catch {}
   window.addEventListener("resize", () => { try { fit.fit(); sendResize(); } catch {} });
   term.onData(d => ws && ws.readyState === 1 && ws.send(d));
