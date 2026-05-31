@@ -12,6 +12,7 @@ import {
 import { startSession, hasSession, killSession, listSessions } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
 import { repairWorktrees } from "./migrate.js";
+import { localRunner } from "./runner.js";
 import { WEB_DIR, DID_MIGRATE } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
 
@@ -75,7 +76,7 @@ app.post("/api/repos", (req, res) => {
   // register in background: init bare repo + validate connectivity (no download)
   (async () => {
     try {
-      await initMirror(git_url, token || null, dest);
+      await initMirror(localRunner,git_url, token || null, dest);
       db.prepare("UPDATE repos SET status='ready', error=NULL WHERE id=?").run(id);
     } catch (e: any) {
       db.prepare("UPDATE repos SET status='error', error=? WHERE id=?").run(String(e.message || e), id);
@@ -89,7 +90,7 @@ app.post("/api/repos/:id/fetch", async (req, res) => {
   const repo = getRepo.get(req.params.id) as Repo | undefined;
   if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   try {
-    await fetchMirror(repo.mirror_path, repo.git_url, repo.token);
+    await fetchMirror(localRunner,repo.mirror_path, repo.git_url, repo.token);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -102,7 +103,7 @@ app.get("/api/repos/:id/branches", async (req, res) => {
   if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(lang, "notFound") });
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
   try {
-    res.json(await listBranches(repo.mirror_path));
+    res.json(await listBranches(localRunner,repo.mirror_path));
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
   }
@@ -125,7 +126,7 @@ app.get("/api/tasks", async (_req, res) => {
   const withLive = await Promise.all(
     tasks.map(async (t) => ({
       ...t,
-      alive: t.status === "cleaned" ? false : await hasSession(t.session),
+      alive: t.status === "cleaned" ? false : await hasSession(localRunner,t.session),
       hasWorktree: !!t.worktree_path && fs.existsSync(t.worktree_path),
     }))
   );
@@ -154,9 +155,9 @@ app.post("/api/tasks", async (req, res) => {
   const session = `tdsp-${id}-${slug(repo.name)}-${s}`;
 
   try {
-    await fetchBranch(repo.mirror_path, base_branch); // pull latest of base branch now
-    await addWorktree(repo.mirror_path, wtAbs, workBranch, base_branch);
-    await startSession(session, wtAbs, prompt);
+    await fetchBranch(localRunner,repo.mirror_path, base_branch); // pull latest of base branch now
+    await addWorktree(localRunner,repo.mirror_path, wtAbs, workBranch, base_branch);
+    await startSession(localRunner,session, wtAbs, prompt);
     db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
       .run(workBranch, wtAbs, session, id);
     res.json({ id, session, work_branch: workBranch });
@@ -171,7 +172,7 @@ app.post("/api/tasks/:id/archive", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   try {
-    await killSession(task.session);
+    await killSession(localRunner,task.session);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
     res.json({ ok: true });
   } catch (e: any) {
@@ -185,8 +186,8 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
   if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   const repo = getRepo.get(task.repo_id) as Repo | undefined;
   try {
-    await killSession(task.session);
-    if (repo?.mirror_path) await removeWorktree(repo.mirror_path, task.worktree_path, task.work_branch);
+    await killSession(localRunner,task.session);
+    if (repo?.mirror_path) await removeWorktree(localRunner,repo.mirror_path, task.worktree_path, task.work_branch);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
     res.json({ ok: true });
   } catch (e: any) {
@@ -206,7 +207,7 @@ app.delete("/api/tasks/:id", (req, res) => {
 
 // ---------- sessions (raw tmux, incl. orphans) ----------
 app.get("/api/sessions", async (_req, res) => {
-  const names = await listSessions();
+  const names = await listSessions(localRunner);
   const known = new Set(
     (db.prepare("SELECT session FROM tasks WHERE status != 'cleaned'").all() as { session: string }[])
       .map((r) => r.session)
@@ -218,14 +219,14 @@ app.post("/api/sessions/:name/kill", async (req, res) => {
   const name = req.params.name;
   if (!SESSION_RE.test(name)) return res.status(400).json({ error: tr(langFromReq(req), "session.invalid") });
   const removeWt = req.body?.removeWorktree !== false; // default: also delete worktree
-  await killSession(name);
+  await killSession(localRunner,name);
 
   const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(name) as Task | undefined;
   let removedWorktree = false;
   if (task) {
     if (removeWt) {
       const repo = getRepo.get(task.repo_id) as Repo | undefined;
-      if (repo?.mirror_path) await removeWorktree(repo.mirror_path, task.worktree_path, task.work_branch);
+      if (repo?.mirror_path) await removeWorktree(localRunner,repo.mirror_path, task.worktree_path, task.work_branch);
       db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
       removedWorktree = true;
     } else {
