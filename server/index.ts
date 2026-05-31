@@ -10,7 +10,9 @@ import {
   mirrorPath,
 } from "./git.js";
 import { startSession, hasSession, killSession, listSessions } from "./tmux.js";
-import { WEB_DIR } from "./paths.js";
+import { syncReposManifest } from "./manifest.js";
+import { repairWorktrees } from "./migrate.js";
+import { WEB_DIR, DID_MIGRATE } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
 
 // ensure child processes (git/tmux/glab/pty) find Homebrew/usr-local binaries
@@ -68,6 +70,7 @@ app.post("/api/repos", (req, res) => {
   const id = Number(info.lastInsertRowid);
   const dest = mirrorPath(id, name);
   db.prepare("UPDATE repos SET mirror_path = ? WHERE id = ?").run(dest, id);
+  syncReposManifest();
 
   // register in background: init bare repo + validate connectivity (no download)
   (async () => {
@@ -112,6 +115,7 @@ app.delete("/api/repos/:id", (req, res) => {
     fs.rmSync(repo.mirror_path, { recursive: true, force: true });
   }
   db.prepare("DELETE FROM repos WHERE id=?").run(repo.id);
+  syncReposManifest();
   res.json({ ok: true });
 });
 
@@ -335,6 +339,9 @@ wss.on("connection", (ws, req) => {
     term.kill();
   });
 });
+
+if (DID_MIGRATE) repairWorktrees(); // fix git worktree links after the ./data move
+syncReposManifest();                // bootstrap repos.json from the current catalog on boot
 
 const PORT = Number(process.env.PORT || 4500);
 server.listen(PORT, () => {

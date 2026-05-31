@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
-import { DATA_DIR, DB_PATH } from "./paths.js";
+import { DATA_DIR, DB_PATH, LEGACY_DATA_DIR } from "./paths.js";
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -47,6 +47,19 @@ CREATE TABLE IF NOT EXISTS hosts (
   created_at TEXT DEFAULT (datetime('now'))
 );
 `);
+
+// One-time path migration (pairs with the ./data -> ~/.task-dispatcher move in
+// paths.ts): the DB stores absolute mirror/worktree paths under the old root,
+// so rewrite that prefix to the new DATA_DIR. Idempotent — once rewritten no
+// row matches the legacy prefix, so re-running is a no-op.
+if (LEGACY_DATA_DIR !== DATA_DIR) {
+  db.prepare(
+    "UPDATE repos SET mirror_path = replace(mirror_path, ?, ?) WHERE mirror_path LIKE ? || '%'"
+  ).run(LEGACY_DATA_DIR, DATA_DIR, LEGACY_DATA_DIR);
+  db.prepare(
+    "UPDATE tasks SET worktree_path = replace(worktree_path, ?, ?) WHERE worktree_path LIKE ? || '%'"
+  ).run(LEGACY_DATA_DIR, DATA_DIR, LEGACY_DATA_DIR);
+}
 
 export interface Repo {
   id: number;
