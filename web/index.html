@@ -62,6 +62,20 @@
     background: none; border: none; color: #6e7681; font-size: 14px; line-height: 1; }
   .repo-del:hover { background: #f8514914; color: #f85149; }
   .repo .disp { width: 100%; margin: 10px 0 0; }
+  /* machine groups: each machine + the repos that live on it */
+  .mgroup { margin-bottom: 16px; }
+  .mhead { display: flex; align-items: center; gap: 7px; padding: 3px 2px 8px; }
+  .mhead.hsel .mname { color: #79c0ff; }
+  .mdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .mdot.on { background: #2ea043; box-shadow: 0 0 6px #2ea04399; }
+  .mdot.off { background: #6e7681; }
+  .mname { font-weight: 600; font-size: 13px; color: #c9d1d9; }
+  .mtarget { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .micon { width: auto; margin: 0; padding: 1px 6px; background: none; border: none; color: #6e7681; font-size: 13px; line-height: 1; }
+  .micon:hover { background: #21262d; color: #c9d1d9; }
+  .mreg { width: 100%; margin-top: 2px; font-size: 12px; }
+  .mreg:disabled { opacity: .4; cursor: not-allowed; }
+  .mempty { font-size: 11.5px; padding: 0 2px 6px; }
   .tm-lbl { display: block; font-size: 11px; color: #8b949e; margin-bottom: 4px; }
   /* task card */
   .task { position: relative; }
@@ -152,13 +166,8 @@
 <header>🛰️ Task Dispatcher<span style="flex:1"></span><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
 <div class="wrap">
   <div class="side">
-    <button class="accent" style="width:100%;margin-bottom:14px" data-i18n="repo.new" onclick="openRepoModal()"></button>
-    <h2 data-i18n="repo.heading"></h2>
-    <div id="repos"></div>
-
-    <button class="accent" style="width:100%;margin-top:20px" data-i18n="host.new" onclick="openHostModal()"></button>
-    <h2 data-i18n="host.heading"></h2>
-    <div id="hosts"></div>
+    <div id="machines"></div>
+    <button class="accent" style="width:100%;margin-top:6px" data-i18n="host.new" onclick="openHostModal()"></button>
   </div>
 
   <div class="main">
@@ -214,7 +223,7 @@
 
 <div id="repo-modal" class="modal-bg" style="display:none">
   <div class="modal">
-    <h2 style="margin-bottom:10px" data-i18n="repo.modalTitle"></h2>
+    <h2 style="margin-bottom:10px"><span data-i18n="repo.modalTitle"></span> · <span data-i18n="host.onMachine"></span> <span id="rm-host" style="color:#79c0ff"></span></h2>
     <input id="r-name" data-i18n-ph="repo.namePh" />
     <input id="r-url" data-i18n-ph="repo.urlPh" />
     <input id="r-token" data-i18n-ph="repo.tokenPh" />
@@ -310,7 +319,7 @@ window.addEventListener("unhandledrejection", (e) => {
   toast(String(e.reason?.message || e.reason || t("toast.opFailed")), "error");
 });
 
-let term, fit, ws, repos = [], branchReq = null, taskRepoId = null, tasksById = {}, hostsById = {}, selectedTaskId = null, selectedHostId = null;
+let term, fit, ws, repos = [], branchReq = null, taskRepoId = null, tasksById = {}, hostsById = {}, hostsOrder = [], repoHostId = null, selectedTaskId = null, selectedHostId = null;
 
 function initTerm() {
   term = new Terminal({
@@ -364,8 +373,8 @@ function paintSelection() {
   document.querySelectorAll("#tasks .task, #archived .task").forEach(el => {
     el.classList.toggle("selected", Number(el.dataset.id) === selectedTaskId);
   });
-  document.querySelectorAll("#hosts .card").forEach(el => {
-    el.classList.toggle("selected", Number(el.dataset.id) === selectedHostId);
+  document.querySelectorAll(".mhead").forEach(el => {
+    el.classList.toggle("hsel", Number(el.dataset.id) === selectedHostId);
   });
 }
 
@@ -404,7 +413,13 @@ function connectHost(id) {
     (h.kind === "mosh" ? "mosh " : "ssh -t ") + h.target);
 }
 
-function openRepoModal() { $("repo-modal").style.display = "flex"; $("r-name").focus(); }
+function openRepoModal(hostId) {
+  repoHostId = hostId ?? null;   // which machine this repo registers on
+  const h = hostsById[hostId];
+  $("rm-host").textContent = h ? (h.kind === "local" ? t("host.local") : h.name) : "";
+  $("repo-modal").style.display = "flex";
+  setTimeout(() => $("r-name").focus(), 30);
+}
 function closeRepoModal() { $("repo-modal").style.display = "none"; }
 function openTaskModal(repoId) {
   const repo = repos.find(r => r.id === repoId && r.status === "ready");
@@ -423,6 +438,7 @@ async function addRepo() {
     name: $("r-name").value.trim(), git_url: $("r-url").value.trim(),
     token: $("r-token").value.trim(),
     default_branch: $("r-default").value.trim() || "main",
+    host_id: repoHostId,
   };
   if (!body.name || !body.git_url) return toast(t("toast.repoFieldsRequired"), "error");
   await api("/api/repos", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
@@ -490,35 +506,51 @@ async function loadRepos() {
   const r = await api("/api/repos").catch(() => null);
   if (!r) return; // server transiently down — stay quiet, poller will retry
   repos = r;
-  $("repos").innerHTML = repos.map(r => `
+  renderMachines();
+}
+function repoCard(r) {
+  const local = hostsById[r.host_id]?.kind === "local";
+  return `
     <div class="card repo">
       <button class="repo-del" title="${t("repo.delTitle")}" onclick="delRepo(${r.id})">✕</button>
       <div class="t">${r.name} <span class="pill ${r.status}">${r.status}</span></div>
       <div class="muted url">${r.git_url}</div>
       ${r.error ? `<div class="muted err">${r.error}</div>` : ""}
-      ${r.status === "ready" ? `<button class="primary disp" onclick="openTaskModal(${r.id})">${t("task.dispatch")}</button>` : ""}
-    </div>`).join("") || `<div class="repo-empty">
-      <div class="ic">📦</div>
-      <div class="t">${t("repo.emptyTitle")}</div>
-      <div class="h">${t("repo.emptyHintPre")}<br><span class="link" onclick="openRepoModal()">${t("repo.new")}</span> ${t("repo.emptyHintPost")}</div>
+      ${r.status === "ready" && local ? `<button class="primary disp" onclick="openTaskModal(${r.id})">${t("task.dispatch")}</button>` : ""}
     </div>`;
 }
 async function delRepo(id){ if(!await confirmDialog(t("repo.delConfirm"),{title:t("repo.delTitle"),okText:t("common.delete"),danger:true}))return; await api(`/api/repos/${id}`,{method:"DELETE"}); loadRepos(); }
 
-// ---- remote machines (L1: terminal-only) ----
+// ---- machines: each machine is a sidebar group holding its repos ----
 async function loadHosts() {
   const hs = await api("/api/hosts").catch(() => null);
   if (!hs) return;
   hostsById = Object.fromEntries(hs.map(h => [h.id, h]));
-  $("hosts").innerHTML = hs.map(h => `
-    <div class="card repo clickable${h.id === selectedHostId ? " selected" : ""}" data-id="${h.id}" onclick="connectHost(${h.id})">
-      <button class="repo-del" title="${t("host.del")}" onclick="event.stopPropagation();delHost(${h.id})">✕</button>
-      <div class="t">${h.name} <span class="pill ${h.kind === "mosh" ? "live" : "ready"}">${h.kind}</span></div>
-      <div class="muted url">${h.target} · ${h.session}</div>
-    </div>`).join("") || `<div class="repo-empty">
-      <div class="ic">🖥</div>
-      <div class="t">${t("host.emptyTitle")}</div>
-      <div class="h">${t("host.emptyHintPre")}<br><span class="link" onclick="openHostModal()">${t("host.new")}</span> ${t("host.emptyHintPost")}</div>
+  hostsOrder = hs.map(h => h.id);   // API order: local machine first
+  renderMachines();
+}
+function renderMachines() {
+  if (!hostsOrder.length) return;   // hosts not loaded yet
+  $("machines").innerHTML = hostsOrder.map(id => hostsById[id]).filter(Boolean).map(machineGroup).join("");
+  paintSelection();
+}
+function machineGroup(h) {
+  const isLocal = h.kind === "local";
+  const online = isLocal || h.status === "online";
+  const name = isLocal ? t("host.local") : h.name;
+  const mine = repos.filter(r => Number(r.host_id) === h.id);
+  return `
+    <div class="mgroup">
+      <div class="mhead${h.id === selectedHostId ? " hsel" : ""}" data-id="${h.id}">
+        <span class="mdot ${online ? "on" : "off"}"></span>
+        <span class="mname">${name}</span>
+        ${isLocal ? "" : `<span class="muted mtarget">${h.target}</span>`}
+        <span style="flex:1"></span>
+        ${isLocal ? "" : `<button class="micon" title="${t("host.terminal")}" onclick="connectHost(${h.id})">❯_</button>`}
+        ${isLocal ? "" : `<button class="micon" title="${t("host.del")}" onclick="delHost(${h.id})">✕</button>`}
+      </div>
+      ${mine.map(repoCard).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`}
+      <button class="sec mreg" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">${t("repo.new")}</button>
     </div>`;
 }
 function openHostModal() { $("host-modal").style.display = "flex"; setTimeout(() => $("h-name").focus(), 30); }
@@ -659,6 +691,7 @@ csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", l
 Promise.allSettled([loadRepos(), loadHosts(), loadTasks()]).then(dismissBoot);
 setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
 setInterval(loadTasks, 4000);
+setInterval(loadHosts, 5000);   // refresh machine liveness dots
 // close modals on backdrop click / Esc
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
 $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });

@@ -110,6 +110,10 @@
       // machines (remote hosts)
       "host.new": "＋ 新建机器",
       "host.heading": "机器",
+      "host.local": "本机",
+      "host.terminal": "终端",
+      "host.noRepos": "还没有仓库",
+      "host.onMachine": "注册到",
       "host.modalTitle": "新建机器",
       "host.namePh": "名称 (例: gpu-box)",
       "host.targetPh": "ssh 目标 (例: user@192.168.1.10)",
@@ -197,6 +201,10 @@
 
       "host.new": "＋ New machine",
       "host.heading": "Machines",
+      "host.local": "Local",
+      "host.terminal": "Terminal",
+      "host.noRepos": "No repos yet",
+      "host.onMachine": "Register to",
       "host.modalTitle": "New machine",
       "host.namePh": "Name (e.g. gpu-box)",
       "host.targetPh": "ssh target (e.g. user@192.168.1.10)",
