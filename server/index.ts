@@ -4,7 +4,7 @@ import { WebSocketServer } from "ws";
 import pty from "node-pty";
 import fs from "node:fs";
 import path from "node:path";
-import { db, Repo, Task } from "./db.js";
+import { db, Repo, Task, Host } from "./db.js";
 import {
   initMirror, fetchMirror, fetchBranch, listBranches, addWorktree, removeWorktree,
   mirrorPath,
@@ -31,12 +31,21 @@ const TMUX_BIN =
   ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"].find((p) => fs.existsSync(p)) ||
   "tmux";
 
+// node-pty's spawn-helper ignores a mutated PATH, so resolve ssh/mosh to
+// absolute paths the same way (used for remote machine terminals).
+function resolveBin(name: string, candidates: string[]) {
+  return candidates.find((p) => fs.existsSync(p)) || name;
+}
+const SSH_BIN = resolveBin("ssh", ["/usr/bin/ssh", "/opt/homebrew/bin/ssh"]);
+const MOSH_BIN = resolveBin("mosh", ["/opt/homebrew/bin/mosh", "/usr/local/bin/mosh", "/usr/bin/mosh"]);
+
 const app = express();
 app.use(express.json());
 app.use(express.static(WEB_DIR));
 
 const getRepo = db.prepare("SELECT * FROM repos WHERE id = ?");
 const getTask = db.prepare("SELECT * FROM tasks WHERE id = ?");
+const getHost = db.prepare("SELECT * FROM hosts WHERE id = ?");
 
 function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "task";
@@ -222,22 +231,73 @@ app.post("/api/sessions/:name/kill", async (req, res) => {
   res.json({ ok: true, removedWorktree });
 });
 
+// ---------- hosts (remote machines, terminal-only L1) ----------
+const SESSION_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+
+app.get("/api/hosts", (_req, res) => {
+  res.json(db.prepare("SELECT * FROM hosts ORDER BY id DESC").all());
+});
+
+app.post("/api/hosts", (req, res) => {
+  const { name, target, kind, session } = req.body ?? {};
+  if (!name || !target) return res.status(400).json({ error: "name and target required" });
+  const k = kind === "mosh" ? "mosh" : "ssh";
+  const sess = (session || "main").trim();
+  if (!SESSION_NAME_RE.test(sess)) return res.status(400).json({ error: "invalid session name" });
+  const info = db.prepare("INSERT INTO hosts (name, target, kind, session) VALUES (?,?,?,?)")
+    .run(String(name).trim(), String(target).trim(), k, sess);
+  res.json({ id: Number(info.lastInsertRowid) });
+});
+
+app.delete("/api/hosts/:id", (req, res) => {
+  db.prepare("DELETE FROM hosts WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ---------- pty bridge ----------
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/pty" });
 
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url || "", "http://localhost");
+  const hostId = url.searchParams.get("host");
   const session = url.searchParams.get("session");
   const lang = langFromQuery(url.searchParams.get("lang"));
-  if (!session || !SESSION_RE.test(session)) {
-    ws.close(1008, "invalid session");
+
+  // resolve the connection target: a local tmux session, or a remote machine.
+  // remote = node-pty spawns ssh/mosh locally, but the shell/tmux/files all
+  // live ON the remote host — this box is just the relay.
+  let file: string, args: string[], label: string;
+  if (hostId) {
+    const host = getHost.get(hostId) as Host | undefined;
+    if (!host) { ws.close(1008, "unknown host"); return; }
+    label = `${host.kind} ${host.target}`;
+    // a remote `ssh host cmd` runs in a non-login shell whose PATH usually
+    // lacks Homebrew, so bare `tmux` is "command not found". Prepend the usual
+    // locations and exec tmux (attach to, or create, the named session).
+    const remoteCmd =
+      `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; ` +
+      `exec tmux new-session -A -s ${host.session}`;
+    if (host.kind === "mosh") {
+      file = MOSH_BIN;
+      args = [host.target, "--", "sh", "-c", remoteCmd];
+    } else {
+      file = SSH_BIN;
+      args = ["-t", host.target, remoteCmd];
+    }
+  } else if (session && SESSION_RE.test(session)) {
+    file = TMUX_BIN;
+    args = ["attach", "-t", session];
+    label = session;
+  } else {
+    ws.close(1008, "invalid target");
     return;
   }
-  // attach to the tmux session; multiple clients can attach independently
+
+  // multiple clients can attach independently (tmux/ssh both handle this)
   let term: pty.IPty;
   try {
-    term = pty.spawn(TMUX_BIN, ["attach", "-t", session], {
+    term = pty.spawn(file, args, {
       name: "xterm-256color",
       cols: 120,
       rows: 32,
@@ -246,7 +306,7 @@ wss.on("connection", (ws, req) => {
     });
   } catch (e: any) {
     // spawn failure must not crash the server — report on the socket and bail
-    try { ws.send(`\r\n\x1b[31m${tr(lang, "session.attachFailed", { session, error: e.message })}\x1b[0m\r\n`); } catch {}
+    try { ws.send(`\r\n\x1b[31m${tr(lang, "session.attachFailed", { session: label, error: e.message })}\x1b[0m\r\n`); } catch {}
     ws.close();
     return;
   }
