@@ -31,11 +31,25 @@ server/
   git.ts     mirror clone / fetch / 列分支 / worktree 生命周期
   tmux.ts    会话 起/查/杀
   mr.ts      glab 开 MR
+  i18n.ts    服务端文案唯一真源（API 错误消息 zh/en）
   index.ts   REST API + /pty WebSocket(node-pty <-> tmux attach)
 web/
+  i18n.js    前端文案唯一真源（UI 字符串 zh/en）+ t() / applyStatic
   index.html 看板 + xterm 终端（CDN 引 xterm，无需前端构建）
 data/        mirrors/ worktrees/ dispatcher.db（gitignored）
 ```
+
+## i18n（中 / en）
+两份字典，各自是所属层的**唯一真源**，互不依赖：
+- **前端** `web/i18n.js`：所有界面文案。静态标签用 `data-i18n="key"`（textContent）/
+  `data-i18n-ph="key"`（placeholder）；JS 动态文案调 `t("key", { name })`。
+- **服务端** `server/i18n.ts`：API 返回的固定错误消息。路由里用
+  `tr(langFromReq(req), "key", { ... })`。
+- **语言选择**：前端按 `localStorage.lang` > 浏览器语言自动判定，header 右上角文字按钮手动切换并持久化；
+  前端每个请求带 `X-Lang` 头，WebSocket 带 `?lang=`，服务端据此返回对应语言。
+- **新增文案**：在对应字典的 `zh` 和 `en` **同时**加同名 key（两份文件底部都有 key 一致性
+  自检，缺翻译会在控制台告警，运行时回退 en→key）。`{name}` 为插值占位符。
+- **不翻译**：git / glab / node-pty 等外部工具透传的原始报错（动态、非我方文案），保持原样。
 
 ## 注意
 - token 目前明文存 sqlite，仅供本机自用；要多人用需加密 + 鉴权。
