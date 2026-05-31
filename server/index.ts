@@ -51,6 +51,13 @@ const getRepo = db.prepare("SELECT * FROM repos WHERE id = ?");
 const getTask = db.prepare("SELECT * FROM tasks WHERE id = ?");
 const getHost = db.prepare("SELECT * FROM hosts WHERE id = ?");
 
+// the Runner for a task's machine (via its repo's host) — local or remote(ssh)
+function taskRunner(task: Task) {
+  const repo = getRepo.get(task.repo_id) as Repo | undefined;
+  const host = repo ? (getHost.get(repo.host_id) as Host) : undefined;
+  return host ? runnerFor(host) : localRunner;
+}
+
 function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "task";
 }
@@ -134,11 +141,14 @@ app.delete("/api/repos/:id", async (req, res) => {
 app.get("/api/tasks", async (_req, res) => {
   const tasks = db.prepare("SELECT * FROM tasks ORDER BY id DESC").all() as Task[];
   const withLive = await Promise.all(
-    tasks.map(async (t) => ({
-      ...t,
-      alive: t.status === "cleaned" ? false : await hasSession(localRunner,t.session),
-      hasWorktree: !!t.worktree_path && fs.existsSync(t.worktree_path),
-    }))
+    tasks.map(async (t) => {
+      const runner = taskRunner(t);
+      return {
+        ...t,
+        alive: t.status === "cleaned" ? false : await hasSession(runner, t.session).catch(() => false),
+        hasWorktree: !!t.worktree_path && (await runner.exists(t.worktree_path).catch(() => false)),
+      };
+    })
   );
   res.json(withLive);
 });
@@ -152,9 +162,7 @@ app.post("/api/tasks", async (req, res) => {
   const repo = getRepo.get(repo_id) as Repo | undefined;
   if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(lang, "repo.notFound") });
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
-  // remote dispatch (worktree + claude ON the remote) is step 4 — local only for now
-  const host = getHost.get(repo.host_id) as Host;
-  if (host.kind !== "local") return res.status(409).json({ error: tr(lang, "task.remoteSoon") });
+  const runner = runnerFor(getHost.get(repo.host_id) as Host); // dispatch ON the repo's machine
 
   const info = db.prepare(
     "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status) VALUES (?,?,?,?,?,?,?,?)"
@@ -168,9 +176,15 @@ app.post("/api/tasks", async (req, res) => {
   const session = `tdsp-${id}-${slug(repo.name)}-${s}`;
 
   try {
-    await fetchBranch(localRunner,repo.mirror_path, base_branch); // pull latest of base branch now
-    await addWorktree(localRunner,repo.mirror_path, wtAbs, workBranch, base_branch);
-    await startSession(localRunner,session, wtAbs, prompt);
+    if (runner.kind !== "local") {
+      // verify the remote toolchain BEFORE creating a worktree — a session running a
+      // missing `claude` would just vanish, and a half-built dispatch would orphan the
+      // worktree. Fail clearly up front instead.
+      await runner.exec("command", ["-v", "claude"]).catch(() => { throw new Error(tr(lang, "task.noClaude")); });
+    }
+    await fetchBranch(runner, repo.mirror_path, base_branch); // pull latest of base branch now
+    await addWorktree(runner, repo.mirror_path, wtAbs, workBranch, base_branch);
+    await startSession(runner, session, wtAbs, prompt);
     db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
       .run(workBranch, wtAbs, session, id);
     res.json({ id, session, work_branch: workBranch });
@@ -185,7 +199,7 @@ app.post("/api/tasks/:id/archive", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   try {
-    await killSession(localRunner,task.session);
+    await killSession(taskRunner(task), task.session);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
     res.json({ ok: true });
   } catch (e: any) {
@@ -199,8 +213,9 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
   if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   const repo = getRepo.get(task.repo_id) as Repo | undefined;
   try {
-    await killSession(localRunner,task.session);
-    if (repo?.mirror_path) await removeWorktree(localRunner,repo.mirror_path, task.worktree_path, task.work_branch);
+    const runner = taskRunner(task);
+    await killSession(runner, task.session);
+    if (repo?.mirror_path) await removeWorktree(runner, repo.mirror_path, task.worktree_path, task.work_branch);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
     res.json({ ok: true });
   } catch (e: any) {
@@ -209,9 +224,9 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
 });
 
 // delete the task record — refused while its worktree still exists on disk
-app.delete("/api/tasks/:id", (req, res) => {
+app.delete("/api/tasks/:id", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
-  if (task && task.worktree_path && fs.existsSync(task.worktree_path)) {
+  if (task && task.worktree_path && (await taskRunner(task).exists(task.worktree_path).catch(() => false))) {
     return res.status(409).json({ error: tr(langFromReq(req), "task.worktreeExists") });
   }
   db.prepare("DELETE FROM tasks WHERE id=?").run(req.params.id);
@@ -232,14 +247,15 @@ app.post("/api/sessions/:name/kill", async (req, res) => {
   const name = req.params.name;
   if (!SESSION_RE.test(name)) return res.status(400).json({ error: tr(langFromReq(req), "session.invalid") });
   const removeWt = req.body?.removeWorktree !== false; // default: also delete worktree
-  await killSession(localRunner,name);
-
   const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(name) as Task | undefined;
+  const runner = task ? taskRunner(task) : localRunner;
+  await killSession(runner, name);
+
   let removedWorktree = false;
   if (task) {
     if (removeWt) {
       const repo = getRepo.get(task.repo_id) as Repo | undefined;
-      if (repo?.mirror_path) await removeWorktree(localRunner,repo.mirror_path, task.worktree_path, task.work_branch);
+      if (repo?.mirror_path) await removeWorktree(runner, repo.mirror_path, task.worktree_path, task.work_branch);
       db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
       removedWorktree = true;
     } else {
@@ -311,9 +327,20 @@ wss.on("connection", (ws, req) => {
       args = ["-t", host.target, remoteCmd];
     }
   } else if (session && SESSION_RE.test(session)) {
-    file = TMUX_BIN;
-    args = ["attach", "-t", session];
-    label = session;
+    // a task's tmux session — attach on whichever machine the task lives
+    const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(session) as Task | undefined;
+    const repo = task ? (getRepo.get(task.repo_id) as Repo | undefined) : undefined;
+    const host = repo ? (getHost.get(repo.host_id) as Host | undefined) : undefined;
+    if (host && host.kind !== "local") {
+      file = SSH_BIN;
+      args = ["-t", host.target,
+        `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; exec tmux attach -t ${session}`];
+      label = `${host.target} ${session}`;
+    } else {
+      file = TMUX_BIN;
+      args = ["attach", "-t", session];
+      label = session;
+    }
   } else {
     ws.close(1008, "invalid target");
     return;

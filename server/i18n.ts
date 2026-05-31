@@ -30,6 +30,7 @@ const messages: Record<Lang, Record<string, string>> = {
     "session.attachFailed": "cannot connect to session {session}: {error}",
     "host.offline": "machine is offline",
     "task.remoteSoon": "remote dispatch isn't supported yet (coming soon)",
+    "task.noClaude": "the claude CLI was not found on the remote machine",
   },
   zh: {
     "repo.fieldsRequired": "名称和 git url 必填",
@@ -42,6 +43,7 @@ const messages: Record<Lang, Record<string, string>> = {
     "session.attachFailed": "无法连接会话 {session}: {error}",
     "host.offline": "机器离线",
     "task.remoteSoon": "远程派发暂未支持（即将上线）",
+    "task.noClaude": "远程机器上找不到 claude CLI",
   },
 };
 
