@@ -183,6 +183,9 @@ app.post("/api/tasks", async (req, res) => {
       .run(workBranch, wtAbs, session, id);
     res.json({ id, session, work_branch: workBranch });
   } catch (e: any) {
+    // a partial dispatch (e.g. session start failed after the worktree was made)
+    // would orphan the worktree — remove it so nothing is left behind
+    await removeWorktree(runner, repo.mirror_path, wtAbs, workBranch).catch(() => {});
     db.prepare("UPDATE tasks SET status='error', error=? WHERE id=?").run(String(e.message || e), id);
     res.status(500).json({ error: String(e.message || e) });
   }
