@@ -12,7 +12,8 @@ import {
 import { startSession, hasSession, killSession, listSessions } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
 import { repairWorktrees } from "./migrate.js";
-import { localRunner } from "./runner.js";
+import { localRunner, runnerFor } from "./runner.js";
+import { startLivenessLoop, probeHost } from "./liveness.js";
 import { WEB_DIR, DID_MIGRATE } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
 
@@ -59,24 +60,32 @@ const SESSION_RE = /^(tdsp|task)-\d+(-[a-z0-9-]+)?$/;
 
 // ---------- repos ----------
 app.get("/api/repos", (_req, res) => {
-  res.json(db.prepare("SELECT id,name,git_url,default_branch,project_path,status,error,created_at FROM repos ORDER BY id DESC").all());
+  res.json(db.prepare("SELECT id,host_id,name,git_url,default_branch,project_path,status,error,created_at FROM repos ORDER BY id DESC").all());
 });
 
 app.post("/api/repos", (req, res) => {
-  const { name, git_url, token, default_branch, project_path } = req.body ?? {};
-  if (!name || !git_url) return res.status(400).json({ error: tr(langFromReq(req), "repo.fieldsRequired") });
+  const { name, git_url, token, default_branch, project_path, host_id } = req.body ?? {};
+  const lang = langFromReq(req);
+  if (!name || !git_url) return res.status(400).json({ error: tr(lang, "repo.fieldsRequired") });
+  // a repo lives ON a machine — default to local, reject offline remotes
+  const host = (host_id
+    ? getHost.get(host_id)
+    : db.prepare("SELECT * FROM hosts WHERE kind='local'").get()) as Host | undefined;
+  if (!host) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (host.kind !== "local" && host.status !== "online") return res.status(409).json({ error: tr(lang, "host.offline") });
+  const runner = runnerFor(host);
   const info = db.prepare(
-    "INSERT INTO repos (name, git_url, token, default_branch, project_path, status) VALUES (?,?,?,?,?,?)"
-  ).run(name, git_url, token || null, default_branch || "main", project_path || null, "cloning");
+    "INSERT INTO repos (host_id, name, git_url, token, default_branch, project_path, status) VALUES (?,?,?,?,?,?,?)"
+  ).run(host.id, name, git_url, token || null, default_branch || "main", project_path || null, "cloning");
   const id = Number(info.lastInsertRowid);
-  const dest = mirrorPath(id, name);
+  const dest = mirrorPath(runner.dataDir, id, name);
   db.prepare("UPDATE repos SET mirror_path = ? WHERE id = ?").run(dest, id);
   syncReposManifest();
 
   // register in background: init bare repo + validate connectivity (no download)
   (async () => {
     try {
-      await initMirror(localRunner,git_url, token || null, dest);
+      await initMirror(runner, git_url, token || null, dest);
       db.prepare("UPDATE repos SET status='ready', error=NULL WHERE id=?").run(id);
     } catch (e: any) {
       db.prepare("UPDATE repos SET status='error', error=? WHERE id=?").run(String(e.message || e), id);
@@ -90,7 +99,7 @@ app.post("/api/repos/:id/fetch", async (req, res) => {
   const repo = getRepo.get(req.params.id) as Repo | undefined;
   if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
   try {
-    await fetchMirror(localRunner,repo.mirror_path, repo.git_url, repo.token);
+    await fetchMirror(runnerFor(getHost.get(repo.host_id) as Host), repo.mirror_path, repo.git_url, repo.token);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -103,17 +112,18 @@ app.get("/api/repos/:id/branches", async (req, res) => {
   if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(lang, "notFound") });
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
   try {
-    res.json(await listBranches(localRunner,repo.mirror_path));
+    res.json(await listBranches(runnerFor(getHost.get(repo.host_id) as Host), repo.mirror_path));
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
   }
 });
 
-app.delete("/api/repos/:id", (req, res) => {
+app.delete("/api/repos/:id", async (req, res) => {
   const repo = getRepo.get(req.params.id) as Repo | undefined;
   if (!repo) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
-  if (repo.mirror_path && fs.existsSync(repo.mirror_path)) {
-    fs.rmSync(repo.mirror_path, { recursive: true, force: true });
+  if (repo.mirror_path) {
+    // remove the bare mirror on whichever machine it lives
+    await runnerFor(getHost.get(repo.host_id) as Host).rmrf(repo.mirror_path).catch(() => {});
   }
   db.prepare("DELETE FROM repos WHERE id=?").run(repo.id);
   syncReposManifest();
@@ -142,6 +152,9 @@ app.post("/api/tasks", async (req, res) => {
   const repo = getRepo.get(repo_id) as Repo | undefined;
   if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(lang, "repo.notFound") });
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
+  // remote dispatch (worktree + claude ON the remote) is step 4 — local only for now
+  const host = getHost.get(repo.host_id) as Host;
+  if (host.kind !== "local") return res.status(409).json({ error: tr(lang, "task.remoteSoon") });
 
   const info = db.prepare(
     "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status) VALUES (?,?,?,?,?,?,?,?)"
@@ -240,7 +253,8 @@ app.post("/api/sessions/:name/kill", async (req, res) => {
 const SESSION_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
 
 app.get("/api/hosts", (_req, res) => {
-  res.json(db.prepare("SELECT * FROM hosts ORDER BY id DESC").all());
+  // local machine (#0) first, then remotes
+  res.json(db.prepare("SELECT * FROM hosts ORDER BY (kind='local') DESC, id DESC").all());
 });
 
 app.post("/api/hosts", (req, res) => {
@@ -251,10 +265,16 @@ app.post("/api/hosts", (req, res) => {
   if (!SESSION_NAME_RE.test(sess)) return res.status(400).json({ error: "invalid session name" });
   const info = db.prepare("INSERT INTO hosts (name, target, kind, session) VALUES (?,?,?,?)")
     .run(String(name).trim(), String(target).trim(), k, sess);
-  res.json({ id: Number(info.lastInsertRowid) });
+  const id = Number(info.lastInsertRowid);
+  probeHost(getHost.get(id) as Host); // probe right away so it goes online fast (fire-and-forget)
+  res.json({ id });
 });
 
 app.delete("/api/hosts/:id", (req, res) => {
+  const host = getHost.get(req.params.id) as Host | undefined;
+  if (host?.kind === "local") return res.status(409).json({ error: "cannot delete the local machine" });
+  const n = (db.prepare("SELECT count(*) AS c FROM repos WHERE host_id=?").get(req.params.id) as { c: number }).c;
+  if (n > 0) return res.status(409).json({ error: "remove this machine's repos first" });
   db.prepare("DELETE FROM hosts WHERE id=?").run(req.params.id);
   res.json({ ok: true });
 });
@@ -342,6 +362,7 @@ wss.on("connection", (ws, req) => {
 });
 
 if (DID_MIGRATE) repairWorktrees(); // fix git worktree links after the ./data move
+startLivenessLoop();                // background ssh probe of remote machines
 syncReposManifest();                // bootstrap repos.json from the current catalog on boot
 
 const PORT = Number(process.env.PORT || 4500);

@@ -61,8 +61,37 @@ if (LEGACY_DATA_DIR !== DATA_DIR) {
   ).run(LEGACY_DATA_DIR, DATA_DIR, LEGACY_DATA_DIR);
 }
 
+// --- machine model (step 3): the hosts table doubles as the "machines" table.
+// Add new columns to existing DBs (SQLite has no ADD COLUMN IF NOT EXISTS). ---
+function addColumn(table: string, col: string, def: string) {
+  const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+addColumn("hosts", "data_dir", "TEXT");                  // the machine's ~/.task-dispatcher
+addColumn("hosts", "status", "TEXT DEFAULT 'unknown'");  // online | offline | unknown
+addColumn("hosts", "last_checked", "TEXT");
+addColumn("repos", "host_id", "INTEGER");                // which machine this repo lives on
+
+// Seed the local machine (kind='local', always present, machine #0) and make
+// every repo belong to a machine — existing repos default to the local one.
+{
+  const local = db.prepare("SELECT id FROM hosts WHERE kind='local'").get() as { id: number } | undefined;
+  let localId: number;
+  if (local) {
+    localId = local.id;
+    db.prepare("UPDATE hosts SET data_dir=?, status='online' WHERE id=?").run(DATA_DIR, localId);
+  } else {
+    const info = db.prepare(
+      "INSERT INTO hosts (name, target, kind, data_dir, status) VALUES ('local','','local',?,'online')"
+    ).run(DATA_DIR);
+    localId = Number(info.lastInsertRowid);
+  }
+  db.prepare("UPDATE repos SET host_id=? WHERE host_id IS NULL").run(localId);
+}
+
 export interface Repo {
   id: number;
+  host_id: number;
   name: string;
   git_url: string;
   token: string | null;
@@ -93,7 +122,10 @@ export interface Host {
   id: number;
   name: string;
   target: string;
-  kind: string;
+  kind: string;          // local | ssh | mosh
   session: string;
+  data_dir: string | null;   // the machine's ~/.task-dispatcher
+  status: string;            // online | offline | unknown
+  last_checked: string | null;
   created_at: string;
 }

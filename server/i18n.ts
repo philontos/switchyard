@@ -28,6 +28,8 @@ const messages: Record<Lang, Record<string, string>> = {
     "task.worktreeExists": "worktree still exists, remove it first",
     "session.invalid": "invalid session",
     "session.attachFailed": "cannot connect to session {session}: {error}",
+    "host.offline": "machine is offline",
+    "task.remoteSoon": "remote dispatch isn't supported yet (coming soon)",
   },
   zh: {
     "repo.fieldsRequired": "名称和 git url 必填",
@@ -38,6 +40,8 @@ const messages: Record<Lang, Record<string, string>> = {
     "task.worktreeExists": "worktree 仍存在，请先删除 worktree",
     "session.invalid": "会话名非法",
     "session.attachFailed": "无法连接会话 {session}: {error}",
+    "host.offline": "机器离线",
+    "task.remoteSoon": "远程派发暂未支持（即将上线）",
   },
 };
 
