@@ -237,9 +237,15 @@
   </div>
 </div>
 
+<!-- Local i18n FIRST, then fill the UI text immediately from the local dict —
+     before the render-blocking CDN terminal libs below. On a hard refresh those
+     CDN files are re-fetched over the network and block everything after them;
+     filling text here keeps every data-i18n element from rendering empty/collapsed
+     ("squished") until the CDN finishes. -->
+<script src="/i18n.js"></script>
+<script>I18N.init(); I18N.applyStatic();</script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
-<script src="/i18n.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const api = (u, opt = {}) => fetch(u, { ...opt, headers: { ...(opt.headers || {}), "X-Lang": I18N.lang } })
