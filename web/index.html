@@ -66,10 +66,10 @@
   /* task card */
   .task { position: relative; }
   .task .t { padding-right: 24px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .task.clickable { cursor: pointer; transition: border-color .12s, background .12s; }
-  .task.clickable:hover { border-color: #4b93f0; background: #1b2230; }
-  /* selected: the task currently open in the bottom terminal — left accent bar + tint, wins over hover */
-  .task.selected, .task.clickable.selected:hover { border-color: #4b93f0; background: #1f6feb1f;
+  .card.clickable { cursor: pointer; transition: border-color .12s, background .12s; }
+  .card.clickable:hover { border-color: #4b93f0; background: #1b2230; }
+  /* selected: the item currently open in the bottom terminal — left accent bar + tint, wins over hover */
+  .card.selected, .card.clickable.selected:hover { border-color: #4b93f0; background: #1f6feb1f;
     box-shadow: inset 3px 0 0 #58a6ff; }
   .card-x { position: absolute; top: 7px; right: 7px; width: auto; margin: 0; padding: 1px 6px;
     background: none; border: none; color: #6e7681; font-size: 13px; line-height: 1; }
@@ -149,6 +149,10 @@
     <button class="accent" style="width:100%;margin-bottom:14px" data-i18n="repo.new" onclick="openRepoModal()"></button>
     <h2 data-i18n="repo.heading"></h2>
     <div id="repos"></div>
+
+    <button class="accent" style="width:100%;margin-top:20px" data-i18n="host.new" onclick="openHostModal()"></button>
+    <h2 data-i18n="host.heading"></h2>
+    <div id="hosts"></div>
   </div>
 
   <div class="main">
@@ -217,6 +221,22 @@
   </div>
 </div>
 
+<div id="host-modal" class="modal-bg" style="display:none">
+  <div class="modal">
+    <h2 style="margin-bottom:10px" data-i18n="host.modalTitle"></h2>
+    <input id="h-name" data-i18n-ph="host.namePh" />
+    <input id="h-target" data-i18n-ph="host.targetPh" />
+    <label class="tm-lbl" data-i18n="host.kindLabel"></label>
+    <div id="h-kind" class="cs" data-ph="ssh"></div>
+    <input id="h-session" data-i18n-ph="host.sessionPh" />
+    <div class="dlg-actions">
+      <button class="sec" data-i18n="dialog.cancel" onclick="closeHostModal()"></button>
+      <button class="primary" data-i18n="host.submit" onclick="addHost()"></button>
+    </div>
+    <div class="hint" style="margin-top:10px" data-i18n="host.hint"></div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
 <script src="/i18n.js"></script>
@@ -277,7 +297,7 @@ window.addEventListener("unhandledrejection", (e) => {
   toast(String(e.reason?.message || e.reason || t("toast.opFailed")), "error");
 });
 
-let term, fit, ws, repos = [], branchReq = null, taskRepoId = null, tasksById = {}, selectedTaskId = null;
+let term, fit, ws, repos = [], branchReq = null, taskRepoId = null, tasksById = {}, hostsById = {}, selectedTaskId = null, selectedHostId = null;
 
 function initTerm() {
   term = new Terminal({
@@ -331,30 +351,44 @@ function paintSelection() {
   document.querySelectorAll("#tasks .task, #archived .task").forEach(el => {
     el.classList.toggle("selected", Number(el.dataset.id) === selectedTaskId);
   });
+  document.querySelectorAll("#hosts .card").forEach(el => {
+    el.classList.toggle("selected", Number(el.dataset.id) === selectedHostId);
+  });
+}
+
+// open the terminal dock against a /pty target (local session or remote host)
+function openPty(query, title, desc, attach) {
+  if (ws) { ws.close(); ws = null; }
+  expandDock();
+  term.reset();
+  // dynamic content, not a localized label — drop the static i18n binding so a
+  // language switch won't overwrite the title back to "Not connected".
+  $("term-title").removeAttribute("data-i18n");
+  $("term-title").textContent = title;
+  $("term-desc").textContent = desc || "";
+  $("term-desc").title = desc || "";       // full text on hover
+  $("term-attach").textContent = attach || "";
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/pty?${query}&lang=${I18N.lang}`);
+  ws.onopen = () => { fit.fit(); sendResize(); };
+  ws.onmessage = (e) => term.write(typeof e.data === "string" ? e.data : "");
+  ws.onclose = () => term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
 }
 
 function connect(id) {
   const t = tasksById[id];
   if (!t) return;
-  selectedTaskId = id;
-  paintSelection();
-  if (ws) { ws.close(); ws = null; }
-  expandDock();
-  term.reset();
-  // task-specific content, not a localized label — drop the static i18n binding
-  // so a language switch won't overwrite it back to "Not connected".
-  $("term-title").removeAttribute("data-i18n");
-  $("term-title").textContent = `#${t.id} ${t.title}`;
-  $("term-desc").textContent = t.prompt ? `· ${t.prompt}` : "";
-  $("term-desc").title = t.prompt || "";   // full text on hover
-  $("term-attach").textContent = "tmux attach -t " + t.session;
-  const session = t.session;
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  // NOTE: `t` here is the task (shadows the global t()), so use I18N.t for strings.
-  ws = new WebSocket(`${proto}://${location.host}/pty?session=${encodeURIComponent(session)}&lang=${I18N.lang}`);
-  ws.onopen = () => { fit.fit(); sendResize(); };
-  ws.onmessage = (e) => term.write(typeof e.data === "string" ? e.data : "");
-  ws.onclose = () => term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
+  selectedTaskId = id; selectedHostId = null; paintSelection();
+  openPty(`session=${encodeURIComponent(t.session)}`,
+    `#${t.id} ${t.title}`, t.prompt ? `· ${t.prompt}` : "", "tmux attach -t " + t.session);
+}
+
+function connectHost(id) {
+  const h = hostsById[id];
+  if (!h) return;
+  selectedHostId = id; selectedTaskId = null; paintSelection();
+  openPty(`host=${id}`, `🖥 ${h.name}`, `· ${h.target} · ${h.session}`,
+    (h.kind === "mosh" ? "mosh " : "ssh -t ") + h.target);
 }
 
 function openRepoModal() { $("repo-modal").style.display = "flex"; $("r-name").focus(); }
@@ -457,6 +491,38 @@ async function loadRepos() {
     </div>`;
 }
 async function delRepo(id){ if(!await confirmDialog(t("repo.delConfirm"),{title:t("repo.delTitle"),okText:t("common.delete"),danger:true}))return; await api(`/api/repos/${id}`,{method:"DELETE"}); loadRepos(); }
+
+// ---- remote machines (L1: terminal-only) ----
+async function loadHosts() {
+  const hs = await api("/api/hosts").catch(() => null);
+  if (!hs) return;
+  hostsById = Object.fromEntries(hs.map(h => [h.id, h]));
+  $("hosts").innerHTML = hs.map(h => `
+    <div class="card repo clickable${h.id === selectedHostId ? " selected" : ""}" data-id="${h.id}" onclick="connectHost(${h.id})">
+      <button class="repo-del" title="${t("host.del")}" onclick="event.stopPropagation();delHost(${h.id})">✕</button>
+      <div class="t">${h.name} <span class="pill ${h.kind === "mosh" ? "live" : "ready"}">${h.kind}</span></div>
+      <div class="muted url">${h.target} · ${h.session}</div>
+    </div>`).join("") || `<div class="repo-empty">
+      <div class="ic">🖥</div>
+      <div class="t">${t("host.emptyTitle")}</div>
+      <div class="h">${t("host.emptyHintPre")}<br><span class="link" onclick="openHostModal()">${t("host.new")}</span> ${t("host.emptyHintPost")}</div>
+    </div>`;
+}
+function openHostModal() { $("host-modal").style.display = "flex"; setTimeout(() => $("h-name").focus(), 30); }
+function closeHostModal() { $("host-modal").style.display = "none"; }
+async function addHost() {
+  const body = {
+    name: $("h-name").value.trim(), target: $("h-target").value.trim(),
+    kind: Selects["h-kind"].value, session: $("h-session").value.trim() || "main",
+  };
+  if (!body.name || !body.target) return toast(t("host.required"), "error");
+  await api("/api/hosts", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
+  $("h-name").value = ""; $("h-target").value = ""; $("h-session").value = "";
+  closeHostModal();
+  toast(t("host.added"), "success");
+  loadHosts();
+}
+async function delHost(id){ if(!await confirmDialog(t("host.delConfirm"),{title:t("host.del"),okText:t("common.delete"),danger:true}))return; await api(`/api/hosts/${id}`,{method:"DELETE"}); loadHosts(); }
 
 async function loadBranches() {
   const id = taskRepoId;
@@ -562,6 +628,7 @@ I18N.onChange = () => {
   const sel = Selects["t-base"];
   if (sel) { sel.ph = t("task.branchPh"); sel.repaint && sel.repaint(); }
   loadRepos();
+  loadHosts();
   loadTasks();
 };
 
@@ -573,17 +640,20 @@ initTerm();
 renderDockToggle();
 $("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
+csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", label: "mosh" }]);
 loadRepos();
+loadHosts();
 loadTasks();
 setInterval(loadTasks, 4000);
 // close modals on backdrop click / Esc
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
 $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });
+$("host-modal").addEventListener("click", e => { if (e.target.id === "host-modal") closeHostModal(); });
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
   if ($("dialog").style.display === "flex") closeDialog(null);
-  else { closeRepoModal(); closeTaskModal(); }
+  else { closeRepoModal(); closeTaskModal(); closeHostModal(); }
 });
 // poll repos so cloning -> ready (and clone errors) show up without manual refresh
 setInterval(() => { if (repos.some(r => r.status === "cloning")) loadRepos(); }, 2000);

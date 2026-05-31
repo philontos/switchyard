@@ -35,6 +35,17 @@ CREATE TABLE IF NOT EXISTS tasks (
   mr_url TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- remote machines reachable over ssh/mosh; a pure terminal entry (L1),
+-- no git/worktree involved — everything runs ON the remote host.
+CREATE TABLE IF NOT EXISTS hosts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  target TEXT NOT NULL,           -- ssh target, e.g. user@host
+  kind TEXT DEFAULT 'ssh',        -- ssh | mosh
+  session TEXT DEFAULT 'main',    -- remote tmux session to attach/create
+  created_at TEXT DEFAULT (datetime('now'))
+);
 `);
 
 export interface Repo {
@@ -62,5 +73,14 @@ export interface Task {
   status: string;
   error: string | null;
   mr_url: string | null;
+  created_at: string;
+}
+
+export interface Host {
+  id: number;
+  name: string;
+  target: string;
+  kind: string;
+  session: string;
   created_at: string;
 }
