@@ -1,5 +1,4 @@
 import path from "node:path";
-import { MIRRORS_DIR, WORKTREES_DIR } from "./paths.js";
 import { Runner } from "./runner.js";
 
 // Run a git command through the given machine's Runner. The env keeps git from
@@ -7,8 +6,8 @@ import { Runner } from "./runner.js";
 async function git(runner: Runner, cwd: string | null, args: string[]): Promise<string> {
   return runner.exec("git", args, {
     cwd: cwd ?? undefined,
+    // extras only — the Runner merges these over the (local or remote) base env.
     env: {
-      ...process.env,
       GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes -o ConnectTimeout=15",
       GIT_TERMINAL_PROMPT: "0",
     },
@@ -30,9 +29,9 @@ export function authUrl(gitUrl: string, token?: string | null): string {
   }
 }
 
-export function mirrorPath(repoId: number, name: string): string {
+export function mirrorPath(dataDir: string, repoId: number, name: string): string {
   const safe = name.replace(/[^a-zA-Z0-9_.-]/g, "_");
-  return path.join(MIRRORS_DIR, `${repoId}-${safe}.git`);
+  return path.join(dataDir, "mirrors", `${repoId}-${safe}.git`);
 }
 
 /**
@@ -41,7 +40,7 @@ export function mirrorPath(repoId: number, name: string): string {
  * Objects for a branch are only fetched later, at dispatch time.
  */
 export async function initMirror(runner: Runner, gitUrl: string, token: string | null, dest: string) {
-  await runner.mkdirp(MIRRORS_DIR);
+  await runner.mkdirp(path.dirname(dest));
   if (await runner.exists(dest)) await runner.rmrf(dest);
   await git(runner, null, ["init", "--bare", dest]);
   await git(runner, dest, ["remote", "add", "origin", authUrl(gitUrl, token)]);
@@ -74,7 +73,7 @@ export async function fetchMirror(runner: Runner, mirror: string, gitUrl: string
 }
 
 export async function addWorktree(runner: Runner, mirror: string, dest: string, workBranch: string, baseBranch: string) {
-  await runner.mkdirp(WORKTREES_DIR);
+  await runner.mkdirp(path.dirname(dest));
   await git(runner, mirror, ["worktree", "add", "-b", workBranch, dest, baseBranch]);
 }
 

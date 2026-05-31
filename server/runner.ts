@@ -1,66 +1,111 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
+import path from "node:path";
+import { DATA_DIR } from "./paths.js";
+import { Host } from "./db.js";
 
 const pexec = promisify(execFile);
 
 export interface ExecOpts {
   cwd?: string;
-  env?: NodeJS.ProcessEnv;
+  /** Extra env vars to set for THIS command (merged over the base env). */
+  env?: Record<string, string>;
 }
 
 /**
  * A Runner executes work ON a machine. The local box (machine #0) runs things
- * directly; a future RemoteRunner will wrap each call in ssh. Every git/tmux
- * command and every filesystem touch goes through a Runner, so the same
- * orchestration code can target any machine just by swapping the Runner.
+ * directly; RemoteRunner wraps each call in ssh. Every git/tmux command and
+ * every filesystem touch goes through a Runner, so the same orchestration code
+ * can target any machine just by swapping the Runner.
  */
 export interface Runner {
   kind: "local" | "ssh";
-  /** Run a one-shot command and return its stdout. */
+  /** This machine's ~/.task-dispatcher (absolute path ON the target machine). */
+  dataDir: string;
   exec(file: string, args: string[], opts?: ExecOpts): Promise<string>;
-  /** `mkdir -p`. */
   mkdirp(dir: string): Promise<void>;
-  /** Does a path exist? */
   exists(p: string): Promise<boolean>;
-  /** `rm -rf`. */
   rmrf(p: string): Promise<void>;
-  /**
-   * Build the (file, args) to hand to node-pty for an interactive terminal.
-   * Local: passthrough. Remote: an `ssh -t` wrapper. (The pty bridge wires this
-   * up in a later step; defined here so the abstraction is complete.)
-   */
   ptySpec(file: string, args: string[]): { file: string; args: string[] };
 }
 
-/** The machine the dispatcher itself runs on — direct child_process + fs. */
 export class LocalRunner implements Runner {
   kind = "local" as const;
+  dataDir = DATA_DIR;
 
   async exec(file: string, args: string[], opts: ExecOpts = {}): Promise<string> {
     const { stdout } = await pexec(file, args, {
       cwd: opts.cwd,
-      env: opts.env ?? process.env,
+      env: { ...process.env, ...opts.env },
       maxBuffer: 1024 * 1024 * 64,
     });
     return stdout;
   }
-
-  async mkdirp(dir: string): Promise<void> {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  async exists(p: string): Promise<boolean> {
-    return fs.existsSync(p);
-  }
-
-  async rmrf(p: string): Promise<void> {
-    fs.rmSync(p, { recursive: true, force: true });
-  }
-
-  ptySpec(file: string, args: string[]): { file: string; args: string[] } {
-    return { file, args };
-  }
+  async mkdirp(dir: string) { fs.mkdirSync(dir, { recursive: true }); }
+  async exists(p: string) { return fs.existsSync(p); }
+  async rmrf(p: string) { fs.rmSync(p, { recursive: true, force: true }); }
+  ptySpec(file: string, args: string[]) { return { file, args }; }
 }
 
 export const localRunner = new LocalRunner();
+
+/** single-quote for a POSIX remote shell */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// A non-login ssh shell's PATH often lacks Homebrew; prepend the usual spots so
+// git/tmux/etc. resolve on the remote.
+const REMOTE_PATH = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"`;
+// reuse one ssh connection per host — first connect sets up a master socket,
+// later commands/probes ride it (a few ms instead of a full handshake).
+const SSH_MUX = [
+  "-o", "ControlMaster=auto",
+  "-o", `ControlPath=${path.join(DATA_DIR, "cm-%C")}`,
+  "-o", "ControlPersist=60s",
+];
+const SSH_BATCH = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"];
+
+export class RemoteRunner implements Runner {
+  kind = "ssh" as const;
+  constructor(public target: string, public dataDir: string) {}
+
+  // PATH fix; optional cd; per-command env prefix; the exec'd command — all
+  // joined into one remote shell command string.
+  private remoteCmd(file: string, args: string[], opts: ExecOpts): string {
+    const parts = [REMOTE_PATH];
+    if (opts.cwd) parts.push(`cd ${shq(opts.cwd)}`);
+    const envPrefix = Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${shq(v)}`).join(" ");
+    parts.push(`${envPrefix} ${[file, ...args].map(shq).join(" ")}`.trim());
+    return parts.join("; ");
+  }
+
+  async exec(file: string, args: string[], opts: ExecOpts = {}): Promise<string> {
+    return localRunner.exec("ssh", [...SSH_MUX, ...SSH_BATCH, this.target, this.remoteCmd(file, args, opts)]);
+  }
+  async mkdirp(dir: string) { await this.exec("mkdir", ["-p", dir]); }
+  async exists(p: string) { try { await this.exec("test", ["-e", p]); return true; } catch { return false; } }
+  async rmrf(p: string) { await this.exec("rm", ["-rf", p]); }
+
+  ptySpec(file: string, args: string[]) {
+    // interactive terminal: ssh -t, no BatchMode (allow host-key/password prompts)
+    const cmd = `${REMOTE_PATH}; exec ${[file, ...args].map(shq).join(" ")}`;
+    return { file: "ssh", args: ["-t", ...SSH_MUX, this.target, cmd] };
+  }
+}
+
+/** Pick the Runner for a machine. */
+export function runnerFor(host: Host): Runner {
+  if (host.kind === "local") return localRunner;
+  return new RemoteRunner(host.target, host.data_dir ?? "");
+}
+
+/**
+ * One ssh round-trip that proves reachability AND reports the remote home dir
+ * (so we can derive its ~/.task-dispatcher). Throws if the host is unreachable.
+ */
+export async function sshProbe(target: string): Promise<{ home: string }> {
+  const home = (await localRunner.exec("ssh", [...SSH_MUX, ...SSH_BATCH, target, 'echo "$HOME"'])).trim();
+  return { home };
+}
