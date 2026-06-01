@@ -94,6 +94,14 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .prow .pmeta { margin-left: auto; font-size: 11px; color: #7d7367; }
 .prow-x { width: auto; margin: 0; padding: 1px 6px; background: none; border: none; color: #7d7367; font-size: 13px; line-height: 1; }
 .prow-x:hover { background: #f8514914; color: #f85149; }
+/* skills modal: available-plugin rows */
+.pg-box { max-height: 360px; overflow-y: auto; border: 1px solid #352e27; border-radius: 6px; padding: 4px 8px; margin-bottom: 7px; }
+.pgrow { display: flex; align-items: flex-start; gap: 10px; padding: 7px 2px; border-bottom: 1px solid #2a241e; }
+.pgmain { flex: 1; min-width: 0; }
+.pgname { font-weight: 600; font-size: 13px; }
+.pgdesc { margin-top: 2px; font-size: 11.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pginstall { flex: none; width: auto; margin: 0; padding: 3px 12px; font-size: 12px; background: #d977571f; border-color: #d9775755; color: #e09a7d; }
+.pginstall:hover { background: #d9775730; border-color: #d9775799; }
 /* task card */
 .task { position: relative; }
 .task .t { padding-right: 24px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
