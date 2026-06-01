@@ -166,9 +166,20 @@ app.post("/api/tasks", async (req, res) => {
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
   const runner = runnerFor(getHost.get(repo.host_id) as Host); // dispatch ON the repo's machine
 
+  // Resolve the preset + skills to inject and PREFLIGHT them: if any referenced
+  // skill is missing, fail now — before any worktree/task is created — so we
+  // never leave a half-built task pointing at a nonexistent skill.
+  const presetId = req.body?.preset_id ?? null;
+  const extraSkills: string[] = Array.isArray(req.body?.extra_skills) ? req.body.extra_skills.map(String) : [];
+  const preset = presetId ? (db.prepare("SELECT * FROM presets WHERE id=?").get(presetId) as Preset | undefined) : undefined;
+  if (presetId && !preset) return res.status(404).json({ error: tr(lang, "preset.notFound") });
+  const wantKeys = [...new Set([...(preset ? (JSON.parse(preset.skill_refs) as string[]) : []), ...extraSkills])];
+  const { found, missing } = resolveSkills(wantKeys, defaultSources());
+  if (missing.length) return res.status(400).json({ error: tr(lang, "skill.missing", { keys: missing.join(", ") }) });
+
   const info = db.prepare(
-    "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status) VALUES (?,?,?,?,?,?,?,?)"
-  ).run(repo_id, base_branch, "", title, prompt || null, "", "", "creating");
+    "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, preset_id, skills) VALUES (?,?,?,?,?,?,?,?,?,?)"
+  ).run(repo_id, base_branch, "", title, prompt || null, "", "", "creating", presetId, JSON.stringify(found.map((f) => f.key)));
   const id = Number(info.lastInsertRowid);
   const s = slug(title);
   const workBranch = `feat/${id}-${s}`;
@@ -180,7 +191,19 @@ app.post("/api/tasks", async (req, res) => {
   try {
     await fetchBranch(runner, repo.mirror_path, base_branch); // pull latest of base branch now
     await addWorktree(runner, repo.mirror_path, wtAbs, workBranch, base_branch);
-    await startSession(runner, session, wtAbs, prompt);
+    // deliver each selected skill's whole dir into the worktree's .claude/skills/
+    for (const sk of found) await runner.putDir(sk.dir, path.join(wtAbs, ".claude", "skills", sk.name));
+    // keep delivered skills out of the repo's git status (worktree-local exclude)
+    if (found.length) {
+      await runner.exec("sh", ["-c",
+        `cd ${JSON.stringify(wtAbs)} && p=$(git rev-parse --git-path info/exclude) && grep -qxF '.claude/skills/' "$p" || printf '.claude/skills/\\n' >> "$p"`,
+      ]).catch(() => {});
+    }
+    // opening message: preset template (if any) else the freeform prompt, + skills line
+    const vars = { title, slug: s, branch: workBranch, prompt: prompt || "" };
+    const opening = (preset ? renderDispatchPrompt(preset.dispatch_prompt || "", vars) : (prompt || ""))
+      + skillsLine(found.map((f) => f.name));
+    await startSession(runner, session, wtAbs, opening.trim() ? opening : null);
     db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
       .run(workBranch, wtAbs, session, id);
     res.json({ id, session, work_branch: workBranch });
