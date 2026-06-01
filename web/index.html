@@ -62,20 +62,31 @@
     background: none; border: none; color: #6e7681; font-size: 14px; line-height: 1; }
   .repo-del:hover { background: #f8514914; color: #f85149; }
   .repo .disp { width: 100%; margin: 10px 0 0; }
-  /* machine groups: each machine + the repos that live on it */
-  .mgroup { margin-bottom: 16px; }
-  .mhead { display: flex; align-items: center; gap: 7px; padding: 3px 2px 8px; }
-  .mhead.hsel .mname { color: #79c0ff; }
-  .mdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .mdot.on { background: #2ea043; box-shadow: 0 0 6px #2ea04399; }
+  /* machines: a compact tab switcher; the active machine's repos show below */
+  .mtabs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-bottom: 14px; }
+  .mtab { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; margin: 0;
+    border-radius: 999px; font: inherit; font-size: 12px; font-weight: 600; line-height: 1.4;
+    color: #8b949e; background: #161b22; border: 1px solid #21262d; cursor: pointer;
+    transition: color .12s, background .12s, border-color .12s; }
+  .mtab:hover { color: #c9d1d9; background: #1c2128; border-color: #30363d; }
+  .mtab.active { color: #e6edf3; background: #1f6feb24; border-color: #1f6feb66; }
+  .mtab-add { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+    padding: 0; margin: 0; border-radius: 999px; font-size: 14px; line-height: 1; color: #6e7681;
+    background: none; border: 1px dashed #30363d; cursor: pointer; transition: color .12s, border-color .12s; }
+  .mtab-add:hover { color: #79c0ff; border-color: #1f6feb99; border-style: solid; }
+  .mdot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .mdot.on { background: #3fb950; box-shadow: 0 0 5px #3fb95099; }
   .mdot.off { background: #6e7681; }
-  .mname { font-weight: 600; font-size: 13px; color: #c9d1d9; }
-  .mtarget { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  /* active machine: ssh target + terminal/delete (remote only) */
+  .msub { display: flex; align-items: center; gap: 6px; margin: 0 2px 11px; }
+  .msub .mtarget { flex: 1; }
+  .mtarget { font-size: 11px; color: #6e7681; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .micon { width: auto; margin: 0; padding: 1px 6px; background: none; border: none; color: #6e7681; font-size: 13px; line-height: 1; }
   .micon:hover { background: #21262d; color: #c9d1d9; }
-  .mreg { width: 100%; margin-top: 2px; font-size: 12px; }
+  .mreg { width: 100%; margin-top: 4px; font-size: 12px; background: none; border: 1px dashed #30363d; color: #8b949e; }
+  .mreg:hover { background: #161b22; border-color: #3d4450; color: #c9d1d9; }
   .mreg:disabled { opacity: .4; cursor: not-allowed; }
-  .mempty { font-size: 11.5px; padding: 0 2px 6px; }
+  .mempty { font-size: 11.5px; padding: 0 2px 8px; }
   .tm-lbl { display: block; font-size: 11px; color: #8b949e; margin-bottom: 4px; }
   /* task card */
   .task { position: relative; }
@@ -167,7 +178,6 @@
 <div class="wrap">
   <div class="side">
     <div id="machines"></div>
-    <button class="accent" style="width:100%;margin-top:6px" data-i18n="host.new" onclick="openHostModal()"></button>
   </div>
 
   <div class="main">
@@ -319,7 +329,7 @@ window.addEventListener("unhandledrejection", (e) => {
   toast(String(e.reason?.message || e.reason || t("toast.opFailed")), "error");
 });
 
-let term, fit, ws, repos = [], branchReq = null, taskRepoId = null, tasksById = {}, hostsById = {}, hostsOrder = [], repoHostId = null, selectedTaskId = null, selectedHostId = null;
+let term, fit, ws, repos = [], branchReq = null, taskRepoId = null, tasksById = {}, hostsById = {}, hostsOrder = [], activeHostId = null, repoHostId = null, selectedTaskId = null;
 
 function initTerm() {
   term = new Terminal({
@@ -373,9 +383,6 @@ function paintSelection() {
   document.querySelectorAll("#tasks .task, #archived .task").forEach(el => {
     el.classList.toggle("selected", Number(el.dataset.id) === selectedTaskId);
   });
-  document.querySelectorAll(".mhead").forEach(el => {
-    el.classList.toggle("hsel", Number(el.dataset.id) === selectedHostId);
-  });
 }
 
 // open the terminal dock against a /pty target (local session or remote host)
@@ -400,7 +407,7 @@ function openPty(query, title, desc, attach) {
 function connect(id) {
   const t = tasksById[id];
   if (!t) return;
-  selectedTaskId = id; selectedHostId = null; paintSelection();
+  selectedTaskId = id; paintSelection();
   openPty(`session=${encodeURIComponent(t.session)}`,
     `#${t.id} ${t.title}`, t.prompt ? `· ${t.prompt}` : "", "tmux attach -t " + t.session);
 }
@@ -408,7 +415,7 @@ function connect(id) {
 function connectHost(id) {
   const h = hostsById[id];
   if (!h) return;
-  selectedHostId = id; selectedTaskId = null; paintSelection();
+  selectedTaskId = null; paintSelection();
   openPty(`host=${id}`, `🖥 ${h.name}`, `· ${h.target} · ${h.session}`,
     (h.kind === "mosh" ? "mosh " : "ssh -t ") + h.target);
 }
@@ -530,28 +537,36 @@ async function loadHosts() {
 }
 function renderMachines() {
   if (!hostsOrder.length) return;   // hosts not loaded yet
-  $("machines").innerHTML = hostsOrder.map(id => hostsById[id]).filter(Boolean).map(machineGroup).join("");
+  const hosts = hostsOrder.map(id => hostsById[id]).filter(Boolean);
+  if (activeHostId == null || !hostsById[activeHostId]) {        // default to the local machine
+    const first = hosts.find(h => h.kind === "local") || hosts[0];
+    activeHostId = first ? first.id : null;
+  }
+  const tabs = hosts.map(h => {
+    const online = h.kind === "local" || h.status === "online";
+    const name = h.kind === "local" ? t("host.local") : h.name;
+    return `<button class="mtab${h.id === activeHostId ? " active" : ""}" onclick="selectHost(${h.id})"><span class="mdot ${online ? "on" : "off"}"></span>${name}</button>`;
+  }).join("");
+  const add = `<button class="mtab-add" title="${t("host.new")}" onclick="openHostModal()">＋</button>`;
+  $("machines").innerHTML = `<div class="mtabs">${tabs}${add}</div>${activeMachine()}`;
   paintSelection();
 }
-function machineGroup(h) {
+function activeMachine() {
+  const h = hostsById[activeHostId];
+  if (!h) return "";
   const isLocal = h.kind === "local";
   const online = isLocal || h.status === "online";
-  const name = isLocal ? t("host.local") : h.name;
   const mine = repos.filter(r => Number(r.host_id) === h.id);
-  return `
-    <div class="mgroup">
-      <div class="mhead${h.id === selectedHostId ? " hsel" : ""}" data-id="${h.id}">
-        <span class="mdot ${online ? "on" : "off"}"></span>
-        <span class="mname">${name}</span>
-        ${isLocal ? "" : `<span class="muted mtarget">${h.target}</span>`}
-        <span style="flex:1"></span>
-        ${isLocal ? "" : `<button class="micon" title="${t("host.terminal")}" onclick="connectHost(${h.id})">❯_</button>`}
-        ${isLocal ? "" : `<button class="micon" title="${t("host.del")}" onclick="delHost(${h.id})">✕</button>`}
-      </div>
-      ${mine.map(repoCard).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`}
-      <button class="sec mreg" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">${t("repo.new")}</button>
+  const bar = isLocal ? "" : `<div class="msub">
+      <span class="mtarget">${h.target}</span>
+      <button class="micon" title="${t("host.terminal")}" onclick="connectHost(${h.id})">❯_</button>
+      <button class="micon" title="${t("host.del")}" onclick="delHost(${h.id})">✕</button>
     </div>`;
+  return bar
+    + (mine.map(repoCard).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`)
+    + `<button class="mreg" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">${t("repo.new")}</button>`;
 }
+function selectHost(id) { activeHostId = id; renderMachines(); }
 function openHostModal() { $("host-modal").style.display = "flex"; setTimeout(() => $("h-name").focus(), 30); }
 function closeHostModal() { $("host-modal").style.display = "none"; }
 async function addHost() {
