@@ -102,11 +102,14 @@
     background: none; border: none; color: #7d7367; font-size: 13px; line-height: 1; }
   .card-x:hover { background: #f8514914; color: #f85149; }
   .muted { color: #a89e90; font-size: 12px; }
-  .pill { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid #352e27; }
-  .pill.live { background: #d9775733; border-color: #d97757; color: #e09a7d; }
-  .pill.ready { background: #5e7e3e33; border-color: #5e7e3e; color: #b3d089; }
-  .pill.error { background: #b6232433; border-color: #b62324; color: #ffa198; }
-  .pill.cleaned, .pill.cloning { color: #a89e90; }
+  /* status dot: color = state, pulse = in-progress (replaces text pills) */
+  .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: #6b6356; }
+  .sdot.ready { background: #8aaa66; box-shadow: 0 0 5px #8aaa6699; }
+  .sdot.live { background: #8aaa66; box-shadow: 0 0 6px #8aaa66; animation: pulse 1.6s ease-in-out infinite; }
+  .sdot.cloning { background: #d8a13f; box-shadow: 0 0 6px #d8a13f; animation: pulse 1.3s ease-in-out infinite; }
+  .sdot.error { background: #f85149; box-shadow: 0 0 5px #f8514999; }
+  .sdot.cleaned { background: #6b6356; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   /* bottom terminal dock (secondary display, collapsible) */
   .dock { flex: none; height: 720px; border-top: 1px solid #352e27; background: #1a1613; display: flex; flex-direction: column; transition: height .15s ease; }
   .dock.collapsed { height: 38px; }
@@ -522,7 +525,7 @@ function repoCard(r) {
   return `
     <div class="card repo">
       <button class="repo-del" title="${t("repo.delTitle")}" onclick="delRepo(${r.id})">✕</button>
-      <div class="t">${r.name} <span class="pill ${r.status}">${r.status}</span></div>
+      <div class="t"><span class="sdot ${r.status}" title="${r.status}"></span>${r.name}</div>
       <div class="muted url">${r.git_url}</div>
       ${r.error ? `<div class="muted err">${r.error}</div>` : ""}
       ${r.status === "ready" ? `<button class="disp" onclick="openTaskModal(${r.id})">${t("task.dispatch")}</button>` : ""}
@@ -637,8 +640,7 @@ function taskCard(t) {
   } else {
     icon = { glyph: "🗑", title: I18N.t("task.deleteRecord"), fn: `deleteTask(${t.id})` };
   }
-  const head = `<div class="t">#${t.id} ${t.title}
-    ${t.alive ? `<span class="pill live">live</span>` : `<span class="pill ${t.status}">${t.status}</span>`}</div>
+  const head = `<div class="t">${t.alive ? `<span class="sdot live" title="live"></span>` : `<span class="sdot ${t.status}" title="${t.status}"></span>`}#${t.id} ${t.title}</div>
     <div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>
     ${t.mr_url ? `<div><a href="${t.mr_url}" target="_blank" onclick="event.stopPropagation()">MR ↗</a></div>` : ""}`;
   const open = active ? ` clickable" onclick="connect(${t.id})` : "";
