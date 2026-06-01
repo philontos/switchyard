@@ -31,7 +31,7 @@
       "repo.new": "＋ 新建仓库",
       "repo.heading": "仓库",
       "tab.live": "任务列表",
-      "tab.archived": "已删除",
+      "tab.archived": "归档",
       "task.dispatch": "＋ 派发任务",
 
       // terminal dock
@@ -78,7 +78,6 @@
 
       // task card
       "task.stopTitle": "停止会话并归档",
-      "task.kill": "kill",
       "task.worktreeKept": "worktree 未删",
       "task.removeWorktree": "删除 worktree",
       "task.deleteRecord": "删除记录",
@@ -164,7 +163,7 @@
       "repo.new": "＋ New repo",
       "repo.heading": "Repositories",
       "tab.live": "Tasks",
-      "tab.archived": "Deleted",
+      "tab.archived": "Archived",
       "task.dispatch": "＋ Dispatch task",
 
       "term.label": "Terminal",
@@ -204,7 +203,6 @@
       "repo.emptyHintPost": "to start dispatching tasks",
 
       "task.stopTitle": "Stop session & archive",
-      "task.kill": "kill",
       "task.worktreeKept": "worktree kept",
       "task.removeWorktree": "Remove worktree",
       "task.deleteRecord": "Delete record",

@@ -137,7 +137,7 @@ function emptyState(icon, title, hint) {
   return `<div class="empty"><div class="empty-ic">${icon}</div><div>${title}</div>${hint ? `<div class="empty-hint">${hint}</div>` : ""}</div>`;
 }
 export async function archive(id){
-  if(!await confirmDialog(t("task.killConfirm"),{title:t("task.killTitle"),okText:t("task.kill"),danger:true}))return;
+  if(!await confirmDialog(t("task.killConfirm"),{title:t("task.killTitle"),okText:t("dialog.ok"),danger:true}))return;
   await api(`/api/tasks/${id}/archive`,{method:"POST"});
   if (id === state.selectedTaskId) state.selectedTaskId = null;
   toast(t("toast.killed"),"success"); loadTasks();
