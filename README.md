@@ -46,9 +46,22 @@ server/
   mr.ts      glab 开 MR
   i18n.ts    服务端文案唯一真源（API 错误消息 zh/en）
   index.ts   REST API + /pty WebSocket(node-pty <-> tmux attach)
-web/
+web/                 看板 + xterm 终端（无前端构建：原生 ES Module + 静态托管）
+  index.html 仅骨架：HTML 标记 + <link> + <script>
   i18n.js    前端文案唯一真源（UI 字符串 zh/en）+ t() / applyStatic
-  index.html 看板 + xterm 终端（CDN 引 xterm，无需前端构建）
+  css/app.css  全部样式
+  js/        按关注点拆分的 ES Module：
+    dom.js      $ / api 工具
+    feedback.js toast / loading 遮罩
+    dialog.js   promise 化的 confirm / prompt
+    select.js   自定义 <select> 组件
+    terminal.js xterm 终端 + 底部 dock + openPty
+    state.js    跨模块共享的可变状态
+    repos.js    仓库列表 / 卡片 / 注册弹窗
+    hosts.js    机器（host）切换 / 注册 / 远程终端
+    tasks.js    任务列表 / 派发弹窗 / 生命周期 / 连接会话
+    main.js     入口：把内联 onclick 处理函数桥接到 window + 初始化
+  vendor/    自托管的 xterm（无外部 CDN）
 ~/.task-dispatcher/  每台机器：mirrors/ worktrees/ repos.json（+ 控制器的 dispatcher.db）
 ```
 
