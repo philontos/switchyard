@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { scanSkills, resolveSkills, SkillSource } from "./skills.ts";
+import { scanSkills, resolveSkills, defaultSources, SkillSource } from "./skills.ts";
 
 function mkSkill(root: string, name: string, desc: string) {
   const d = path.join(root, name);
@@ -42,4 +42,14 @@ test("resolveSkills returns found dirs and reports missing", () => {
 test("missing root is skipped, not thrown", () => {
   const r = scanSkills([{ source: "local", root: "/no/such/dir/xyz" }]);
   assert.deepEqual(r, []);
+});
+
+test("defaultSources scans the dispatcher-local plugin cache (P1 install target)", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "home-"));
+  // a skill as it would land after a dispatcher-local `claude plugin install`
+  mkSkill(path.join(home, ".task-dispatcher", "claude-config", "plugins", "cache", "claude-plugins-official", "demo", "1.0.0", "skills"),
+    "demoskill", "from a dispatcher-local install");
+  const e = scanSkills(defaultSources(home)).find(s => s.name === "demoskill");
+  assert.ok(e, "demoskill discovered");
+  assert.equal(e.source, "dispatcher");
 });

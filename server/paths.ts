@@ -18,6 +18,12 @@ export const WORKTREES_DIR = path.join(DATA_DIR, "worktrees");
 export const DB_PATH = path.join(DATA_DIR, "dispatcher.db");
 export const MANIFEST_PATH = path.join(DATA_DIR, "repos.json");
 
+// Dispatcher-owned CLAUDE_CONFIG_DIR — lets us install official plugins for the
+// dispatcher WITHOUT touching the user's global ~/.claude. Its plugin cache
+// (<this>/plugins/cache) is one of the skill scan roots; keep that subpath in
+// sync with server/skills.ts defaultSources().
+export const DISPATCHER_CLAUDE_CFG = path.join(DATA_DIR, "claude-config");
+
 // One-time migration: relocate the legacy project-local ./data to the new
 // home-dir root so existing repos/tasks/hosts survive the path change. Both
 // live under $HOME (same filesystem), so a directory rename is atomic. The DB
