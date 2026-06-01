@@ -58,6 +58,7 @@ try { initTerm(); } catch (e) { console.error("terminal init failed:", e); }
 renderDockToggle();
 $("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
+csMount("t-preset").setOptions([{ value: "", label: t("task.presetNone") }], "");   // populated per open
 csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", label: "mosh" }]);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
 Promise.allSettled([loadRepos(), loadHosts(), loadTasks()]).then(dismissBoot);
