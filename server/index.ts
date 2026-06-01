@@ -176,12 +176,6 @@ app.post("/api/tasks", async (req, res) => {
   const session = `tdsp-${id}-${slug(repo.name)}-${s}`;
 
   try {
-    if (runner.kind !== "local") {
-      // verify the remote toolchain BEFORE creating a worktree — a session running a
-      // missing `claude` would just vanish, and a half-built dispatch would orphan the
-      // worktree. Fail clearly up front instead.
-      await runner.exec("command", ["-v", "claude"]).catch(() => { throw new Error(tr(lang, "task.noClaude")); });
-    }
     await fetchBranch(runner, repo.mirror_path, base_branch); // pull latest of base branch now
     await addWorktree(runner, repo.mirror_path, wtAbs, workBranch, base_branch);
     await startSession(runner, session, wtAbs, prompt);
@@ -189,6 +183,9 @@ app.post("/api/tasks", async (req, res) => {
       .run(workBranch, wtAbs, session, id);
     res.json({ id, session, work_branch: workBranch });
   } catch (e: any) {
+    // a partial dispatch (e.g. session start failed after the worktree was made)
+    // would orphan the worktree — remove it so nothing is left behind
+    await removeWorktree(runner, repo.mirror_path, wtAbs, workBranch).catch(() => {});
     db.prepare("UPDATE tasks SET status='error', error=? WHERE id=?").run(String(e.message || e), id);
     res.status(500).json({ error: String(e.message || e) });
   }
@@ -313,12 +310,9 @@ wss.on("connection", (ws, req) => {
     const host = getHost.get(hostId) as Host | undefined;
     if (!host) { ws.close(1008, "unknown host"); return; }
     label = `${host.kind} ${host.target}`;
-    // a remote `ssh host cmd` runs in a non-login shell whose PATH usually
-    // lacks Homebrew, so bare `tmux` is "command not found". Prepend the usual
-    // locations and exec tmux (attach to, or create, the named session).
-    const remoteCmd =
-      `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; ` +
-      `exec tmux new-session -A -s ${host.session}`;
+    // just forward — the remote's shell env (the user's responsibility) resolves
+    // tmux. attach to, or create, the named session.
+    const remoteCmd = `exec tmux new-session -A -s ${host.session}`;
     if (host.kind === "mosh") {
       file = MOSH_BIN;
       args = [host.target, "--", "sh", "-c", remoteCmd];
@@ -333,8 +327,7 @@ wss.on("connection", (ws, req) => {
     const host = repo ? (getHost.get(repo.host_id) as Host | undefined) : undefined;
     if (host && host.kind !== "local") {
       file = SSH_BIN;
-      args = ["-t", host.target,
-        `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; exec tmux attach -t ${session}`];
+      args = ["-t", host.target, `exec tmux attach -t ${session}`];
       label = `${host.target} ${session}`;
     } else {
       file = TMUX_BIN;

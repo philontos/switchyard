@@ -55,9 +55,6 @@ function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-// A non-login ssh shell's PATH often lacks Homebrew; prepend the usual spots so
-// git/tmux/etc. resolve on the remote.
-const REMOTE_PATH = `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"`;
 // reuse one ssh connection per host — first connect sets up a master socket,
 // later commands/probes ride it (a few ms instead of a full handshake).
 const SSH_MUX = [
@@ -71,10 +68,11 @@ export class RemoteRunner implements Runner {
   kind = "ssh" as const;
   constructor(public target: string, public dataDir: string) {}
 
-  // PATH fix; optional cd; per-command env prefix; the exec'd command — all
-  // joined into one remote shell command string.
+  // just forward: optional cd; per-command env prefix; the exec'd command —
+  // joined into one remote shell command string. PATH/toolchain resolution is
+  // the remote's job (the user's ssh/shell config), not ours.
   private remoteCmd(file: string, args: string[], opts: ExecOpts): string {
-    const parts = [REMOTE_PATH];
+    const parts: string[] = [];
     if (opts.cwd) parts.push(`cd ${shq(opts.cwd)}`);
     const envPrefix = Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${shq(v)}`).join(" ");
     parts.push(`${envPrefix} ${[file, ...args].map(shq).join(" ")}`.trim());
@@ -90,7 +88,7 @@ export class RemoteRunner implements Runner {
 
   ptySpec(file: string, args: string[]) {
     // interactive terminal: ssh -t, no BatchMode (allow host-key/password prompts)
-    const cmd = `${REMOTE_PATH}; exec ${[file, ...args].map(shq).join(" ")}`;
+    const cmd = `exec ${[file, ...args].map(shq).join(" ")}`;
     return { file: "ssh", args: ["-t", ...SSH_MUX, this.target, cmd] };
   }
 }
