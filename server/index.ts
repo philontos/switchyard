@@ -11,6 +11,7 @@ import {
 } from "./git.js";
 import { scanSkills, resolveSkills, defaultSources } from "./skills.js";
 import { renderDispatchPrompt, skillsLine } from "./presets.js";
+import { listAvailable, installPlugin } from "./plugins.js";
 import { startSession, hasSession, killSession, listSessions } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
 import { repairWorktrees } from "./migrate.js";
@@ -340,6 +341,23 @@ app.post("/api/presets", (req, res) => {
 app.delete("/api/presets/:id", (req, res) => {
   db.prepare("DELETE FROM presets WHERE id=?").run(req.params.id);
   res.json({ ok: true });
+});
+
+// ---------- plugin install (official channel; populates the skill sources) ----------
+app.get("/api/plugins/available", async (_req, res) => {
+  try { res.json(await listAvailable()); }
+  catch (e: any) { res.status(500).json({ error: String(e.message || e) }); }
+});
+
+app.post("/api/plugins/install", async (req, res) => {
+  const { pluginId, target } = req.body ?? {};
+  if (!pluginId) return res.status(400).json({ error: tr(langFromReq(req), "plugin.idRequired") });
+  try {
+    await installPlugin(String(pluginId), target === "dispatcher" ? "dispatcher" : "global");
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 // ---------- pty bridge ----------

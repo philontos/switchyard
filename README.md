@@ -39,7 +39,8 @@ npm run dev      # http://localhost:4500  (PORT 可改)
 ## 预设 / skill 注入（preset skills）
 派发任务时可让会话**自带一套实践**：把若干 Claude Code skill 注入到该任务的 worktree，并用一段开场模板驱动 claude。框架对 skill 内容零认知 —— 实践全在 skill 与模板里。
 
-- **skill 来源（只读，不入库，动态扫描）**：`~/.claude/skills/`、插件 cache `~/.claude/plugins/cache/**`、以及 dispatcher 本地 `~/.task-dispatcher/skills/`。每个 skill 以 `源:name` 标识（如 `plugin:brainstorming`）。要加自写 skill，把标准 skill 目录放进上述任一位置即可。
+- **skill 来源（只读，不入库，动态扫描）**：`~/.claude/skills/`、插件 cache `~/.claude/plugins/cache/**`、dispatcher 本地 `~/.task-dispatcher/skills/`、以及 dispatcher 安装目录 `~/.task-dispatcher/claude-config/plugins/cache/**`。每个 skill 以 `源:name` 标识（如 `plugin:brainstorming`）。要加自写 skill，把标准 skill 目录放进上述任一位置即可。
+- **从官方市场安装（header「Skills」）**：浏览 `claude` 官方插件市场，选落点安装 —— **全局**（`claude plugin install` → `~/.claude`）或 **dispatcher 本地**（`CLAUDE_CONFIG_DIR=~/.task-dispatcher/claude-config claude plugin install`，**不碰用户全局 `~/.claude`**）。装好的插件，其捆绑 skill 自动进上面的来源列表。（skill 以插件为载体分发，故安装单位是插件。）
 - **预设**：header「预设」里新建/命名 —— 一段开场 `dispatch_prompt` 模板（变量 `{title}/{slug}/{branch}/{prompt}`）+ 引用的 skill 列表。
 - **派发**：填标题后选一个预设、再勾选额外 skill。派发时框架把 (预设引用 ∪ 勾选) 的 skill **整目录**拷进 `<worktree>/.claude/skills/`（写 `.git/info/exclude` 防污染 git），开场消息末尾追加「本任务已带入 skills: …」。本机/远程一致（远程经 `Runner.putDir` 走 tar+ssh）。
 - **校验**：派发前先校验引用的 skill 都存在，缺任何一个立即报错、任务创建失败、不留半成品。
@@ -54,6 +55,7 @@ server/
   mr.ts      glab 开 MR
   skills.ts  读穿式 skill 源扫描 / 解析（源:name）
   presets.ts 开场 prompt 模板渲染 + skills 清单行
+  plugins.ts 官方渠道安装（全局 / dispatcher 隔离 CLAUDE_CONFIG_DIR）
   runner.ts  本机/远程执行抽象（exec/mkdirp/putDir…）
   i18n.ts    服务端文案唯一真源（API 错误消息 zh/en）
   index.ts   REST API（含 /api/skills、/api/presets、派发注入）+ /pty WebSocket
@@ -72,6 +74,7 @@ web/                 看板 + xterm 终端（无前端构建：原生 ES Module 
     hosts.js    机器（host）切换 / 注册 / 远程终端
     tasks.js    任务列表 / 派发弹窗（预设下拉 + 附加 skill）/ 生命周期 / 连接会话
     presets.js  预设管理弹窗（列/建/删 + 选 skill + 模板）
+    skills.js   Skills 弹窗（浏览官方插件 + 选落点安装）
     main.js     入口：把内联 onclick 处理函数桥接到 window + 初始化
   vendor/    自托管的 xterm（无外部 CDN）
 ~/.task-dispatcher/  每台机器：mirrors/ worktrees/ repos.json（+ 控制器的 dispatcher.db）

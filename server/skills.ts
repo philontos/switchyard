@@ -17,6 +17,8 @@ export function defaultSources(home = os.homedir()): SkillSource[] {
     { source: "local",      root: path.join(home, ".claude", "skills") },
     { source: "plugin",     root: path.join(home, ".claude", "plugins", "cache") },
     { source: "dispatcher", root: path.join(home, ".task-dispatcher", "skills") },
+    // dispatcher-local plugin installs land here (CLAUDE_CONFIG_DIR=<DATA_DIR>/claude-config)
+    { source: "dispatcher", root: path.join(home, ".task-dispatcher", "claude-config", "plugins", "cache") },
   ];
 }
 

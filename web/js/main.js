@@ -15,6 +15,7 @@ import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./re
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost } from "./hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, showTab, connect, openTaskModal, closeTaskModal } from "./tasks.js";
 import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
+import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 
 // ---- inline-onclick bridge ----
 // Every function referenced by an onclick="…" attribute (static markup in
@@ -32,6 +33,8 @@ Object.assign(window, {
   toggleDock,
   // presets
   openPresetModal, closePresetModal, addPreset, delPreset,
+  // skills (official-plugin install)
+  openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList,
 });
 
 // global safety net: surface uncaught API errors as toasts
@@ -62,6 +65,7 @@ renderDockToggle();
 $("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
 csMount("t-preset").setOptions([{ value: "", label: t("task.presetNone") }], "");   // populated per open
+csMount("sk-target").setOptions([{ value: "global", label: t("skill.targetGlobal") }, { value: "dispatcher", label: t("skill.targetDispatcher") }], "global");
 csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", label: "mosh" }]);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
 Promise.allSettled([loadRepos(), loadHosts(), loadTasks()]).then(dismissBoot);
@@ -73,11 +77,12 @@ $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal
 $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });
 $("host-modal").addEventListener("click", e => { if (e.target.id === "host-modal") closeHostModal(); });
 $("preset-modal").addEventListener("click", e => { if (e.target.id === "preset-modal") closePresetModal(); });
+$("skills-modal").addEventListener("click", e => { if (e.target.id === "skills-modal") closeSkillsModal(); });
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
   if ($("dialog").style.display === "flex") closeDialog(null);
-  else { closeRepoModal(); closeTaskModal(); closeHostModal(); closePresetModal(); }
+  else { closeRepoModal(); closeTaskModal(); closeHostModal(); closePresetModal(); closeSkillsModal(); }
 });
 // poll repos so cloning -> ready (and clone errors) show up without manual refresh
 setInterval(() => { if (state.repos.some(r => r.status === "cloning")) loadRepos(); }, 2000);
