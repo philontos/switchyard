@@ -72,6 +72,7 @@
       // repo card / empty state
       "repo.delTitle": "删除仓库",
       "repo.delConfirm": "删除该仓库镜像？",
+      "repo.forceDelConfirm": "该仓库下还有 {count} 个进行中的任务。强制删除会杀掉它们的会话、删除 worktree 和任务记录。确定？",
       "repo.emptyTitle": "还没有仓库",
       "repo.emptyHintPre": "注册一个 Git 仓库",
       "repo.emptyHintPost": "开始派发任务",
@@ -187,6 +188,7 @@
 
       "repo.delTitle": "Delete repository",
       "repo.delConfirm": "Delete this repository mirror?",
+      "repo.forceDelConfirm": "This repository still has {count} task(s) in progress. Force delete will kill their sessions, remove their worktrees and delete the task records. Proceed?",
       "repo.emptyTitle": "No repositories yet",
       "repo.emptyHintPre": "Register a Git repository",
       "repo.emptyHintPost": "to start dispatching tasks",

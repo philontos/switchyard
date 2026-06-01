@@ -9,7 +9,7 @@ import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { openPty } from "./terminal.js";
 
-let taskRepoId = null, branchReq = null, tasksById = {};
+let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 
 // reflect the current selection onto the cards already in the DOM (no refetch)
 export function paintSelection() {
@@ -97,39 +97,57 @@ export async function addTask() {
   }
 }
 
-function taskCard(t) {
+function taskCard(t, online) {
   const active = t.status !== "cleaned";
   // one corner action per state — stop (active) / cleanup (cleaned)
   // NOTE: the param is `t` (the task), so it shadows the global t() — use I18N.t here.
+  // `needsHost` actions run a command ON the machine, so they're disabled while
+  // the machine is offline; "delete record" is pure DB and stays available.
   let icon, note = "";
   if (active) {
-    icon = { glyph: "⏹", title: I18N.t("task.stopTitle"), fn: `archive(${t.id})` };
+    icon = { glyph: "⏹", title: I18N.t("task.stopTitle"), fn: `archive(${t.id})`, needsHost: true };
   } else if (t.hasWorktree) {
-    icon = { glyph: "🗑", title: I18N.t("task.removeWorktree"), fn: `removeWt(${t.id})` };
+    icon = { glyph: "🗑", title: I18N.t("task.removeWorktree"), fn: `removeWt(${t.id})`, needsHost: true };
     note = `<div class="muted">${I18N.t("task.worktreeKept")}</div>`;
   } else {
-    icon = { glyph: "🗑", title: I18N.t("task.deleteRecord"), fn: `deleteTask(${t.id})` };
+    icon = { glyph: "🗑", title: I18N.t("task.deleteRecord"), fn: `deleteTask(${t.id})`, needsHost: false };
   }
+  const disabled = icon.needsHost && !online;
   const head = `<div class="t">${t.alive ? `<span class="sdot live" title="live"></span>` : `<span class="sdot ${t.status}" title="${t.status}"></span>`}#${t.id} ${t.title}</div>
     <div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>
     ${t.mr_url ? `<div><a href="${t.mr_url}" target="_blank" onclick="event.stopPropagation()">MR ↗</a></div>` : ""}`;
   const open = active ? ` clickable" onclick="connect(${t.id})` : "";
   const sel = t.id === state.selectedTaskId ? " selected" : "";
   return `<div class="card task${sel}${open}" data-id="${t.id}">
-    <button class="card-x" title="${icon.title}" onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
+    <button class="card-x" title="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
     ${head}${note}
   </div>`;
 }
 
+// Fetch ALL tasks into the cache (tasksById keeps every task so connect() works
+// for any session, even one whose card is filtered out of the current machine),
+// then render. The 4s poller calls this; renderTasks() handles the display.
 export async function loadTasks() {
   const tasks = await api("/api/tasks").catch(() => null);
   if (!tasks) return;
   tasksById = Object.fromEntries(tasks.map(t => [t.id, t]));
-  const live = tasks.filter(t => t.status !== "cleaned");
-  const archived = tasks.filter(t => t.status === "cleaned");
-  $("tasks").innerHTML = live.map(taskCard).join("") ||
+  taskOrder = tasks.map(t => t.id);          // preserve the API's id-DESC order
+  renderTasks();
+}
+
+// Render the cached tasks filtered to the active machine. Pure (no fetch), so
+// switching machines is instant — called on fetch, and via renderMachines() on
+// boot / machine switch / repo change / host poll.
+export function renderTasks() {
+  const hostOf = Object.fromEntries(state.repos.map(r => [r.id, Number(r.host_id)]));
+  const host = state.hostsById[state.activeHostId];
+  const online = !host || host.kind === "local" || host.status === "online";
+  const mine = taskOrder.map(id => tasksById[id]).filter(t => t && hostOf[t.repo_id] === state.activeHostId);
+  const live = mine.filter(t => t.status !== "cleaned");
+  const archived = mine.filter(t => t.status === "cleaned");
+  $("tasks").innerHTML = live.map(t => taskCard(t, online)).join("") ||
     emptyState("🗂️", t("empty.liveTitle"), t("empty.liveHint"));
-  $("archived").innerHTML = archived.map(taskCard).join("") ||
+  $("archived").innerHTML = archived.map(t => taskCard(t, online)).join("") ||
     emptyState("📦", t("empty.archTitle"), t("empty.archHint"));
   $("arch-count").textContent = archived.length ? `(${archived.length})` : "";
 }

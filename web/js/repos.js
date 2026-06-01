@@ -17,17 +17,35 @@ export async function loadRepos() {
   state.repos = r;
   renderMachines();
 }
-export function repoCard(r) {
+// `online` = is this repo's machine reachable. Dispatch runs ON the machine, so
+// it's disabled when offline (mirrors the "new repo" button). Delete stays
+// enabled — the server refuses it when offline (host.offline toast), so it never
+// dead-ends a machine you must bring online first to clean up.
+export function repoCard(r, online = true) {
   return `
     <div class="card repo">
       <button class="repo-del" title="${t("repo.delTitle")}" onclick="delRepo(${r.id})">✕</button>
       <div class="t"><span class="sdot ${r.status}" title="${r.status}"></span>${r.name}</div>
       <div class="muted url">${r.git_url}</div>
       ${r.error ? `<div class="muted err">${r.error}</div>` : ""}
-      ${r.status === "ready" ? `<button class="disp" onclick="openTaskModal(${r.id})">${t("task.dispatch")}</button>` : ""}
+      ${r.status === "ready" ? `<button class="disp" ${online ? "" : "disabled"} onclick="openTaskModal(${r.id})">${t("task.dispatch")}</button>` : ""}
     </div>`;
 }
-export async function delRepo(id){ if(!await confirmDialog(t("repo.delConfirm"),{title:t("repo.delTitle"),okText:t("common.delete"),danger:true}))return; await api(`/api/repos/${id}`,{method:"DELETE"}); loadRepos(); }
+// Plain delete refuses (409) if the repo still has running tasks — then we offer
+// a force delete that tears them (sessions + worktrees) down with the repo.
+export async function delRepo(id) {
+  if (!await confirmDialog(t("repo.delConfirm"), { title: t("repo.delTitle"), okText: t("common.delete"), danger: true })) return;
+  try {
+    await api(`/api/repos/${id}`, { method: "DELETE" });
+  } catch (e) {
+    if (!(e.status === 409 && e.body && e.body.liveCount > 0)) { toast(e.message, "error"); return; }
+    if (!await confirmDialog(t("repo.forceDelConfirm", { count: e.body.liveCount }),
+          { title: t("repo.delTitle"), okText: t("common.delete"), danger: true })) return;
+    try { await api(`/api/repos/${id}?force=1`, { method: "DELETE" }); }
+    catch (e2) { toast(e2.message, "error"); return; }
+  }
+  loadRepos();
+}
 
 export function openRepoModal(hostId) {
   repoHostId = hostId ?? null;   // which machine this repo registers on
