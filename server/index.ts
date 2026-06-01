@@ -4,11 +4,13 @@ import { WebSocketServer } from "ws";
 import pty from "node-pty";
 import fs from "node:fs";
 import path from "node:path";
-import { db, Repo, Task, Host } from "./db.js";
+import { db, Repo, Task, Host, Preset } from "./db.js";
 import {
   initMirror, fetchMirror, fetchBranch, listBranches, addWorktree, removeWorktree,
   mirrorPath,
 } from "./git.js";
+import { scanSkills, resolveSkills, defaultSources } from "./skills.js";
+import { renderDispatchPrompt, skillsLine } from "./presets.js";
 import { startSession, hasSession, killSession, listSessions } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
 import { repairWorktrees } from "./migrate.js";
@@ -289,6 +291,31 @@ app.delete("/api/hosts/:id", (req, res) => {
   const n = (db.prepare("SELECT count(*) AS c FROM repos WHERE host_id=?").get(req.params.id) as { c: number }).c;
   if (n > 0) return res.status(409).json({ error: "remove this machine's repos first" });
   db.prepare("DELETE FROM hosts WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- skills (read-through aggregation; nothing stored) ----------
+app.get("/api/skills", (_req, res) => {
+  res.json(scanSkills(defaultSources()).map(({ key, name, description, source }) => ({ key, name, description, source })));
+});
+
+// ---------- presets (preset task templates: opening prompt + referenced skills) ----------
+app.get("/api/presets", (_req, res) => {
+  res.json(db.prepare("SELECT * FROM presets ORDER BY id DESC").all());
+});
+
+app.post("/api/presets", (req, res) => {
+  const { name, description, dispatch_prompt, skill_refs } = req.body ?? {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: tr(langFromReq(req), "preset.nameRequired") });
+  const refs = Array.isArray(skill_refs) ? skill_refs.map(String) : [];
+  const info = db.prepare(
+    "INSERT INTO presets (name, description, dispatch_prompt, skill_refs) VALUES (?,?,?,?)"
+  ).run(String(name).trim(), description ?? null, dispatch_prompt ?? null, JSON.stringify(refs));
+  res.json({ id: Number(info.lastInsertRowid) });
+});
+
+app.delete("/api/presets/:id", (req, res) => {
+  db.prepare("DELETE FROM presets WHERE id=?").run(req.params.id);
   res.json({ ok: true });
 });
 
