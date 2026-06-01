@@ -95,7 +95,9 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .prow-x { width: auto; margin: 0; padding: 1px 6px; background: none; border: none; color: #7d7367; font-size: 13px; line-height: 1; }
 .prow-x:hover { background: #f8514914; color: #f85149; }
 /* skills modal: available-plugin rows */
-.pg-box { max-height: 360px; overflow-y: auto; border: 1px solid #352e27; border-radius: 6px; padding: 4px 8px; margin-bottom: 7px; }
+.pg-box { height: 360px; overflow-y: auto; border: 1px solid #352e27; border-radius: 6px; padding: 4px 8px; margin-bottom: 7px; }
+.pg-state { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; color: #7d7367; font-size: 12.5px; }
+.pg-spin { flex: none; width: 15px; height: 15px; border: 2px solid #352e27; border-top-color: #e0906f; border-radius: 50%; animation: spin .8s linear infinite; }
 .pgrow { display: flex; align-items: flex-start; gap: 10px; padding: 7px 2px; border-bottom: 1px solid #2a241e; }
 .pgmain { flex: 1; min-width: 0; }
 .pgname { font-weight: 600; font-size: 13px; }

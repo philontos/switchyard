@@ -18,12 +18,12 @@ export function openSkillsModal() {
 export function closeSkillsModal() { $("skills-modal").style.display = "none"; }
 
 async function loadAvailablePlugins() {
-  $("sk-list").innerHTML = `<div class="muted" style="padding:8px 2px">${t("skill.loading")}</div>`;
+  $("sk-list").innerHTML = `<div class="pg-state"><span class="pg-spin"></span>${t("skill.loading")}</div>`;
   try {
     available = await api("/api/plugins/available");
     renderList("");
   } catch (e) {
-    $("sk-list").innerHTML = `<div class="muted" style="padding:8px 2px">${t("skill.loadFailed")}</div>`;
+    $("sk-list").innerHTML = `<div class="pg-state">${t("skill.loadFailed")}</div>`;
   }
 }
 
@@ -39,7 +39,7 @@ function renderList(filter) {
           <button class="pginstall" onclick="installPluginUI(${i})">${t("skill.install")}</button>
         </div>`;
       }).join("")
-    : `<div class="muted" style="padding:8px 2px">${t("skill.availableEmpty")}</div>`;
+    : `<div class="pg-state">${t("skill.availableEmpty")}</div>`;
 }
 export function filterSkillList(v) { renderList(v); }
 
