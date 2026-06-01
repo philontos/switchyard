@@ -7,6 +7,8 @@
 // All of this runs ON THE CONTROLLER (not via a per-task Runner) — installs are
 // a controller-side operation.
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { localRunner } from "./runner.js";
 import { DISPATCHER_CLAUDE_CFG } from "./paths.js";
 
@@ -53,7 +55,16 @@ export function installPlan(pluginId: string, target: "global" | "dispatcher"): 
 }
 
 export async function listAvailable(): Promise<AvailablePlugin[]> {
-  return parseAvailable(await localRunner.exec(CLAUDE_BIN, ["plugin", "list", "--available", "--json"]));
+  // NOTE: `claude plugin list --available --json` truncates its (100KB+) output
+  // to the 64KiB pipe buffer when stdout is a pipe — but writes in full to a
+  // file. execFile uses a pipe, so redirect to a temp file and read that.
+  const tmp = path.join(os.tmpdir(), `tdsp-plugins-${process.pid}.json`);
+  try {
+    await localRunner.exec("sh", ["-c", `${JSON.stringify(CLAUDE_BIN)} plugin list --available --json > ${JSON.stringify(tmp)}`]);
+    return parseAvailable(fs.readFileSync(tmp, "utf8"));
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
 }
 
 export async function installPlugin(pluginId: string, target: "global" | "dispatcher"): Promise<void> {
