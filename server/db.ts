@@ -46,6 +46,19 @@ CREATE TABLE IF NOT EXISTS hosts (
   session TEXT DEFAULT 'main',    -- remote tmux session to attach/create
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- preset task templates: a named bundle = an opening prompt template + a list
+-- of skills to inject (referenced by "source:name"). Skills themselves are NOT
+-- stored — they're scanned read-through (server/skills.ts) and copied into the
+-- task worktree at dispatch.
+CREATE TABLE IF NOT EXISTS presets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT,
+  dispatch_prompt TEXT,
+  skill_refs TEXT DEFAULT '[]',   -- JSON array of "source:name"
+  created_at TEXT DEFAULT (datetime('now'))
+);
 `);
 
 // One-time path migration (pairs with the ./data -> ~/.task-dispatcher move in
@@ -71,6 +84,8 @@ addColumn("hosts", "data_dir", "TEXT");                  // the machine's ~/.tas
 addColumn("hosts", "status", "TEXT DEFAULT 'unknown'");  // online | offline | unknown
 addColumn("hosts", "last_checked", "TEXT");
 addColumn("repos", "host_id", "INTEGER");                // which machine this repo lives on
+addColumn("tasks", "preset_id", "INTEGER");              // preset this task was dispatched with
+addColumn("tasks", "skills", "TEXT DEFAULT '[]'");       // JSON: source:name actually delivered
 
 // Seed the local machine (kind='local', always present, machine #0) and make
 // every repo belong to a machine — existing repos default to the local one.
@@ -127,5 +142,14 @@ export interface Host {
   data_dir: string | null;   // the machine's ~/.task-dispatcher
   status: string;            // online | offline | unknown
   last_checked: string | null;
+  created_at: string;
+}
+
+export interface Preset {
+  id: number;
+  name: string;
+  description: string | null;
+  dispatch_prompt: string | null;
+  skill_refs: string;        // JSON array string of "source:name"
   created_at: string;
 }
