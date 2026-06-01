@@ -82,6 +82,18 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .mreg:disabled { opacity: .4; cursor: not-allowed; }
 .mempty { font-size: 11.5px; padding: 0 2px 8px; }
 .tm-lbl { display: block; font-size: 11px; color: #a89e90; margin-bottom: 4px; }
+/* dispatch modal: extra-skill checkbox list */
+.skills-box { max-height: 132px; overflow-y: auto; border: 1px solid #352e27; border-radius: 6px; padding: 5px 8px; margin-bottom: 7px; }
+.skopt { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: 12.5px; cursor: pointer; }
+.skopt input[type=checkbox] { width: auto; margin: 0; }
+.sksrc { margin-left: auto; font-size: 10.5px; color: #7d7367; background: #2a241e; border: 1px solid #352e27; border-radius: 999px; padding: 0 7px; }
+/* preset management: existing-preset rows */
+#preset-list { margin-bottom: 10px; }
+.prow { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-bottom: 1px solid #2a241e; font-size: 13px; }
+.prow .pname { font-weight: 600; }
+.prow .pmeta { margin-left: auto; font-size: 11px; color: #7d7367; }
+.prow-x { width: auto; margin: 0; padding: 1px 6px; background: none; border: none; color: #7d7367; font-size: 13px; line-height: 1; }
+.prow-x:hover { background: #f8514914; color: #f85149; }
 /* task card */
 .task { position: relative; }
 .task .t { padding-right: 24px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -151,7 +163,9 @@ a { color: #e0906f; }
 .toast.out { animation: tout .25s ease forwards; }
 @keyframes tin { from { opacity: 0; transform: translateX(16px); } }
 @keyframes tout { to { opacity: 0; transform: translateX(16px); } }
-/* dialog */
+/* dialog — sits above the other modals so a confirm triggered from inside a
+   modal (e.g. delete a preset) is on top, not hidden behind it */
+#dialog { z-index: 90; }
 .dlg-msg { margin: 6px 0 12px; white-space: pre-wrap; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .dlg-actions button { width: auto; padding: 6px 16px; margin: 0; }

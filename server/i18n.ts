@@ -29,6 +29,9 @@ const messages: Record<Lang, Record<string, string>> = {
     "session.invalid": "invalid session",
     "session.attachFailed": "cannot connect to session {session}: {error}",
     "host.offline": "machine is offline",
+    "preset.nameRequired": "preset name required",
+    "preset.notFound": "preset not found",
+    "skill.missing": "skill(s) not found: {keys}",
   },
   zh: {
     "repo.fieldsRequired": "名称和 git url 必填",
@@ -40,6 +43,9 @@ const messages: Record<Lang, Record<string, string>> = {
     "session.invalid": "会话名非法",
     "session.attachFailed": "无法连接会话 {session}: {error}",
     "host.offline": "机器离线",
+    "preset.nameRequired": "预设名称必填",
+    "preset.notFound": "未找到预设",
+    "skill.missing": "未找到 skill：{keys}",
   },
 };
 
