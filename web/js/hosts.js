@@ -8,10 +8,10 @@ import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { repoCard } from "./repos.js";
-import { paintSelection } from "./tasks.js";
+import { paintSelection, renderTasks } from "./tasks.js";
 import { openPty } from "./terminal.js";
 
-let hostsOrder = [], activeHostId = null;
+let hostsOrder = [];   // API order: local machine first. Active machine is state.activeHostId.
 
 // ---- machines: each machine is a sidebar group holding its repos ----
 export async function loadHosts() {
@@ -24,21 +24,22 @@ export async function loadHosts() {
 export function renderMachines() {
   if (!hostsOrder.length) return;   // hosts not loaded yet
   const hosts = hostsOrder.map(id => state.hostsById[id]).filter(Boolean);
-  if (activeHostId == null || !state.hostsById[activeHostId]) {        // default to the local machine
+  if (state.activeHostId == null || !state.hostsById[state.activeHostId]) {   // default to the local machine
     const first = hosts.find(h => h.kind === "local") || hosts[0];
-    activeHostId = first ? first.id : null;
+    state.activeHostId = first ? first.id : null;
   }
   const tabs = hosts.map(h => {
     const online = h.kind === "local" || h.status === "online";
     const name = h.kind === "local" ? t("host.local") : h.name;
-    return `<button class="mtab${h.id === activeHostId ? " active" : ""}" onclick="selectHost(${h.id})"><span class="mdot ${online ? "on" : "off"}"></span>${name}</button>`;
+    return `<button class="mtab${h.id === state.activeHostId ? " active" : ""}" onclick="selectHost(${h.id})"><span class="mdot ${online ? "on" : "off"}"></span>${name}</button>`;
   }).join("");
   const add = `<button class="mtab-add" title="${t("host.new")}" onclick="openHostModal()">＋</button>`;
   $("machines").innerHTML = `<div class="mtabs">${tabs}${add}</div>${activeMachine()}`;
   paintSelection();
+  renderTasks();   // task/archive lists follow the active machine — single re-render hub
 }
 function activeMachine() {
-  const h = state.hostsById[activeHostId];
+  const h = state.hostsById[state.activeHostId];
   if (!h) return "";
   const isLocal = h.kind === "local";
   const online = isLocal || h.status === "online";
@@ -49,10 +50,10 @@ function activeMachine() {
       <button class="micon" title="${t("host.del")}" onclick="delHost(${h.id})">✕</button>
     </div>`;
   return bar
-    + (mine.map(repoCard).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`)
+    + (mine.map(r => repoCard(r, online)).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`)
     + `<button class="mreg" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">${t("repo.new")}</button>`;
 }
-export function selectHost(id) { activeHostId = id; renderMachines(); }
+export function selectHost(id) { state.activeHostId = id; renderMachines(); }   // renderMachines re-renders tasks too
 export function openHostModal() { $("host-modal").style.display = "flex"; setTimeout(() => $("h-name").focus(), 30); }
 export function closeHostModal() { $("host-modal").style.display = "none"; }
 export async function addHost() {

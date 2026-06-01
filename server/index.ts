@@ -61,6 +61,18 @@ function taskRunner(task: Task) {
   return host ? runnerFor(host) : localRunner;
 }
 
+// the machine a task lives on (via its repo) — for the offline write-guard
+function taskHost(task: Task): Host | undefined {
+  const repo = getRepo.get(task.repo_id) as Repo | undefined;
+  return repo ? (getHost.get(repo.host_id) as Host | undefined) : undefined;
+}
+
+// a write that must run ON a machine is refused while that machine is offline
+// (the local machine is always reachable). Reads stay allowed.
+function offline(host: Host | undefined): boolean {
+  return !!host && host.kind !== "local" && host.status !== "online";
+}
+
 function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "task";
 }
@@ -106,10 +118,13 @@ app.post("/api/repos", (req, res) => {
 });
 
 app.post("/api/repos/:id/fetch", async (req, res) => {
+  const lang = langFromReq(req);
   const repo = getRepo.get(req.params.id) as Repo | undefined;
-  if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
+  if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(lang, "notFound") });
+  const host = getHost.get(repo.host_id) as Host | undefined;
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
   try {
-    await fetchMirror(runnerFor(getHost.get(repo.host_id) as Host), repo.mirror_path, repo.git_url, repo.token);
+    await fetchMirror(runnerFor(host as Host), repo.mirror_path, repo.git_url, repo.token);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -128,13 +143,41 @@ app.get("/api/repos/:id/branches", async (req, res) => {
   }
 });
 
+// Delete a repo and everything bound to it — so the per-machine task view never
+// strands an invisible orphan. Live tasks (status != cleaned) block a plain
+// delete; ?force=1 tears them down too. Archived tasks (cleaned, worktree kept
+// or not) are always cleaned up with the repo — no unknown worktree left behind.
 app.delete("/api/repos/:id", async (req, res) => {
+  const lang = langFromReq(req);
   const repo = getRepo.get(req.params.id) as Repo | undefined;
-  if (!repo) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
-  if (repo.mirror_path) {
-    // remove the bare mirror on whichever machine it lives
-    await runnerFor(getHost.get(repo.host_id) as Host).rmrf(repo.mirror_path).catch(() => {});
+  if (!repo) return res.status(404).json({ error: tr(lang, "notFound") });
+  const host = getHost.get(repo.host_id) as Host | undefined;
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const runner = runnerFor(host as Host);
+  const force = req.query.force === "1" || req.query.force === "true";
+
+  const tasks = db.prepare("SELECT * FROM tasks WHERE repo_id=?").all(repo.id) as Task[];
+  const live = tasks.filter((t) => t.status !== "cleaned");
+  if (live.length && !force) {
+    return res.status(409).json({ error: tr(lang, "repo.hasLiveTasks", { count: live.length }), liveCount: live.length });
   }
+
+  // tear down every bound task: kill session + remove worktree. The machine is
+  // online (guarded above), so removal should succeed — if a worktree can't be
+  // removed, abort (500) rather than silently leave it behind; nothing is
+  // deleted yet, so the operation is safely retryable.
+  for (const t of tasks) {
+    await killSession(runner, t.session).catch(() => {});
+    if (t.worktree_path && repo.mirror_path && (await runner.exists(t.worktree_path).catch(() => false))) {
+      try {
+        await removeWorktree(runner, repo.mirror_path, t.worktree_path, t.work_branch);
+      } catch (e: any) {
+        return res.status(500).json({ error: String(e.message || e) });
+      }
+    }
+  }
+  db.prepare("DELETE FROM tasks WHERE repo_id=?").run(repo.id);
+  if (repo.mirror_path) await runner.rmrf(repo.mirror_path).catch(() => {});
   db.prepare("DELETE FROM repos WHERE id=?").run(repo.id);
   syncReposManifest();
   res.json({ ok: true });
@@ -165,7 +208,9 @@ app.post("/api/tasks", async (req, res) => {
   const repo = getRepo.get(repo_id) as Repo | undefined;
   if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(lang, "repo.notFound") });
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
-  const runner = runnerFor(getHost.get(repo.host_id) as Host); // dispatch ON the repo's machine
+  const host = getHost.get(repo.host_id) as Host | undefined;
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const runner = runnerFor(host as Host); // dispatch ON the repo's machine
 
   // Resolve the preset + skills to inject and PREFLIGHT them: if any referenced
   // skill is missing, fail now — before any worktree/task is created — so we
@@ -219,8 +264,10 @@ app.post("/api/tasks", async (req, res) => {
 
 // archive: end the tmux session but KEEP the worktree (moves task to archived tab)
 app.post("/api/tasks/:id/archive", async (req, res) => {
+  const lang = langFromReq(req);
   const task = getTask.get(req.params.id) as Task | undefined;
-  if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
+  if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (offline(taskHost(task))) return res.status(409).json({ error: tr(lang, "host.offline") });
   try {
     await killSession(taskRunner(task), task.session);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
@@ -232,8 +279,10 @@ app.post("/api/tasks/:id/archive", async (req, res) => {
 
 // remove the worktree (frees disk) without deleting the task record
 app.post("/api/tasks/:id/cleanup", async (req, res) => {
+  const lang = langFromReq(req);
   const task = getTask.get(req.params.id) as Task | undefined;
-  if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
+  if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (offline(taskHost(task))) return res.status(409).json({ error: tr(lang, "host.offline") });
   const repo = getRepo.get(task.repo_id) as Repo | undefined;
   try {
     const runner = taskRunner(task);
