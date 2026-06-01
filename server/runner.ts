@@ -27,6 +27,8 @@ export interface Runner {
   mkdirp(dir: string): Promise<void>;
   exists(p: string): Promise<boolean>;
   rmrf(p: string): Promise<void>;
+  /** Copy a local directory tree to `dest` ON the target machine. */
+  putDir(localSrc: string, dest: string): Promise<void>;
   ptySpec(file: string, args: string[]): { file: string; args: string[] };
 }
 
@@ -45,6 +47,10 @@ export class LocalRunner implements Runner {
   async mkdirp(dir: string) { fs.mkdirSync(dir, { recursive: true }); }
   async exists(p: string) { return fs.existsSync(p); }
   async rmrf(p: string) { fs.rmSync(p, { recursive: true, force: true }); }
+  async putDir(localSrc: string, dest: string) {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.cpSync(localSrc, dest, { recursive: true });
+  }
   ptySpec(file: string, args: string[]) { return { file, args }; }
 }
 
@@ -85,6 +91,22 @@ export class RemoteRunner implements Runner {
   async mkdirp(dir: string) { await this.exec("mkdir", ["-p", dir]); }
   async exists(p: string) { try { await this.exec("test", ["-e", p]); return true; } catch { return false; } }
   async rmrf(p: string) { await this.exec("rm", ["-rf", p]); }
+
+  // Stream the local dir to the remote with tar-over-ssh. We need a real pipe,
+  // so this goes through a local shell (`sh -c`); each ssh arg + the remote
+  // command are single-quoted for that shell, and the remote command's own
+  // paths are quoted again for the remote shell. If the source dir's basename
+  // differs from dest's, rename it ON THE REMOTE after extraction.
+  async putDir(localSrc: string, dest: string) {
+    const base = path.basename(localSrc);
+    const srcParent = path.dirname(localSrc);
+    const destParent = path.dirname(dest);
+    const extracted = path.join(destParent, base);
+    const rename = extracted === dest ? "" : ` && rm -rf ${shq(dest)} && mv ${shq(extracted)} ${shq(dest)}`;
+    const remote = `mkdir -p ${shq(destParent)} && tar -C ${shq(destParent)} -xf -${rename}`;
+    const sshArgs = [...SSH_MUX, ...SSH_BATCH, this.target, remote].map(shq).join(" ");
+    await localRunner.exec("sh", ["-c", `tar -C ${shq(srcParent)} -cf - ${shq(base)} | ssh ${sshArgs}`]);
+  }
 
   ptySpec(file: string, args: string[]) {
     // interactive terminal: ssh -t, no BatchMode (allow host-key/password prompts)
