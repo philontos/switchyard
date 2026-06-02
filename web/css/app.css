@@ -78,6 +78,8 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .micon { width: auto; margin: 0; padding: 1px 6px; background: none; border: none; color: #7d7367; font-size: 13px; line-height: 1; }
 .micon:hover { background: #2a241e; color: #ece6dd; }
 .mreg { width: 100%; margin-top: 4px; font-size: 12px; background: none; border: 1px dashed #352e27; color: #a89e90; }
+.mreg-row { display: flex; gap: 6px; }
+.mreg-row .mreg { flex: 1; width: auto; min-width: 0; }
 .mreg:hover { background: #221d18; border-color: #473d33; color: #ece6dd; }
 .mreg:disabled { opacity: .4; cursor: not-allowed; }
 .mlocal { border-style: solid; border-color: #d9775744; color: #e09a7d; }
