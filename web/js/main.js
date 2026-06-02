@@ -13,7 +13,7 @@ import { initTerm, renderDockToggle, toggleDock } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost } from "./hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, showTab, connect, openTaskModal, closeTaskModal } from "./tasks.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, showTab, connect, openTaskModal, closeTaskModal, openLocalModal, closeLocalModal, addLocalTask } from "./tasks.js";
 import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 
@@ -25,6 +25,7 @@ import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } f
 Object.assign(window, {
   // tasks
   showTab, addTask, openTaskModal, closeTaskModal, connect, archive, removeWt, deleteTask,
+  openLocalModal, closeLocalModal, addLocalTask,
   // repos
   delRepo, openRepoModal, closeRepoModal, addRepo,
   // hosts
@@ -75,6 +76,7 @@ setInterval(loadHosts, 5000);   // refresh machine liveness dots
 // close modals on backdrop click / Esc
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
 $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });
+$("local-modal").addEventListener("click", e => { if (e.target.id === "local-modal") closeLocalModal(); });
 $("host-modal").addEventListener("click", e => { if (e.target.id === "host-modal") closeHostModal(); });
 $("preset-modal").addEventListener("click", e => { if (e.target.id === "preset-modal") closePresetModal(); });
 $("skills-modal").addEventListener("click", e => { if (e.target.id === "skills-modal") closeSkillsModal(); });
@@ -82,7 +84,7 @@ document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
   if ($("dialog").style.display === "flex") closeDialog(null);
-  else { closeRepoModal(); closeTaskModal(); closeHostModal(); closePresetModal(); closeSkillsModal(); }
+  else { closeRepoModal(); closeTaskModal(); closeLocalModal(); closeHostModal(); closePresetModal(); closeSkillsModal(); }
 });
 // poll repos so cloning -> ready (and clone errors) show up without manual refresh
 setInterval(() => { if (state.repos.some(r => r.status === "cloning")) loadRepos(); }, 2000);

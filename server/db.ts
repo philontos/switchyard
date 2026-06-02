@@ -86,6 +86,12 @@ addColumn("hosts", "last_checked", "TEXT");
 addColumn("repos", "host_id", "INTEGER");                // which machine this repo lives on
 addColumn("tasks", "preset_id", "INTEGER");              // preset this task was dispatched with
 addColumn("tasks", "skills", "TEXT DEFAULT '[]'");       // JSON: source:name actually delivered
+// repo-less local quick tasks (kind='local'): no mirror/worktree, just a claude
+// session in a plain dir. They carry their own host_id (repo tasks derive it via
+// their repo) and a cwd; repo_id is 0 and the branch/worktree columns are "".
+addColumn("tasks", "kind", "TEXT DEFAULT 'repo'");       // 'repo' | 'local'
+addColumn("tasks", "host_id", "INTEGER");                // local tasks: which machine
+addColumn("tasks", "cwd", "TEXT");                       // local tasks: working dir
 
 // Seed the local machine (kind='local', always present, machine #0) and make
 // every repo belong to a machine — existing repos default to the local one.
@@ -131,6 +137,9 @@ export interface Task {
   error: string | null;
   mr_url: string | null;
   created_at: string;
+  kind: string;              // 'repo' | 'local'
+  host_id: number | null;    // local tasks: the machine they run on
+  cwd: string | null;        // local tasks: working dir
 }
 
 export interface Host {

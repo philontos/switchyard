@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import pty from "node-pty";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { db, Repo, Task, Host, Preset } from "./db.js";
 import {
@@ -16,6 +17,7 @@ import { startSession, hasSession, killSession, listSessions } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
 import { repairWorktrees } from "./migrate.js";
 import { localRunner, runnerFor } from "./runner.js";
+import { resolveCwd } from "./local.js";
 import { startLivenessLoop, probeHost } from "./liveness.js";
 import { WEB_DIR, DID_MIGRATE } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
@@ -258,6 +260,39 @@ app.post("/api/tasks", async (req, res) => {
     // would orphan the worktree — remove it so nothing is left behind
     await removeWorktree(runner, repo.mirror_path, wtAbs, workBranch).catch(() => {});
     db.prepare("UPDATE tasks SET status='error', error=? WHERE id=?").run(String(e.message || e), id);
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// repo-less local quick task: skip the mirror/worktree/skills machinery and just
+// start a claude tmux session in a plain dir (default ~) on the local machine.
+// Stored in the same tasks table with kind='local', repo_id=0 and empty branch/
+// worktree columns, so it rides the existing list/connect/archive/delete plumbing.
+app.post("/api/tasks/local", async (req, res) => {
+  const lang = langFromReq(req);
+  const local = db.prepare("SELECT * FROM hosts WHERE kind='local'").get() as Host | undefined;
+  if (!local) return res.status(404).json({ error: tr(lang, "notFound") });
+
+  const cwd = resolveCwd(req.body?.cwd, os.homedir());
+  if (!(await localRunner.exists(cwd))) return res.status(400).json({ error: tr(lang, "task.cwdMissing", { cwd }) });
+  const prompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+  const provided = String(req.body?.title ?? "").trim();
+
+  // insert first so the auto-title and session name can use the row id
+  const info = db.prepare(
+    "INSERT INTO tasks (kind, host_id, repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, cwd) " +
+    "VALUES ('local', ?, 0, '', '', ?, ?, '', '', 'creating', ?)"
+  ).run(local.id, provided, prompt || null, cwd);
+  const id = Number(info.lastInsertRowid);
+  const title = provided || tr(lang, "task.localDefaultTitle", { id });
+  const session = `tdsp-${id}-local-${slug(title)}`;
+
+  try {
+    await startSession(localRunner, session, cwd, prompt.trim() ? prompt : null);
+    db.prepare("UPDATE tasks SET title=?, session=?, status='running' WHERE id=?").run(title, session, id);
+    res.json({ id, session });
+  } catch (e: any) {
+    db.prepare("UPDATE tasks SET title=?, status='error', error=? WHERE id=?").run(title, String(e.message || e), id);
     res.status(500).json({ error: String(e.message || e) });
   }
 });

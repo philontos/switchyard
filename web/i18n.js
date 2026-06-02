@@ -64,6 +64,17 @@
       "task.promptPh": "给 claude 的初始指令（可选）",
       "task.submit": "建 worktree + 起会话",
 
+      // local quick task (repo-less)
+      "local.new": "＋ 本地任务",
+      "local.modalTitle": "本地快速任务",
+      "local.titlePh": "任务标题（可选，留空自动命名）",
+      "local.cwdPh": "工作目录（默认 ~）",
+      "local.promptPh": "给 claude 的初始指令（可选）",
+      "local.submit": "起本地会话",
+      "local.hint": "不拉取仓库、不建 worktree，直接在该目录起一个 tmux claude 会话。",
+      "local.tag": "本地",
+      "local.starting": "正在启动本地会话…",
+
       // custom <select>
       "cs.placeholder": "请选择",
       "cs.empty": "无可选项",
@@ -193,6 +204,17 @@
       "task.titlePh": "Task title",
       "task.promptPh": "Initial prompt for claude (optional)",
       "task.submit": "Create worktree + start session",
+
+      // local quick task (repo-less)
+      "local.new": "＋ Local task",
+      "local.modalTitle": "Local quick task",
+      "local.titlePh": "Task title (optional, auto-named if blank)",
+      "local.cwdPh": "Working dir (default ~)",
+      "local.promptPh": "Initial prompt for claude (optional)",
+      "local.submit": "Start session",
+      "local.hint": "No repo fetch or worktree — just a tmux claude session in that directory.",
+      "local.tag": "local",
+      "local.starting": "Starting local session…",
 
       "cs.placeholder": "Select…",
       "cs.empty": "No options",
