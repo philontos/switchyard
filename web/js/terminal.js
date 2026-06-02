@@ -36,40 +36,19 @@ export function initTerm() {
   try { fit.fit(); } catch {}
   window.addEventListener("resize", () => { try { fit.fit(); sendResize(); } catch {} });
   term.onData(d => ws && ws.readyState === 1 && ws.send(d));
-  // 点击 dock 外侧(如上方的任务区/标题栏)自动折叠终端 —— 不必特地去点 ▾ 开关。
-  // capture 阶段触发: 点任务卡片时先折叠, 紧接着卡片自己的 connect()->openPty()->
-  // expandDock() 又把它展开, 净效果是切到新会话且终端保持打开; 而点击真正的空白
-  // 区域没有后续 expand, 就只剩折叠。有选区时跳过, 不打断划词(松手即复制)的操作。
-  document.addEventListener("click", (e) => {
-    const d = $("dock");
-    if (d.classList.contains("collapsed") || d.contains(e.target)) return;
-    if (String(window.getSelection() || "")) return;
-    d.classList.add("collapsed");
-    renderDockToggle();
-  }, true);
 }
 function sendResize() {
   if (ws && ws.readyState === 1) ws.send("\x00resize:" + term.cols + "x" + term.rows);
 }
-export function renderDockToggle() {
-  const collapsed = $("dock").classList.contains("collapsed");
-  $("dock-toggle").textContent = (collapsed ? "▴ " : "▾ ") + t("term.label");
-}
-function expandDock() {
-  $("dock").classList.remove("collapsed");
-  renderDockToggle();
-  setTimeout(() => { try { fit.fit(); sendResize(); } catch {} }, 160);
-}
-export function toggleDock() {
-  const d = $("dock");
-  if (d.classList.contains("collapsed")) expandDock();
-  else { d.classList.add("collapsed"); renderDockToggle(); }
-}
+// The terminal is permanent (col3); the empty-state overlay shows when nothing
+// is attached. openPty() hides it; clearing a selection re-shows it.
+export function showTermEmpty() { $("term-empty").classList.remove("hidden"); }
+function hideTermEmpty() { $("term-empty").classList.add("hidden"); }
 
 // open the terminal dock against a /pty target (local session or remote host)
 export function openPty(query, title, desc, attach) {
   if (ws) { ws.close(); ws = null; }
-  expandDock();
+  hideTermEmpty();
   term.reset();
   // dynamic content, not a localized label — drop the static i18n binding so a
   // language switch won't overwrite the title back to "Not connected".

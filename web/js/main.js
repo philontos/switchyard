@@ -9,7 +9,7 @@ import { $ } from "./dom.js";
 import { toast } from "./feedback.js";
 import { closeDialog } from "./dialog.js";
 import { Selects, csMount } from "./select.js";
-import { initTerm, renderDockToggle, toggleDock } from "./terminal.js";
+import { initTerm, showTermEmpty } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost } from "./hosts.js";
@@ -30,8 +30,6 @@ Object.assign(window, {
   delRepo, openRepoModal, closeRepoModal, addRepo,
   // hosts
   selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost,
-  // terminal
-  toggleDock,
   // presets
   openPresetModal, closePresetModal, addPreset, delPreset,
   // skills (official-plugin install)
@@ -48,7 +46,6 @@ function renderSwitcher() { $("lang-toggle").textContent = I18N.lang === "zh" ? 
 // re-render everything not covered by data-i18n attributes when the language flips
 I18N.onChange = () => {
   renderSwitcher();
-  renderDockToggle();
   const sel = Selects["t-base"];
   if (sel) { sel.ph = t("task.branchPh"); sel.repaint && sel.repaint(); }
   loadRepos();
@@ -62,17 +59,18 @@ renderSwitcher();
 
 function dismissBoot() { const b = $("boot"); if (b) b.classList.add("done"); }
 try { initTerm(); } catch (e) { console.error("terminal init failed:", e); }
-renderDockToggle();
+showTermEmpty();
 $("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
 csMount("t-preset").setOptions([{ value: "", label: t("task.presetNone") }], "");   // populated per open
 csMount("sk-target").setOptions([{ value: "global", label: t("skill.targetGlobal") }, { value: "dispatcher", label: t("skill.targetDispatcher") }], "global");
 csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", label: "mosh" }]);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
-Promise.allSettled([loadRepos(), loadHosts(), loadTasks()]).then(dismissBoot);
+// TASK1-TEMP: left-column renders not yet rewired for the new layout — re-enabled in Task 2.
+// Promise.allSettled([loadRepos(), loadHosts(), loadTasks()]).then(dismissBoot);
 setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
-setInterval(loadTasks, 4000);
-setInterval(loadHosts, 5000);   // refresh machine liveness dots
+// setInterval(loadTasks, 4000);
+// setInterval(loadHosts, 5000);   // refresh machine liveness dots
 // close modals on backdrop click / Esc
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
 $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });
