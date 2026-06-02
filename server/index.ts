@@ -13,10 +13,10 @@ import {
 import { scanSkills, resolveSkills, defaultSources } from "./skills.js";
 import { renderDispatchPrompt, skillsLine } from "./presets.js";
 import { listAvailable, installPlugin } from "./plugins.js";
-import { startSession, startShellSession, hasSession, killSession, listSessions } from "./tmux.js";
+import { startSession, startShellSession, hasSession, killSession, listSessions, cancelCopyMode } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
 import { repairWorktrees } from "./migrate.js";
-import { localRunner, runnerFor } from "./runner.js";
+import { localRunner, runnerFor, type Runner } from "./runner.js";
 import { resolveCwd } from "./local.js";
 import { hookSettingsJson } from "./hooks.js";
 import { startLivenessLoop, probeHost } from "./liveness.js";
@@ -486,6 +486,9 @@ wss.on("connection", (ws, req) => {
   // remote = node-pty spawns ssh/mosh locally, but the shell/tmux/files all
   // live ON the remote host — this box is just the relay.
   let file: string, args: string[], label: string;
+  // the session whose copy/scroll mode we cancel on attach, so this client lands
+  // on the live prompt no matter what mode a previous client left the pane in.
+  let cancelRunner: Runner | null = null, cancelSession = "";
   if (hostId) {
     const host = getHost.get(hostId) as Host | undefined;
     if (!host) { ws.close(1008, "unknown host"); return; }
@@ -500,6 +503,7 @@ wss.on("connection", (ws, req) => {
       file = SSH_BIN;
       args = ["-t", host.target, remoteCmd];
     }
+    cancelRunner = runnerFor(host); cancelSession = host.session;
   } else if (session && SESSION_RE.test(session)) {
     // a task's tmux session — attach on whichever machine the task lives
     const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(session) as Task | undefined;
@@ -514,6 +518,8 @@ wss.on("connection", (ws, req) => {
       args = ["attach", "-t", session];
       label = session;
     }
+    // local task = no repo/host (repo_id 0) → runs on this box
+    cancelRunner = host ? runnerFor(host) : localRunner; cancelSession = session;
   } else {
     ws.close(1008, "invalid target");
     return;
@@ -535,6 +541,11 @@ wss.on("connection", (ws, req) => {
     ws.close();
     return;
   }
+
+  // best-effort, fire-and-forget: nudge the pane out of copy/scroll mode so this
+  // attach shows the live prompt. NOT awaited — the listeners below must register
+  // synchronously, before the client's first resize arrives, or it gets dropped.
+  if (cancelRunner) cancelCopyMode(cancelRunner, cancelSession);
 
   term.onData((data) => {
     if (ws.readyState === ws.OPEN) ws.send(data);

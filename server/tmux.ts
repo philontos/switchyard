@@ -42,6 +42,17 @@ export async function killSession(runner: Runner, session: string) {
   await tmux(runner, ["kill-session", "-t", session]).catch(() => {});
 }
 
+/**
+ * Force the session's active pane out of copy/scroll mode so a client attaching
+ * next lands on the live prompt instead of stale scrollback. `-X cancel` is a
+ * copy-mode COMMAND, not a keystroke: in copy-mode it exits, and when the pane
+ * is NOT in a mode tmux just errors and inserts nothing — unlike a literal `q`,
+ * which would be typed into claude's prompt. Best-effort, so errors are ignored.
+ */
+export async function cancelCopyMode(runner: Runner, session: string) {
+  await tmux(runner, ["send-keys", "-t", session, "-X", "cancel"]).catch(() => {});
+}
+
 /** List all dispatcher-owned tmux sessions (named task-<id>). */
 export async function listSessions(runner: Runner): Promise<string[]> {
   try {

@@ -83,4 +83,7 @@ export function openPty(query, title, desc, attach) {
   ws.onopen = () => { fit.fit(); sendResize(); };
   ws.onmessage = (e) => term.write(typeof e.data === "string" ? e.data : "");
   ws.onclose = () => term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
+  // grab the keyboard so arrows/typing go straight into the session — expandDock()
+  // above already un-hid #term (it's display:none while collapsed), so it's focusable.
+  term.focus();
 }
