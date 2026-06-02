@@ -12,7 +12,7 @@ import { Selects, csMount } from "./select.js";
 import { initTerm, showTermEmpty } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
-import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss } from "./hosts.js";
+import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost, toggleRepo, toggleArchived, toggleHostMenu, toggleRepoMenu, initHostMenuDismiss } from "./hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, connect, openTaskModal, closeTaskModal, addLocalTask } from "./tasks.js";
 import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
@@ -30,7 +30,7 @@ Object.assign(window, {
   delRepo, openRepoModal, closeRepoModal, addRepo,
   // hosts
   selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost,
-  toggleRepo, toggleArchived, toggleHostMenu,
+  toggleRepo, toggleArchived, toggleHostMenu, toggleRepoMenu,
   // presets
   openPresetModal, closePresetModal, addPreset, delPreset,
   // skills (official-plugin install)

@@ -15,6 +15,7 @@ let hostsOrder = [];               // API order: local machine first. Active mac
 const collapsedRepos = new Set();  // collapsed repo groups (repo id) — read by renderList
 let archivedOpen = false;          // is the archived section expanded
 let menuHostId = null;             // remote machine whose ⚙ menu is open (null = none)
+let menuRepoId = null;             // repo whose ⋯ action menu is open (null = none)
 
 // ---- machines: col1 is a vertical icon rail; col2 (renderList, added next)
 // lists the active machine's repos + tasks. loadHosts/loadRepos/loadTasks all
@@ -47,7 +48,7 @@ function renderRail(hosts) {
   $("m-rail").innerHTML = hosts.map(icon).join("")
     + `<button class="rchip add" title="${t("host.new")}" onclick="openHostModal()">＋</button>`;
 }
-export function selectHost(id) { state.activeHostId = id; menuHostId = null; rerender(); }
+export function selectHost(id) { state.activeHostId = id; menuHostId = null; menuRepoId = null; rerender(); }
 
 // col2: machine header (name + ＋register-repo + remote ⚙ menu) then collapsible
 // repo groups with nested tasks, the local quick-task group (local machine), and
@@ -69,7 +70,7 @@ function renderList() {
       <button onclick="connectHost(${h.id})">${t("host.shell")}</button>
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
-  const header = `<div class="mh"><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${newRepo}${menu}</div>`;
+  const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${newRepo}${menu}</div>`;
 
   const repos = state.repos.filter(r => Number(r.host_id) === h.id);
   const repoBlocks = repos.map(r => {
@@ -77,21 +78,22 @@ function renderList() {
     const mine = tasks.filter(tk => tk.repo_id === r.id && tk.status !== "cleaned");
     const body = collapsed ? ""
       : (mine.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("repo.noTasks")}</div>`);
-    return `<div class="grp">${repoGroupHead(r, online, collapsed)}${body}</div>`;
+    // `.open` (expanded) is what shows the state now — a left accent bar + faint
+    // wash on the whole group, in place of the old ▸/▾ caret glyph.
+    return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, online, collapsed, menuRepoId === r.id)}${body}</div>`;
   }).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`;
 
   let localBlock = "";
   if (isLocal) {
     const locals = tasks.filter(tk => tk.kind === "local" && tk.host_id === h.id && tk.status !== "cleaned");
     const add = `<button class="grp-act" title="${t("local.new")}" onclick="event.stopPropagation();addLocalTask()">＋</button>`;
-    localBlock = `<div class="grp"><div class="grp-head static">
-        <span class="grp-caret"></span><span class="grp-name">${t("list.localGroup")}</span>${add}</div>
+    localBlock = `<div class="grp open"><div class="grp-head static">
+        <span class="grp-name">${t("list.localGroup")}</span>${add}</div>
         ${locals.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
   }
 
   const archived = tasks.filter(tk => tk.status === "cleaned" && (tk.host_id ?? hostOf[tk.repo_id]) === h.id);
-  const archBlock = `<div class="grp"><div class="grp-head" onclick="toggleArchived()">
-      <span class="grp-caret">${archivedOpen ? "▾" : "▸"}</span>
+  const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
       <span class="grp-name">${t("list.archived")}</span>
       <span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
       ${archivedOpen ? (archived.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
@@ -100,15 +102,18 @@ function renderList() {
 }
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
 export function toggleArchived() { archivedOpen = !archivedOpen; renderList(); }
-export function toggleHostMenu(id) { menuHostId = (menuHostId === id) ? null : id; renderList(); }
+export function toggleHostMenu(id) { menuHostId = (menuHostId === id) ? null : id; menuRepoId = null; renderList(); }
+export function toggleRepoMenu(id) { menuRepoId = (menuRepoId === id) ? null : id; menuHostId = null; renderList(); }
 
-// Close the ⚙ menu on any outside click. The gear's own handler stops
-// propagation, so a click on it never reaches here (it toggles instead).
+// Close the ⚙ (machine) and ⋯ (repo) menus on any outside click. Each trigger's
+// own handler stops propagation, so a click on it never reaches here (it toggles
+// instead); a click anywhere else dismisses whichever menu is open.
 export function initHostMenuDismiss() {
   document.addEventListener("click", (e) => {
-    if (menuHostId == null) return;
-    if (e.target.closest(".mh-menu") || e.target.closest(".mh-gear")) return;
-    menuHostId = null; renderList();
+    let changed = false;
+    if (menuHostId != null && !e.target.closest(".mh-menu") && !e.target.closest(".mh-gear")) { menuHostId = null; changed = true; }
+    if (menuRepoId != null && !e.target.closest(".grp-menu") && !e.target.closest(".grp-menu-btn")) { menuRepoId = null; changed = true; }
+    if (changed) renderList();
   });
 }
 export function openHostModal() { $("host-modal").style.display = "flex"; setTimeout(() => $("h-name").focus(), 30); }

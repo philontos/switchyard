@@ -86,6 +86,7 @@
 
       // repo card / empty state
       "repo.delTitle": "删除仓库",
+      "repo.menu": "仓库操作",
       "repo.delConfirm": "删除该仓库镜像？",
       "repo.forceDelConfirm": "该仓库下还有 {count} 个进行中的任务。强制删除会杀掉它们的会话、删除 worktree 和任务记录。确定？",
       "repo.emptyTitle": "还没有仓库",
@@ -229,6 +230,7 @@
       "cs.loading": "Loading…",
 
       "repo.delTitle": "Delete repository",
+      "repo.menu": "Repo actions",
       "repo.delConfirm": "Delete this repository mirror?",
       "repo.forceDelConfirm": "This repository still has {count} task(s) in progress. Force delete will kill their sessions, remove their worktrees and delete the task records. Proceed?",
       "repo.emptyTitle": "No repositories yet",

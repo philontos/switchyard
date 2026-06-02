@@ -20,19 +20,29 @@ export async function loadRepos() {
 // renderList (hosts.js). `online` = is this repo's machine reachable — dispatch
 // runs ON the machine, so its ＋ is disabled when offline. Delete stays enabled
 // (the server refuses it when offline, so it never dead-ends a machine you must
-// bring online first to clean up). `collapsed` flips the caret; renderList omits
-// the task body when collapsed.
-export function repoGroupHead(r, online, collapsed) {
-  const caret = collapsed ? "▸" : "▾";
+// bring online first to clean up). `collapsed` selects the open/closed styling
+// (renderList toggles `.open` on the wrapping `.grp`); it omits the task body
+// when collapsed. `menuOpen` renders the ⋯ action popup (delete).
+//
+// Status read: `ready` shows NO dot — the nested task cards carry the live dots,
+// so a repo dot here would just duplicate them. `cloning` shows a breathing amber
+// dot; `error` washes the head faint red + shows a "!" with the message. Dispatch
+// (＋) only exists when ready, so a cloning/erroring repo offers just the ⋯ menu
+// — delete is its only available action there.
+export function repoGroupHead(r, online, collapsed, menuOpen) {
+  const dot = r.status === "cloning" ? `<span class="sdot cloning" title="${r.status}"></span>` : "";
   const disp = r.status === "ready"
     ? `<button class="grp-act" title="${t("task.dispatch")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskModal(${r.id})">＋</button>` : "";
-  return `<div class="grp-head" onclick="toggleRepo(${r.id})">
-    <span class="grp-caret">${caret}</span>
-    <span class="sdot ${r.status}" title="${r.status}"></span>
+  const menu = menuOpen ? `<div class="grp-menu">
+      <button class="danger" onclick="event.stopPropagation();delRepo(${r.id})">${t("repo.delTitle")}</button>
+    </div>` : "";
+  return `<div class="grp-head${r.status === "error" ? " err" : ""}" onclick="toggleRepo(${r.id})">
+    ${dot}
     <span class="grp-name">${r.name}</span>
     ${r.error ? `<span class="grp-err" title="${r.error}">!</span>` : ""}
     ${disp}
-    <button class="grp-del" title="${t("repo.delTitle")}" onclick="event.stopPropagation();delRepo(${r.id})">✕</button>
+    <button class="grp-menu-btn" title="${t("repo.menu")}" onclick="event.stopPropagation();toggleRepoMenu(${r.id})">⋯</button>
+    ${menu}
   </div>`;
 }
 // Plain delete refuses (409) if the repo still has running tasks — then we offer
