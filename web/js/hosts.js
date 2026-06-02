@@ -101,6 +101,16 @@ function renderList() {
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
 export function toggleArchived() { archivedOpen = !archivedOpen; renderList(); }
 export function toggleHostMenu(id) { menuHostId = (menuHostId === id) ? null : id; renderList(); }
+
+// Close the ⚙ menu on any outside click. The gear's own handler stops
+// propagation, so a click on it never reaches here (it toggles instead).
+export function initHostMenuDismiss() {
+  document.addEventListener("click", (e) => {
+    if (menuHostId == null) return;
+    if (e.target.closest(".mh-menu") || e.target.closest(".mh-gear")) return;
+    menuHostId = null; renderList();
+  });
+}
 export function openHostModal() { $("host-modal").style.display = "flex"; setTimeout(() => $("h-name").focus(), 30); }
 export function closeHostModal() { $("host-modal").style.display = "none"; }
 export async function addHost() {

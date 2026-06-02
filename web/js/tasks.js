@@ -7,7 +7,7 @@ import { toast, showLoading, hideLoading } from "./feedback.js";
 import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
-import { openPty } from "./terminal.js";
+import { openPty, showTermEmpty } from "./terminal.js";
 import { rerender } from "./hosts.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
@@ -170,7 +170,7 @@ export function allTasks() { return taskOrder.map(id => tasksById[id]).filter(Bo
 export async function archive(id){
   if(!await confirmDialog(t("task.killConfirm"),{title:t("task.killTitle"),okText:t("dialog.ok"),danger:true}))return;
   await api(`/api/tasks/${id}/archive`,{method:"POST"});
-  if (id === state.selectedTaskId) state.selectedTaskId = null;
+  if (id === state.selectedTaskId) { state.selectedTaskId = null; showTermEmpty(); }
   toast(t("toast.killed"),"success"); loadTasks();
 }
 export async function removeWt(id){
@@ -178,4 +178,4 @@ export async function removeWt(id){
   await api(`/api/tasks/${id}/cleanup`,{method:"POST"});
   toast(t("toast.worktreeRemoved"),"success"); loadTasks();
 }
-export function deleteTask(id){ if (id === state.selectedTaskId) state.selectedTaskId = null; api(`/api/tasks/${id}`,{method:"DELETE"}).then(loadTasks).catch(e=>toast(e.message,"error")); }
+export function deleteTask(id){ if (id === state.selectedTaskId) { state.selectedTaskId = null; showTermEmpty(); } api(`/api/tasks/${id}`,{method:"DELETE"}).then(loadTasks).catch(e=>toast(e.message,"error")); }

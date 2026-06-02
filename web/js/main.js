@@ -12,7 +12,7 @@ import { Selects, csMount } from "./select.js";
 import { initTerm, showTermEmpty } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
-import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost, toggleRepo, toggleArchived, toggleHostMenu } from "./hosts.js";
+import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss } from "./hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, connect, openTaskModal, closeTaskModal, addLocalTask } from "./tasks.js";
 import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
@@ -61,6 +61,7 @@ renderSwitcher();
 function dismissBoot() { const b = $("boot"); if (b) b.classList.add("done"); }
 try { initTerm(); } catch (e) { console.error("terminal init failed:", e); }
 showTermEmpty();
+initHostMenuDismiss();   // close the machine ⚙ menu on any outside click
 $("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
 csMount("t-preset").setOptions([{ value: "", label: t("task.presetNone") }], "");   // populated per open
