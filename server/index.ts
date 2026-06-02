@@ -382,10 +382,18 @@ app.get("/api/sessions", async (_req, res) => {
 });
 
 app.post("/api/sessions/:name/kill", async (req, res) => {
+  const lang = langFromReq(req);
   const name = req.params.name;
-  if (!SESSION_RE.test(name)) return res.status(400).json({ error: tr(langFromReq(req), "session.invalid") });
-  const removeWt = req.body?.removeWorktree !== false; // default: also delete worktree
+  if (!SESSION_RE.test(name)) return res.status(400).json({ error: tr(lang, "session.invalid") });
   const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(name) as Task | undefined;
+  // An orphan (no task row in THIS controller's db) may be a LIVE session owned
+  // by another controller that shares this machine's tmux server — killing it
+  // would tear down their work (exactly the cross-controller accident the
+  // single-controller rule warns about). Refuse unless explicitly forced.
+  if (!task && req.body?.force !== true) {
+    return res.status(409).json({ error: tr(lang, "session.orphanRefused", { name }) });
+  }
+  const removeWt = req.body?.removeWorktree !== false; // default: also delete worktree
   const runner = task ? taskRunner(task) : localRunner;
   await killSession(runner, name);
 
