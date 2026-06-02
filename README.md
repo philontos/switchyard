@@ -55,6 +55,19 @@ npm run dev      # http://localhost:4500  (PORT 可改)
 3. 右侧终端自动连上该会话，直接跟 claude 交互；任务卡片「进终端」可随时重连。
 4. 完成后「提 MR」（push 工作分支 + glab 开 MR），再「清理」杀会话删 worktree。
 
+## 终端手感：建议开全屏渲染
+任务终端跑的是 claude TUI。默认**行内渲染**时，滚轮滚的是终端 scrollback，会被 claude 的重绘反复拽动，割裂；输入框也会随滚动卷走。给 claude 开**全屏渲染**（alt-screen）后：底部输入框钉死不动、滚动顺滑、不再「横跳」；复制时按住 Option（或 Shift）拖拽走本地选区即可。
+
+开法任选其一（等价）：
+- 会话内输入 `/tui fullscreen`（持久，对该机后续会话生效）。
+- 用户级配置 `~/.claude/settings.json` 加一行 env，对该机**所有任务**生效：
+
+```json
+{ "env": { "CLAUDE_CODE_NO_FLICKER": "1" } }
+```
+
+> 这是 **per-machine 的用户级**设置（不跨机器）：本机和每台远程靶机的 `~/.claude/settings.json` **各配一份**，才能让所有任务都一致。tmux 全局保持 `mouse off` 即可 —— 全屏 claude 自己接管滚轮，不需要 tmux mouse；反而开了 `mouse on` 会让非全屏的 shell pane 误入 copy-mode，又开始横跳。已在跑的老会话不会自动变，需在其中手动敲一次 `/tui fullscreen`。
+
 ## 预设 / skill 注入（preset skills）
 派发任务时可让会话**自带一套实践**：把若干 Claude Code skill 注入到该任务的 worktree，并用一段开场模板驱动 claude。框架对 skill 内容零认知 —— 实践全在 skill 与模板里。
 
