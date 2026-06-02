@@ -70,6 +70,20 @@
   </div>
 </div>
 
+<div id="local-modal" class="modal-bg" style="display:none">
+  <div class="modal">
+    <h2 style="margin-bottom:12px" data-i18n="local.modalTitle"></h2>
+    <input id="l-title" data-i18n-ph="local.titlePh" />
+    <input id="l-cwd" data-i18n-ph="local.cwdPh" />
+    <textarea id="l-prompt" rows="3" data-i18n-ph="local.promptPh"></textarea>
+    <div class="dlg-actions">
+      <button class="sec" data-i18n="dialog.cancel" onclick="closeLocalModal()"></button>
+      <button class="primary" data-i18n="local.submit" onclick="addLocalTask()"></button>
+    </div>
+    <div class="hint" style="margin-top:10px" data-i18n="local.hint"></div>
+  </div>
+</div>
+
 <div id="repo-modal" class="modal-bg" style="display:none">
   <div class="modal">
     <h2 style="margin-bottom:10px"><span data-i18n="repo.modalTitle"></span> · <span data-i18n="host.onMachine"></span> <span id="rm-host" style="color:#e09a7d"></span></h2>

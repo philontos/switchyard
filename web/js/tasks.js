@@ -39,6 +39,32 @@ export function openTaskModal(repoId) {
 }
 export function closeTaskModal() { $("task-modal").style.display = "none"; }
 
+// Local quick task: no repo/branch/worktree — just a claude session in a dir
+// (default ~) on the local machine. Minimal form: optional title, cwd, prompt.
+export function openLocalModal() {
+  $("l-title").value = ""; $("l-cwd").value = ""; $("l-prompt").value = "";
+  $("local-modal").style.display = "flex";
+  setTimeout(() => $("l-title").focus(), 30);
+}
+export function closeLocalModal() { $("local-modal").style.display = "none"; }
+
+export async function addLocalTask() {
+  const body = { title: $("l-title").value.trim(), cwd: $("l-cwd").value.trim(), prompt: $("l-prompt").value };
+  showLoading(t("local.starting"));
+  try {
+    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    closeLocalModal();
+    showTab("live");
+    toast(t("toast.taskDispatched", { session: r.session }), "success");
+    await loadTasks();
+    connect(r.id);
+  } catch (e) {
+    toast(t("toast.dispatchFailed", { error: e.message }), "error", 6000);
+  } finally {
+    hideLoading();
+  }
+}
+
 // preset dropdown + extra-skill checkboxes for the dispatch modal. Both reset
 // each open; dispatch works fine even if these fail to load (no preset).
 async function loadDispatchOptions() {
@@ -113,9 +139,13 @@ function taskCard(t, online) {
     icon = { glyph: "🗑", title: I18N.t("task.deleteRecord"), fn: `deleteTask(${t.id})`, needsHost: false };
   }
   const disabled = icon.needsHost && !online;
+  // local quick tasks have no branch/MR — show their working dir + a "local" tag
+  const meta = t.kind === "local"
+    ? `<div class="muted">📂 <code>${t.cwd || "~"}</code> <span class="tag-local">${I18N.t("local.tag")}</span></div>`
+    : `<div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>
+       ${t.mr_url ? `<div><a href="${t.mr_url}" target="_blank" onclick="event.stopPropagation()">MR ↗</a></div>` : ""}`;
   const head = `<div class="t">${t.alive ? `<span class="sdot live" title="live"></span>` : `<span class="sdot ${t.status}" title="${t.status}"></span>`}#${t.id} ${t.title}</div>
-    <div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>
-    ${t.mr_url ? `<div><a href="${t.mr_url}" target="_blank" onclick="event.stopPropagation()">MR ↗</a></div>` : ""}`;
+    ${meta}`;
   const open = active ? ` clickable" onclick="connect(${t.id})` : "";
   const sel = t.id === state.selectedTaskId ? " selected" : "";
   return `<div class="card task${sel}${open}" data-id="${t.id}">
@@ -142,7 +172,8 @@ export function renderTasks() {
   const hostOf = Object.fromEntries(state.repos.map(r => [r.id, Number(r.host_id)]));
   const host = state.hostsById[state.activeHostId];
   const online = !host || host.kind === "local" || host.status === "online";
-  const mine = taskOrder.map(id => tasksById[id]).filter(t => t && hostOf[t.repo_id] === state.activeHostId);
+  // local tasks carry their own host_id; repo tasks derive it from their repo
+  const mine = taskOrder.map(id => tasksById[id]).filter(t => t && (t.host_id ?? hostOf[t.repo_id]) === state.activeHostId);
   const live = mine.filter(t => t.status !== "cleaned");
   const archived = mine.filter(t => t.status === "cleaned");
   $("tasks").innerHTML = live.map(t => taskCard(t, online)).join("") ||

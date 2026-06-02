@@ -49,9 +49,12 @@ function activeMachine() {
       <button class="micon" title="${t("host.terminal")}" onclick="connectHost(${h.id})">❯_</button>
       <button class="micon" title="${t("host.del")}" onclick="delHost(${h.id})">✕</button>
     </div>`;
+  // the local machine can also dispatch a repo-less quick task (claude in a dir)
+  const localBtn = isLocal ? `<button class="mreg mlocal" onclick="openLocalModal()">${t("local.new")}</button>` : "";
   return bar
     + (mine.map(r => repoCard(r, online)).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`)
-    + `<button class="mreg" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">${t("repo.new")}</button>`;
+    + `<button class="mreg" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">${t("repo.new")}</button>`
+    + localBtn;
 }
 export function selectHost(id) { state.activeHostId = id; renderMachines(); }   // renderMachines re-renders tasks too
 export function openHostModal() { $("host-modal").style.display = "flex"; setTimeout(() => $("h-name").focus(), 30); }
