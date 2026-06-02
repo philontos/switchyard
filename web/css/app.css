@@ -127,6 +127,8 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .sdot.ready { background: #8aaa66; box-shadow: 0 0 5px #8aaa6699; }
 .sdot.live { background: #8aaa66; box-shadow: 0 0 6px #8aaa66; animation: pulse 1.6s ease-in-out infinite; }
 .sdot.cloning { background: #d8a13f; box-shadow: 0 0 6px #d8a13f; animation: pulse 1.3s ease-in-out infinite; }
+/* blocked on a permission prompt — steady amber so it reads as "needs you" */
+.sdot.waiting { background: #e0b341; box-shadow: 0 0 7px #e0b341; }
 .sdot.error { background: #f85149; box-shadow: 0 0 5px #f8514999; }
 .sdot.cleaned { background: #6b6356; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }

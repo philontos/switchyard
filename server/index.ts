@@ -18,6 +18,7 @@ import { syncReposManifest } from "./manifest.js";
 import { repairWorktrees } from "./migrate.js";
 import { localRunner, runnerFor } from "./runner.js";
 import { resolveCwd } from "./local.js";
+import { hookSettingsJson } from "./hooks.js";
 import { startLivenessLoop, probeHost } from "./liveness.js";
 import { WEB_DIR, DID_MIGRATE } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
@@ -81,6 +82,11 @@ function slug(s: string) {
 
 // matches dispatcher-owned sessions (new tdsp-* scheme + legacy task-N)
 const SESSION_RE = /^(tdsp|task)-\d+(-[a-z0-9-]+)?$/;
+
+// Per-task "blocked on the user" flag, set/cleared by the session's own Claude
+// Code hooks (see hooks.ts). In-memory and fire-and-forget: a dispatcher restart
+// resets it, and the next permission prompt re-arms it. Drives the yellow light.
+const taskWaiting = new Map<number, boolean>();
 
 // ---------- repos ----------
 app.get("/api/repos", (_req, res) => {
@@ -195,6 +201,7 @@ app.get("/api/tasks", async (_req, res) => {
         ...t,
         alive: t.status === "cleaned" ? false : await hasSession(runner, t.session).catch(() => false),
         hasWorktree: !!t.worktree_path && (await runner.exists(t.worktree_path).catch(() => false)),
+        waiting: taskWaiting.get(t.id) ?? false,
       };
     })
   );
@@ -247,6 +254,16 @@ app.post("/api/tasks", async (req, res) => {
         `cd ${JSON.stringify(wtAbs)} && p=$(git rev-parse --git-path info/exclude) && grep -qxF '.claude/skills/' "$p" || printf '.claude/skills/\\n' >> "$p"`,
       ]).catch(() => {});
     }
+    // inject per-task hooks so the session reports when it's blocked on a
+    // permission prompt (yellow light). Local machine only — the hook curls
+    // localhost:PORT, which only reaches us when the session runs on this box.
+    if (host?.kind === "local") {
+      fs.mkdirSync(path.join(wtAbs, ".claude"), { recursive: true });
+      fs.writeFileSync(path.join(wtAbs, ".claude", "settings.local.json"), hookSettingsJson(id, PORT));
+      await runner.exec("sh", ["-c",
+        `cd ${JSON.stringify(wtAbs)} && p=$(git rev-parse --git-path info/exclude) && grep -qxF '.claude/settings.local.json' "$p" || printf '.claude/settings.local.json\\n' >> "$p"`,
+      ]).catch(() => {});
+    }
     // opening message: preset template (if any) else the freeform prompt, + skills line
     const vars = { title, slug: s, branch: workBranch, prompt: prompt || "" };
     const opening = (preset ? renderDispatchPrompt(preset.dispatch_prompt || "", vars) : (prompt || ""))
@@ -297,6 +314,17 @@ app.post("/api/tasks/local", async (req, res) => {
   }
 });
 
+// Called BY a task's own Claude Code session (see hooks.ts): /wait when it
+// blocks on a permission prompt, /clear when it resumes. Localhost only — the
+// session curls this on the machine it runs on, so it only reaches us for tasks
+// on the local box (remote tasks just never light up; that's the v1 scope).
+app.post("/api/tasks/:id/hook/:state", (req, res) => {
+  const id = Number(req.params.id);
+  if (req.params.state === "wait") taskWaiting.set(id, true);
+  else taskWaiting.delete(id);
+  res.json({ ok: true });
+});
+
 // archive: end the tmux session but KEEP the worktree (moves task to archived tab)
 app.post("/api/tasks/:id/archive", async (req, res) => {
   const lang = langFromReq(req);
@@ -306,6 +334,7 @@ app.post("/api/tasks/:id/archive", async (req, res) => {
   try {
     await killSession(taskRunner(task), task.session);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+    taskWaiting.delete(task.id);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -324,6 +353,7 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
     await killSession(runner, task.session);
     if (repo?.mirror_path) await removeWorktree(runner, repo.mirror_path, task.worktree_path, task.work_branch);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+    taskWaiting.delete(task.id);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -337,6 +367,7 @@ app.delete("/api/tasks/:id", async (req, res) => {
     return res.status(409).json({ error: tr(langFromReq(req), "task.worktreeExists") });
   }
   db.prepare("DELETE FROM tasks WHERE id=?").run(req.params.id);
+  taskWaiting.delete(Number(req.params.id));
   res.json({ ok: true });
 });
 
