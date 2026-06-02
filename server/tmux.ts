@@ -17,6 +17,18 @@ export async function startSession(runner: Runner, session: string, cwd: string,
   await tmux(runner, ["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});
 }
 
+/**
+ * Start a detached bare-shell tmux session (the login shell, no command) in cwd.
+ * Used by the local quick task: a throwaway terminal where the user cd's and
+ * runs claude (or anything) themselves — deliberately more general than
+ * auto-launching claude.
+ */
+export async function startShellSession(runner: Runner, session: string, cwd: string) {
+  await tmux(runner, ["new-session", "-d", "-s", session, "-c", cwd]);
+  // keep the pane around if the shell exits so the user can read the result
+  await tmux(runner, ["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});
+}
+
 export async function hasSession(runner: Runner, session: string): Promise<boolean> {
   try {
     await tmux(runner, ["has-session", "-t", session]);

@@ -39,21 +39,15 @@ export function openTaskModal(repoId) {
 }
 export function closeTaskModal() { $("task-modal").style.display = "none"; }
 
-// Local quick task: no repo/branch/worktree — just a claude session in a dir
-// (default ~) on the local machine. Minimal form: optional title, cwd, prompt.
-export function openLocalModal() {
-  $("l-title").value = ""; $("l-cwd").value = ""; $("l-prompt").value = "";
-  $("local-modal").style.display = "flex";
-  setTimeout(() => $("l-title").focus(), 30);
-}
-export function closeLocalModal() { $("local-modal").style.display = "none"; }
-
+// Local quick task: one click, zero form. Opens a bare tmux shell in ~ on the
+// local machine — the server auto-names it ("Local task #N") and defaults the
+// cwd to home; the user then cd's and runs claude (or anything) themselves.
+// Deliberately bare-bones for a fast start; repo/branch/worktree/preset/prompt
+// all live in the richer repo dispatch flow instead.
 export async function addLocalTask() {
-  const body = { title: $("l-title").value.trim(), cwd: $("l-cwd").value.trim(), prompt: $("l-prompt").value };
   showLoading(t("local.starting"));
   try {
-    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    closeLocalModal();
+    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     showTab("live");
     toast(t("toast.taskDispatched", { session: r.session }), "success");
     await loadTasks();
