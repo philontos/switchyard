@@ -78,8 +78,12 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   background: #221d18; border-bottom: 1px solid #352e27; }
 .mh-ic { flex: none; font-size: 14px; opacity: .85; }
 .mh-name { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mh-gear { width: auto; margin: 0; padding: 2px 8px; font-size: 13px; line-height: 1.4; background: none; border: none; color: #7d7367; }
-.mh-gear:hover { background: #2a241e; color: #ece6dd; }
+/* machine-settings ⚙ — sized to sit level with the ＋repo pill beside it (4):
+   same vertical padding + a 1px (transparent) border box, just a ghost fill
+   instead of the accent, and a larger glyph so it no longer reads as tiny. */
+.mh-gear { flex: none; width: auto; margin: 0; padding: 4px 9px; font-size: 15px; line-height: 1.12;
+  background: none; border: 1px solid transparent; border-radius: 6px; color: #7d7367; }
+.mh-gear:hover { background: #2a241e; border-color: #352e27; color: #ece6dd; }
 /* register-repo: a low-saturation accent pill — labeled, vs the icon-only square
    ＋ on each repo row, so the two action levels look deliberately different. */
 .mh-act { flex: none; width: auto; margin: 0; padding: 4px 12px; font-size: 12px; line-height: 1.4;
@@ -92,11 +96,14 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .mh-menu .mh-target { font-size: 11px; color: #7d7367; padding: 2px 4px; word-break: break-all; }
 .mh-menu button { width: 100%; margin: 0; text-align: left; }
 /* col2: collapsible repo / local / archived groups + nested task cards.
-   A hairline divides consecutive groups (2.2); the expanded group is marked by a
-   faint wash + a left accent bar (.open) instead of a caret glyph (2.5). */
-.grp { padding: 4px 4px 5px; }
-.grp + .grp { border-top: 1px solid #2a241e; }
-.grp.open { background: #ffffff06; box-shadow: inset 2px 0 0 #e0906f99; }
+   Each group is its own rounded block with a gap below it (1) — replaces the old
+   hairline divider that made consecutive groups read as one continuous slab. The
+   expanded group is marked by a faint wash + a left accent bar (.open) instead of
+   a caret glyph; both are clipped to the rounded corners, so the gap between
+   groups breaks the accent bars apart instead of fusing them into one rail (2). */
+.grp { padding: 2px 2px 3px; border-radius: 8px; margin-bottom: 7px; }
+.grp:last-child { margin-bottom: 0; }
+.grp.open { background: #ffffff06; box-shadow: inset 2px 0 0 #e0906f99; padding-bottom: 6px; }
 .grp-head { display: flex; align-items: center; gap: 6px; padding: 4px 4px; border-radius: 6px; cursor: pointer; position: relative; }
 .grp-head.static { cursor: default; }
 .grp-head:not(.static):hover { background: #2a241e; }
@@ -110,16 +117,14 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   background: #d977571f; border: 1px solid #d9775744; color: #e09a7d; }
 .grp-act:hover { background: #d9775730; border-color: #d9775799; color: #ecae93; }
 .grp-act:disabled { opacity: .4; cursor: not-allowed; }
-/* ⋯ menu trigger + its popup — delete lives here now, replacing the hover-✕ that
-   made the ＋ position jump (2.6). Mirrors the machine ⚙ menu. */
-.grp-menu-btn { flex: none; width: 24px; height: 24px; margin: 0; padding: 0; font-size: 16px; line-height: 1;
+/* delete 🗑 — reveals on row hover, in a slot pinned just left of ＋. The slot is
+   always reserved (opacity, not display), so ＋ never shifts and the repo ＋ stays
+   on the same right edge as the local-task ＋ (3). Replaces the old ⋯ menu. */
+.grp-del { flex: none; width: 24px; height: 24px; margin: 0; padding: 0; font-size: 13px; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;
-  background: none; border: 1px solid transparent; color: #7d7367; }
-.grp-menu-btn:hover { background: #2a241e; border-color: #352e27; color: #ece6dd; }
-.grp-menu { position: absolute; top: 100%; right: 0; z-index: 40; margin-top: 4px; padding: 6px;
-  background: #221d18; border: 1px solid #352e27; border-radius: 8px; box-shadow: 0 10px 30px #000b;
-  display: flex; flex-direction: column; gap: 4px; min-width: 132px; }
-.grp-menu button { width: 100%; margin: 0; text-align: left; }
+  background: none; border: 1px solid transparent; color: #7d7367; opacity: 0; transition: opacity .12s; }
+.grp-head:hover .grp-del, .grp-del:focus-visible { opacity: 1; }
+.grp-del:hover { background: #f8514914; border-color: #f8514955; color: #f85149; }
 .grp-empty { font-size: 11.5px; color: #6b6356; padding: 2px 0 6px 16px; }
 .grp .card.task { margin: 0 0 6px 14px; }
 /* "local" tag on a repo-less task card */
