@@ -53,7 +53,7 @@ function activeMachine() {
   const repoBtn = `<button class="mreg" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">${t("repo.new")}</button>`;
   // on the local machine, sit "new repo" and "local task" side by side in one row
   const actions = isLocal
-    ? `<div class="mreg-row">${repoBtn}<button class="mreg mlocal" onclick="openLocalModal()">${t("local.new")}</button></div>`
+    ? `<div class="mreg-row">${repoBtn}<button class="mreg mlocal" onclick="addLocalTask()">${t("local.new")}</button></div>`
     : repoBtn;
   return bar
     + (mine.map(r => repoCard(r, online)).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`)
