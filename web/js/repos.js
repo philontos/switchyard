@@ -7,7 +7,7 @@ import { $, api } from "./dom.js";
 import { toast } from "./feedback.js";
 import { confirmDialog } from "./dialog.js";
 import { state } from "./state.js";
-import { renderMachines } from "./hosts.js";
+import { rerender } from "./hosts.js";
 
 let repoHostId = null;   // which machine the register-repo modal targets
 
@@ -15,7 +15,7 @@ export async function loadRepos() {
   const r = await api("/api/repos").catch(() => null);
   if (!r) return; // server transiently down — stay quiet, poller will retry
   state.repos = r;
-  renderMachines();
+  rerender();
 }
 // `online` = is this repo's machine reachable. Dispatch runs ON the machine, so
 // it's disabled when offline (mirrors the "new repo" button). Delete stays

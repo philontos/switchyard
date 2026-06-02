@@ -8,6 +8,7 @@ import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { openPty } from "./terminal.js";
+import { rerender } from "./hosts.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 
@@ -48,7 +49,6 @@ export async function addLocalTask() {
   showLoading(t("local.starting"));
   try {
     const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-    showTab("live");
     toast(t("toast.taskDispatched", { session: r.session }), "success");
     await loadTasks();
     connect(r.id);
@@ -106,7 +106,6 @@ export async function addTask() {
     const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
     $("t-title").value = ""; $("t-prompt").value = "";
     closeTaskModal();
-    showTab("live");
     toast(t("toast.taskDispatched", { session: r.session }), "success");
     await loadTasks();
     connect(r.id);
@@ -156,35 +155,18 @@ function taskCard(t, online) {
 
 // Fetch ALL tasks into the cache (tasksById keeps every task so connect() works
 // for any session, even one whose card is filtered out of the current machine),
-// then render. The 4s poller calls this; renderTasks() handles the display.
+// then re-render. The 4s poller calls this; rerender() (hosts.js) builds col2.
 export async function loadTasks() {
   const tasks = await api("/api/tasks").catch(() => null);
   if (!tasks) return;
   tasksById = Object.fromEntries(tasks.map(t => [t.id, t]));
   taskOrder = tasks.map(t => t.id);          // preserve the API's id-DESC order
-  renderTasks();
+  rerender();
 }
 
-// Render the cached tasks filtered to the active machine. Pure (no fetch), so
-// switching machines is instant — called on fetch, and via renderMachines() on
-// boot / machine switch / repo change / host poll.
-export function renderTasks() {
-  const hostOf = Object.fromEntries(state.repos.map(r => [r.id, Number(r.host_id)]));
-  const host = state.hostsById[state.activeHostId];
-  const online = !host || host.kind === "local" || host.status === "online";
-  // local tasks carry their own host_id; repo tasks derive it from their repo
-  const mine = taskOrder.map(id => tasksById[id]).filter(t => t && (t.host_id ?? hostOf[t.repo_id]) === state.activeHostId);
-  const live = mine.filter(t => t.status !== "cleaned");
-  const archived = mine.filter(t => t.status === "cleaned");
-  $("tasks").innerHTML = live.map(t => taskCard(t, online)).join("") ||
-    emptyState("🗂️", t("empty.liveTitle"), t("empty.liveHint"));
-  $("archived").innerHTML = archived.map(t => taskCard(t, online)).join("") ||
-    emptyState("📦", t("empty.archTitle"), t("empty.archHint"));
-  $("arch-count").textContent = archived.length ? `(${archived.length})` : "";
-}
-function emptyState(icon, title, hint) {
-  return `<div class="empty"><div class="empty-ic">${icon}</div><div>${title}</div>${hint ? `<div class="empty-hint">${hint}</div>` : ""}</div>`;
-}
+// All cached tasks in API order (id-DESC). renderList (hosts.js) reads this to
+// group tasks under their repo / machine.
+export function allTasks() { return taskOrder.map(id => tasksById[id]).filter(Boolean); }
 export async function archive(id){
   if(!await confirmDialog(t("task.killConfirm"),{title:t("task.killTitle"),okText:t("dialog.ok"),danger:true}))return;
   await api(`/api/tasks/${id}/archive`,{method:"POST"});
@@ -197,8 +179,3 @@ export async function removeWt(id){
   toast(t("toast.worktreeRemoved"),"success"); loadTasks();
 }
 export function deleteTask(id){ if (id === state.selectedTaskId) state.selectedTaskId = null; api(`/api/tasks/${id}`,{method:"DELETE"}).then(loadTasks).catch(e=>toast(e.message,"error")); }
-export function showTab(tab){
-  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-  $("tasks").hidden = tab !== "live";
-  $("archived").hidden = tab !== "arch";
-}

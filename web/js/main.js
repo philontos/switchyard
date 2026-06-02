@@ -13,7 +13,7 @@ import { initTerm, showTermEmpty } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost } from "./hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, showTab, connect, openTaskModal, closeTaskModal, addLocalTask } from "./tasks.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, connect, openTaskModal, closeTaskModal, addLocalTask } from "./tasks.js";
 import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 
@@ -24,7 +24,7 @@ import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } f
 // that exposes them. (I18N is already global, set by i18n.js.)
 Object.assign(window, {
   // tasks
-  showTab, addTask, openTaskModal, closeTaskModal, connect, archive, removeWt, deleteTask,
+  addTask, openTaskModal, closeTaskModal, connect, archive, removeWt, deleteTask,
   addLocalTask,
   // repos
   delRepo, openRepoModal, closeRepoModal, addRepo,
@@ -66,11 +66,10 @@ csMount("t-preset").setOptions([{ value: "", label: t("task.presetNone") }], "")
 csMount("sk-target").setOptions([{ value: "global", label: t("skill.targetGlobal") }, { value: "dispatcher", label: t("skill.targetDispatcher") }], "global");
 csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", label: "mosh" }]);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
-// TASK1-TEMP: left-column renders not yet rewired for the new layout — re-enabled in Task 2.
-// Promise.allSettled([loadRepos(), loadHosts(), loadTasks()]).then(dismissBoot);
+Promise.allSettled([loadRepos(), loadHosts(), loadTasks()]).then(dismissBoot);
 setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
-// setInterval(loadTasks, 4000);
-// setInterval(loadHosts, 5000);   // refresh machine liveness dots
+setInterval(loadTasks, 4000);
+setInterval(loadHosts, 5000);   // refresh machine liveness dots
 // close modals on backdrop click / Esc
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
 $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });

@@ -7,59 +7,45 @@ import { toast } from "./feedback.js";
 import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
-import { repoCard } from "./repos.js";
-import { paintSelection, renderTasks } from "./tasks.js";
+import { paintSelection } from "./tasks.js";
 import { openPty } from "./terminal.js";
 
-let hostsOrder = [];   // API order: local machine first. Active machine is state.activeHostId.
+let hostsOrder = [];               // API order: local machine first. Active machine is state.activeHostId.
+const collapsedRepos = new Set();  // collapsed repo groups (repo id) — read by renderList
+let archivedOpen = false;          // is the archived section expanded
+let menuHostId = null;             // remote machine whose ⚙ menu is open (null = none)
 
-// ---- machines: each machine is a sidebar group holding its repos ----
+// ---- machines: col1 is a vertical icon rail; col2 (renderList, added next)
+// lists the active machine's repos + tasks. loadHosts/loadRepos/loadTasks all
+// funnel through rerender() — the single re-render hub. ----
 export async function loadHosts() {
   const hs = await api("/api/hosts").catch(() => null);
   if (!hs) return;
   state.hostsById = Object.fromEntries(hs.map(h => [h.id, h]));
   hostsOrder = hs.map(h => h.id);   // API order: local machine first
-  renderMachines();
+  rerender();
 }
-export function renderMachines() {
+export function rerender() {
   if (!hostsOrder.length) return;   // hosts not loaded yet
   const hosts = hostsOrder.map(id => state.hostsById[id]).filter(Boolean);
   if (state.activeHostId == null || !state.hostsById[state.activeHostId]) {   // default to the local machine
     const first = hosts.find(h => h.kind === "local") || hosts[0];
     state.activeHostId = first ? first.id : null;
   }
-  const tabs = hosts.map(h => {
-    const online = h.kind === "local" || h.status === "online";
-    const name = h.kind === "local" ? t("host.local") : h.name;
-    return `<button class="mtab${h.id === state.activeHostId ? " active" : ""}" onclick="selectHost(${h.id})"><span class="mdot ${online ? "on" : "off"}"></span>${name}</button>`;
-  }).join("");
-  const add = `<button class="mtab-add" title="${t("host.new")}" onclick="openHostModal()">＋</button>`;
-  $("machines").innerHTML = `<div class="mtabs">${tabs}${add}</div>${activeMachine()}`;
+  renderRail(hosts);
   paintSelection();
-  renderTasks();   // task/archive lists follow the active machine — single re-render hub
 }
-function activeMachine() {
-  const h = state.hostsById[state.activeHostId];
-  if (!h) return "";
-  const isLocal = h.kind === "local";
-  const online = isLocal || h.status === "online";
-  const mine = state.repos.filter(r => Number(r.host_id) === h.id);
-  const bar = isLocal ? "" : `<div class="msub">
-      <span class="mtarget">${h.target}</span>
-      <button class="micon" title="${t("host.terminal")}" onclick="connectHost(${h.id})">❯_</button>
-      <button class="micon" title="${t("host.del")}" onclick="delHost(${h.id})">✕</button>
-    </div>`;
-  // the local machine can also dispatch a repo-less quick task (claude in a dir)
-  const repoBtn = `<button class="mreg" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">${t("repo.new")}</button>`;
-  // on the local machine, sit "new repo" and "local task" side by side in one row
-  const actions = isLocal
-    ? `<div class="mreg-row">${repoBtn}<button class="mreg mlocal" onclick="addLocalTask()">${t("local.new")}</button></div>`
-    : repoBtn;
-  return bar
-    + (mine.map(r => repoCard(r, online)).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`)
-    + actions;
+function renderRail(hosts) {
+  const icon = h => {
+    const online = h.kind === "local" || h.status === "online";
+    const glyph = h.kind === "local" ? "🖥" : "▦";
+    const title = h.kind === "local" ? t("host.local") : `${h.name} · ${h.target}`;
+    return `<button class="rchip${h.id === state.activeHostId ? " active" : ""}" title="${title}" onclick="selectHost(${h.id})"><span class="rdot ${online ? "on" : "off"}"></span>${glyph}</button>`;
+  };
+  $("m-rail").innerHTML = hosts.map(icon).join("")
+    + `<button class="rchip add" title="${t("host.new")}" onclick="openHostModal()">＋</button>`;
 }
-export function selectHost(id) { state.activeHostId = id; renderMachines(); }   // renderMachines re-renders tasks too
+export function selectHost(id) { state.activeHostId = id; menuHostId = null; rerender(); }
 export function openHostModal() { $("host-modal").style.display = "flex"; setTimeout(() => $("h-name").focus(), 30); }
 export function closeHostModal() { $("host-modal").style.display = "none"; }
 export async function addHost() {
