@@ -78,10 +78,11 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   background: #221d18; border-bottom: 1px solid #352e27; }
 .mh-ic { flex: none; font-size: 14px; opacity: .85; }
 .mh-name { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* machine-settings ⚙ — sized to sit level with the ＋repo pill beside it (4):
-   same vertical padding + a 1px (transparent) border box, just a ghost fill
-   instead of the accent, and a larger glyph so it no longer reads as tiny. */
-.mh-gear { flex: none; width: auto; margin: 0; padding: 4px 9px; font-size: 15px; line-height: 1.12;
+/* machine-settings ⚙ — a ghost icon button beside the ＋repo pill. Tight padding
+   + a 17px glyph so the gear itself reads at a proper size (a roomier box just
+   made the icon look tiny); the 1px transparent border keeps it from jumping on
+   hover. */
+.mh-gear { flex: none; width: auto; margin: 0; padding: 2px 7px; font-size: 17px; line-height: 1.1;
   background: none; border: 1px solid transparent; border-radius: 6px; color: #7d7367; }
 .mh-gear:hover { background: #2a241e; border-color: #352e27; color: #ece6dd; }
 /* register-repo: a low-saturation accent pill — labeled, vs the icon-only square
@@ -119,10 +120,13 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .grp-act:disabled { opacity: .4; cursor: not-allowed; }
 /* delete 🗑 — reveals on row hover, in a slot pinned just left of ＋. The slot is
    always reserved (opacity, not display), so ＋ never shifts and the repo ＋ stays
-   on the same right edge as the local-task ＋ (3). Replaces the old ⋯ menu. */
+   on the same right edge as the local-task ＋ (3). Replaces the old ⋯ menu.
+   NO opacity transition on purpose: toggleRepo / the 4s poller rebuild the whole
+   #m-list, recreating this node — a fade would replay each time and read as a
+   flicker while you hover. Instant reveal keeps it steady across re-renders. */
 .grp-del { flex: none; width: 24px; height: 24px; margin: 0; padding: 0; font-size: 13px; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;
-  background: none; border: 1px solid transparent; color: #7d7367; opacity: 0; transition: opacity .12s; }
+  background: none; border: 1px solid transparent; color: #7d7367; opacity: 0; }
 .grp-head:hover .grp-del, .grp-del:focus-visible { opacity: 1; }
 .grp-del:hover { background: #f8514914; border-color: #f8514955; color: #f85149; }
 .grp-empty { font-size: 11.5px; color: #6b6356; padding: 2px 0 6px 16px; }
