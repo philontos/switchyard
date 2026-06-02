@@ -144,7 +144,13 @@ function taskCard(t, online) {
     ? `<div class="muted">📂 <code>${t.cwd || "~"}</code> <span class="tag-local">${I18N.t("local.tag")}</span></div>`
     : `<div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>
        ${t.mr_url ? `<div><a href="${t.mr_url}" target="_blank" onclick="event.stopPropagation()">MR ↗</a></div>` : ""}`;
-  const head = `<div class="t">${t.alive ? `<span class="sdot live" title="live"></span>` : `<span class="sdot ${t.status}" title="${t.status}"></span>`}#${t.id} ${t.title}</div>
+  // dot: alive+waiting (blocked on a permission prompt) → yellow; alive → green; else status
+  const dot = t.alive
+    ? (t.waiting
+        ? `<span class="sdot waiting" title="${I18N.t("task.waiting")}"></span>`
+        : `<span class="sdot live" title="live"></span>`)
+    : `<span class="sdot ${t.status}" title="${t.status}"></span>`;
+  const head = `<div class="t">${dot}#${t.id} ${t.title}</div>
     ${meta}`;
   const open = active ? ` clickable" onclick="connect(${t.id})` : "";
   const sel = t.id === state.selectedTaskId ? " selected" : "";

@@ -89,6 +89,7 @@
       "repo.emptyHintPost": "开始派发任务",
 
       // task card
+      "task.waiting": "等待你授权",
       "task.stopTitle": "停止会话并归档",
       "task.kill": "kill",
       "task.worktreeKept": "worktree 未删",
@@ -227,6 +228,7 @@
       "repo.emptyHintPre": "Register a Git repository",
       "repo.emptyHintPost": "to start dispatching tasks",
 
+      "task.waiting": "Waiting for your approval",
       "task.stopTitle": "Stop session & archive",
       "task.kill": "kill",
       "task.worktreeKept": "worktree kept",
