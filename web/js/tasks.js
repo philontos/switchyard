@@ -14,7 +14,7 @@ let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 
 // reflect the current selection onto the cards already in the DOM (no refetch)
 export function paintSelection() {
-  document.querySelectorAll("#tasks .task, #archived .task").forEach(el => {
+  document.querySelectorAll("#m-list .task").forEach(el => {
     el.classList.toggle("selected", Number(el.dataset.id) === state.selectedTaskId);
   });
 }
@@ -116,7 +116,7 @@ export async function addTask() {
   }
 }
 
-function taskCard(t, online) {
+export function taskCard(t, online) {
   const active = t.status !== "cleaned";
   // one corner action per state — stop (active) / cleanup (cleaned)
   // NOTE: the param is `t` (the task), so it shadows the global t() — use I18N.t here.

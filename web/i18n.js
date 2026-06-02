@@ -40,6 +40,16 @@
       "term.disconnected": "[已断开]",
       "term.selectHint": "⇧ 拖拽选中",
       "term.selectHintTitle": "终端开了鼠标模式,普通拖拽会发给会话;按住 Shift(或 mac 的 Option)拖拽即可选中,松手自动复制",
+      "term.empty": "点左侧任务进入终端",
+
+      // terminal-centric layout: col2 list (groups + machine header)
+      "repo.repoWord": "仓库",
+      "repo.noTasks": "暂无任务",
+      "host.manage": "机器管理",
+      "host.shell": "开机器 shell",
+      "list.localGroup": "本机快捷任务",
+      "list.archived": "已归档",
+      "local.none": "暂无快捷任务",
 
       // shared dialog buttons
       "dialog.cancel": "取消",
@@ -178,6 +188,16 @@
       "term.disconnected": "[disconnected]",
       "term.selectHint": "⇧ Drag-select",
       "term.selectHintTitle": "The terminal runs in mouse mode, so a plain drag is sent to the session; hold Shift (or Option on mac) and drag to select, release to copy automatically.",
+      "term.empty": "Pick a task on the left to open its terminal",
+
+      // terminal-centric layout: col2 list (groups + machine header)
+      "repo.repoWord": "repo",
+      "repo.noTasks": "No tasks yet",
+      "host.manage": "Machine settings",
+      "host.shell": "Open machine shell",
+      "list.localGroup": "Local quick tasks",
+      "list.archived": "Archived",
+      "local.none": "No quick tasks yet",
 
       "dialog.cancel": "Cancel",
       "dialog.ok": "OK",

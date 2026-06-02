@@ -12,14 +12,14 @@ import { Selects, csMount } from "./select.js";
 import { initTerm, showTermEmpty } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
-import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost } from "./hosts.js";
+import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost, toggleRepo, toggleArchived, toggleHostMenu } from "./hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, connect, openTaskModal, closeTaskModal, addLocalTask } from "./tasks.js";
 import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 
 // ---- inline-onclick bridge ----
 // Every function referenced by an onclick="…" attribute (static markup in
-// index.html + the strings built in repoCard/taskCard/renderMachines) must be
+// index.html + the strings built in repoGroupHead/taskCard/renderList) must be
 // global, since ES module scope is not. This is the single, auditable place
 // that exposes them. (I18N is already global, set by i18n.js.)
 Object.assign(window, {
@@ -30,6 +30,7 @@ Object.assign(window, {
   delRepo, openRepoModal, closeRepoModal, addRepo,
   // hosts
   selectHost, openHostModal, closeHostModal, addHost, delHost, connectHost,
+  toggleRepo, toggleArchived, toggleHostMenu,
   // presets
   openPresetModal, closePresetModal, addPreset, delPreset,
   // skills (official-plugin install)

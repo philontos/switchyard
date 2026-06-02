@@ -1,7 +1,6 @@
-// Repos: loading the list, rendering a repo card, the register-repo modal, and
-// delete. loadRepos() re-renders the machine sidebar (repos live grouped under
-// their host), so this module imports renderMachines from hosts.js — and
-// hosts.js imports repoCard from here. That import cycle is fine: both are
+// Repos: loading the list, rendering a repo group header, the register-repo
+// modal, and delete. loadRepos() re-renders via rerender() in hosts.js — and
+// hosts.js imports repoGroupHead from here. That import cycle is fine: both are
 // hoisted functions only called at runtime, never during module evaluation.
 import { $, api } from "./dom.js";
 import { toast } from "./feedback.js";
@@ -17,19 +16,24 @@ export async function loadRepos() {
   state.repos = r;
   rerender();
 }
-// `online` = is this repo's machine reachable. Dispatch runs ON the machine, so
-// it's disabled when offline (mirrors the "new repo" button). Delete stays
-// enabled — the server refuses it when offline (host.offline toast), so it never
-// dead-ends a machine you must bring online first to clean up.
-export function repoCard(r, online = true) {
-  return `
-    <div class="card repo">
-      <button class="repo-del" title="${t("repo.delTitle")}" onclick="delRepo(${r.id})">✕</button>
-      <div class="t"><span class="sdot ${r.status}" title="${r.status}"></span>${r.name}</div>
-      <div class="muted url">${r.git_url}</div>
-      ${r.error ? `<div class="muted err">${r.error}</div>` : ""}
-      ${r.status === "ready" ? `<button class="disp" ${online ? "" : "disabled"} onclick="openTaskModal(${r.id})">${t("task.dispatch")}</button>` : ""}
-    </div>`;
+// A repo is a collapsible group header in col2; its tasks are nested under it by
+// renderList (hosts.js). `online` = is this repo's machine reachable — dispatch
+// runs ON the machine, so its ＋ is disabled when offline. Delete stays enabled
+// (the server refuses it when offline, so it never dead-ends a machine you must
+// bring online first to clean up). `collapsed` flips the caret; renderList omits
+// the task body when collapsed.
+export function repoGroupHead(r, online, collapsed) {
+  const caret = collapsed ? "▸" : "▾";
+  const disp = r.status === "ready"
+    ? `<button class="grp-act" title="${t("task.dispatch")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskModal(${r.id})">＋</button>` : "";
+  return `<div class="grp-head" onclick="toggleRepo(${r.id})">
+    <span class="grp-caret">${caret}</span>
+    <span class="sdot ${r.status}" title="${r.status}"></span>
+    <span class="grp-name">${r.name}</span>
+    ${r.error ? `<span class="grp-err" title="${r.error}">!</span>` : ""}
+    ${disp}
+    <button class="grp-del" title="${t("repo.delTitle")}" onclick="event.stopPropagation();delRepo(${r.id})">✕</button>
+  </div>`;
 }
 // Plain delete refuses (409) if the repo still has running tasks — then we offer
 // a force delete that tears them (sessions + worktrees) down with the repo.
