@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS hosts (
   name TEXT NOT NULL,
   target TEXT NOT NULL,           -- ssh target, e.g. user@host
   kind TEXT DEFAULT 'ssh',        -- ssh | mosh
-  session TEXT DEFAULT 'main',    -- remote tmux session to attach/create
+  session TEXT DEFAULT 'main',    -- legacy/unused: shells are now per-machine task rows (kind='local'), not one named session per host
   created_at TEXT DEFAULT (datetime('now'))
 );
 

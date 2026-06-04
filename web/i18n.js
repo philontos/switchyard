@@ -46,10 +46,9 @@
       "repo.repoWord": "仓库",
       "repo.noTasks": "暂无任务",
       "host.manage": "机器管理",
-      "host.shell": "开机器 shell",
-      "list.localGroup": "本机快捷任务",
+      "list.localGroup": "Shells",
       "list.archived": "已归档",
-      "local.none": "暂无快捷任务",
+      "local.none": "暂无 shell",
 
       // shared dialog buttons
       "dialog.cancel": "取消",
@@ -74,10 +73,10 @@
       "task.promptPh": "给 claude 的初始指令（可选）",
       "task.submit": "建 worktree + 起会话",
 
-      // local quick task (repo-less)
-      "local.new": "＋ 本地任务",
-      "local.tag": "本地",
-      "local.starting": "正在启动本地会话…",
+      // shells (bare tmux, per machine — local or remote)
+      "local.new": "新建 shell",
+      "local.tag": "shell",
+      "local.starting": "正在启动 shell…",
 
       // custom <select>
       "cs.placeholder": "请选择",
@@ -137,7 +136,6 @@
       "host.namePh": "名称 (例: gpu-box)",
       "host.targetPh": "ssh 目标 (例: user@192.168.1.10)",
       "host.kindLabel": "连接方式",
-      "host.sessionPh": "远程 tmux 会话名 (默认 main)",
       "host.submit": "添加",
       "host.hint": "复用本机 ~/.ssh 登录态。连上后 shell / tmux / 代码 / 文件全在远程机器上，本机只做中继。",
       "host.del": "删除机器",
@@ -197,10 +195,9 @@
       "repo.repoWord": "repo",
       "repo.noTasks": "No tasks yet",
       "host.manage": "Machine settings",
-      "host.shell": "Open machine shell",
-      "list.localGroup": "Local quick tasks",
+      "list.localGroup": "Shells",
       "list.archived": "Archived",
-      "local.none": "No quick tasks yet",
+      "local.none": "No shells yet",
 
       "dialog.cancel": "Cancel",
       "dialog.ok": "OK",
@@ -222,10 +219,10 @@
       "task.promptPh": "Initial prompt for claude (optional)",
       "task.submit": "Create worktree + start session",
 
-      // local quick task (repo-less)
-      "local.new": "＋ Local task",
-      "local.tag": "local",
-      "local.starting": "Starting local session…",
+      // shells (bare tmux, per machine — local or remote)
+      "local.new": "New shell",
+      "local.tag": "shell",
+      "local.starting": "Starting shell…",
 
       "cs.placeholder": "Select…",
       "cs.empty": "No options",
@@ -278,7 +275,6 @@
       "host.namePh": "Name (e.g. gpu-box)",
       "host.targetPh": "ssh target (e.g. user@192.168.1.10)",
       "host.kindLabel": "Connection",
-      "host.sessionPh": "Remote tmux session (default main)",
       "host.submit": "Add",
       "host.hint": "Reuses your local ~/.ssh. Once connected, the shell / tmux / code / files all live on the remote machine — this box is just a relay.",
       "host.del": "Delete machine",

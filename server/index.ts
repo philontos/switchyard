@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import pty from "node-pty";
 import { spawnPty } from "./pty.js";
+import { attachCommand } from "./attach.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -59,15 +60,16 @@ const getRepo = db.prepare("SELECT * FROM repos WHERE id = ?");
 const getTask = db.prepare("SELECT * FROM tasks WHERE id = ?");
 const getHost = db.prepare("SELECT * FROM hosts WHERE id = ?");
 
-// the Runner for a task's machine (via its repo's host) — local or remote(ssh)
+// the Runner for a task's machine — local or remote(ssh/mosh)
 function taskRunner(task: Task) {
-  const repo = getRepo.get(task.repo_id) as Repo | undefined;
-  const host = repo ? (getHost.get(repo.host_id) as Host) : undefined;
+  const host = taskHost(task);
   return host ? runnerFor(host) : localRunner;
 }
 
-// the machine a task lives on (via its repo) — for the offline write-guard
+// the machine a task lives on — for attach + the offline write-guard. Shell
+// tasks (kind='local') carry host_id directly; repo tasks resolve via their repo.
 function taskHost(task: Task): Host | undefined {
+  if (task.host_id != null) return getHost.get(task.host_id) as Host | undefined;
   const repo = getRepo.get(task.repo_id) as Repo | undefined;
   return repo ? (getHost.get(repo.host_id) as Host | undefined) : undefined;
 }
@@ -286,31 +288,37 @@ app.post("/api/tasks", async (req, res) => {
   }
 });
 
-// repo-less local quick task: skip the mirror/worktree/skills machinery and just
-// open a bare tmux shell in a plain dir (default ~) on the local machine — the
-// user cd's and runs claude (or anything) themselves. Stored in the same tasks
-// table with kind='local', repo_id=0 and empty branch/worktree columns, so it
-// rides the existing list/connect/archive/delete plumbing.
+// repo-less shell task: skip the mirror/worktree/skills machinery and just open a
+// bare tmux shell in a plain dir (default the machine's home) on the chosen
+// machine (host_id; default local) — the user cd's and runs claude (or anything)
+// themselves. Stored in the same tasks table with kind='local', repo_id=0 and
+// empty branch/worktree columns, so it rides the existing
+// list/connect/archive/delete plumbing on local AND remote machines.
 app.post("/api/tasks/local", async (req, res) => {
   const lang = langFromReq(req);
-  const local = db.prepare("SELECT * FROM hosts WHERE kind='local'").get() as Host | undefined;
-  if (!local) return res.status(404).json({ error: tr(lang, "notFound") });
+  const host = req.body?.host_id != null
+    ? (getHost.get(req.body.host_id) as Host | undefined)
+    : (db.prepare("SELECT * FROM hosts WHERE kind='local'").get() as Host | undefined);
+  if (!host) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
 
-  const cwd = resolveCwd(req.body?.cwd, os.homedir());
-  if (!(await localRunner.exists(cwd))) return res.status(400).json({ error: tr(lang, "task.cwdMissing", { cwd }) });
+  const runner = runnerFor(host);
+  const home = host.kind === "local" ? os.homedir() : (await runner.exec("sh", ["-c", 'echo "$HOME"']).catch(() => "")).trim();
+  const cwd = resolveCwd(req.body?.cwd, home);
+  if (!(await runner.exists(cwd))) return res.status(400).json({ error: tr(lang, "task.cwdMissing", { cwd }) });
   const provided = String(req.body?.title ?? "").trim();
 
   // insert first so the auto-title and session name can use the row id
   const info = db.prepare(
     "INSERT INTO tasks (kind, host_id, repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, cwd) " +
     "VALUES ('local', ?, 0, '', '', ?, NULL, '', '', 'creating', ?)"
-  ).run(local.id, provided, cwd);
+  ).run(host.id, provided, cwd);
   const id = Number(info.lastInsertRowid);
   const title = provided || tr(lang, "task.localDefaultTitle", { id });
   const session = `tdsp-${id}-local-${slug(title)}`;
 
   try {
-    await startShellSession(localRunner, session, cwd);
+    await startShellSession(runner, session, cwd);
     db.prepare("UPDATE tasks SET title=?, session=?, status='running' WHERE id=?").run(title, session, id);
     res.json({ id, session });
   } catch (e: any) {
@@ -440,21 +448,17 @@ app.post("/api/sessions/:name/kill", async (req, res) => {
 });
 
 // ---------- hosts (remote machines, terminal-only L1) ----------
-const SESSION_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
-
 app.get("/api/hosts", (_req, res) => {
   // local machine (#0) first, then remotes
   res.json(db.prepare("SELECT * FROM hosts ORDER BY (kind='local') DESC, id DESC").all());
 });
 
 app.post("/api/hosts", (req, res) => {
-  const { name, target, kind, session } = req.body ?? {};
+  const { name, target, kind } = req.body ?? {};
   if (!name || !target) return res.status(400).json({ error: "name and target required" });
   const k = kind === "mosh" ? "mosh" : "ssh";
-  const sess = (session || "main").trim();
-  if (!SESSION_NAME_RE.test(sess)) return res.status(400).json({ error: "invalid session name" });
-  const info = db.prepare("INSERT INTO hosts (name, target, kind, session) VALUES (?,?,?,?)")
-    .run(String(name).trim(), String(target).trim(), k, sess);
+  const info = db.prepare("INSERT INTO hosts (name, target, kind) VALUES (?,?,?)")
+    .run(String(name).trim(), String(target).trim(), k);
   const id = Number(info.lastInsertRowid);
   probeHost(getHost.get(id) as Host); // probe right away so it goes online fast (fire-and-forget)
   res.json({ id });
@@ -517,52 +521,20 @@ const wss = new WebSocketServer({ server, path: "/pty" });
 
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url || "", "http://localhost");
-  const hostId = url.searchParams.get("host");
   const session = url.searchParams.get("session");
   const lang = langFromQuery(url.searchParams.get("lang"));
 
-  // resolve the connection target: a local tmux session, or a remote machine.
-  // remote = node-pty spawns ssh/mosh locally, but the shell/tmux/files all
-  // live ON the remote host — this box is just the relay.
-  let file: string, args: string[], label: string;
+  // attach the relay to a task's tmux session, on whichever machine the task
+  // lives: local tmux, or ssh/mosh into the remote and attach there. node-pty
+  // spawns the client locally; the shell/tmux/files all live ON that machine.
+  if (!session || !SESSION_RE.test(session)) { ws.close(1008, "invalid target"); return; }
+  const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(session) as Task | undefined;
+  const host = task ? taskHost(task) : undefined;
+  const { file, args, label } = attachCommand(host, session, { ssh: SSH_BIN, mosh: MOSH_BIN, tmux: TMUX_BIN });
   // the session whose copy/scroll mode we cancel on attach, so this client lands
   // on the live prompt no matter what mode a previous client left the pane in.
-  let cancelRunner: Runner | null = null, cancelSession = "";
-  if (hostId) {
-    const host = getHost.get(hostId) as Host | undefined;
-    if (!host) { ws.close(1008, "unknown host"); return; }
-    label = `${host.kind} ${host.target}`;
-    // just forward — the remote's shell env (the user's responsibility) resolves
-    // tmux. attach to, or create, the named session.
-    const remoteCmd = `exec tmux new-session -A -s ${host.session}`;
-    if (host.kind === "mosh") {
-      file = MOSH_BIN;
-      args = [host.target, "--", "sh", "-c", remoteCmd];
-    } else {
-      file = SSH_BIN;
-      args = ["-t", host.target, remoteCmd];
-    }
-    cancelRunner = runnerFor(host); cancelSession = host.session;
-  } else if (session && SESSION_RE.test(session)) {
-    // a task's tmux session — attach on whichever machine the task lives
-    const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(session) as Task | undefined;
-    const repo = task ? (getRepo.get(task.repo_id) as Repo | undefined) : undefined;
-    const host = repo ? (getHost.get(repo.host_id) as Host | undefined) : undefined;
-    if (host && host.kind !== "local") {
-      file = SSH_BIN;
-      args = ["-t", host.target, `exec tmux attach -t ${session}`];
-      label = `${host.target} ${session}`;
-    } else {
-      file = TMUX_BIN;
-      args = ["attach", "-t", session];
-      label = session;
-    }
-    // local task = no repo/host (repo_id 0) → runs on this box
-    cancelRunner = host ? runnerFor(host) : localRunner; cancelSession = session;
-  } else {
-    ws.close(1008, "invalid target");
-    return;
-  }
+  const cancelRunner: Runner = host ? runnerFor(host) : localRunner;
+  const cancelSession = session;
 
   // multiple clients can attach independently (tmux/ssh both handle this)
   let term: pty.IPty;
