@@ -53,6 +53,19 @@ export async function cancelCopyMode(runner: Runner, session: string) {
   await tmux(runner, ["send-keys", "-t", session, "-X", "cancel"]).catch(() => {});
 }
 
+/**
+ * Inject text into a session's input as a BRACKETED PASTE (not keystrokes), so
+ * Claude Code treats a pasted image path the way it treats a real drag/paste —
+ * converting it to an inline [Image #N] attachment (verified: typed keystrokes
+ * route through the Read tool instead, a bracketed paste attaches directly). A
+ * named buffer keeps the user's paste buffers untouched; -d removes it after.
+ * No trailing newline, so it never auto-submits — the user adds text and Enters.
+ */
+export async function pasteText(runner: Runner, session: string, text: string) {
+  await tmux(runner, ["set-buffer", "-b", "tdsp-paste", "--", text]);
+  await tmux(runner, ["paste-buffer", "-t", session, "-b", "tdsp-paste", "-p", "-d"]);
+}
+
 /** List all dispatcher-owned tmux sessions (named task-<id>). */
 export async function listSessions(runner: Runner): Promise<string[]> {
   try {

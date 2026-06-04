@@ -16,3 +16,12 @@ test("LocalRunner.putDir copies a directory tree", async () => {
   assert.equal(fs.readFileSync(path.join(dest, "SKILL.md"), "utf8"), "hi");
   assert.ok(fs.existsSync(path.join(dest, "sub", "x.sh")));
 });
+
+test("LocalRunner.putFile copies a single file, creating parent dirs", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pf-"));
+  const src = path.join(tmp, "a.png");
+  fs.writeFileSync(src, "PNGDATA");
+  const dest = path.join(tmp, "out", "nested", "b.png"); // parents don't exist yet
+  await localRunner.putFile(src, dest);
+  assert.equal(fs.readFileSync(dest, "utf8"), "PNGDATA");
+});

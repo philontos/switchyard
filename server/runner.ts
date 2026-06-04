@@ -29,6 +29,8 @@ export interface Runner {
   rmrf(p: string): Promise<void>;
   /** Copy a local directory tree to `dest` ON the target machine. */
   putDir(localSrc: string, dest: string): Promise<void>;
+  /** Copy a single local file to `dest` ON the target machine. */
+  putFile(localSrc: string, dest: string): Promise<void>;
   ptySpec(file: string, args: string[]): { file: string; args: string[] };
 }
 
@@ -50,6 +52,10 @@ export class LocalRunner implements Runner {
   async putDir(localSrc: string, dest: string) {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.cpSync(localSrc, dest, { recursive: true });
+  }
+  async putFile(localSrc: string, dest: string) {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(localSrc, dest);
   }
   ptySpec(file: string, args: string[]) { return { file, args }; }
 }
@@ -106,6 +112,14 @@ export class RemoteRunner implements Runner {
     const remote = `mkdir -p ${shq(destParent)} && tar -C ${shq(destParent)} -xf -${rename}`;
     const sshArgs = [...SSH_MUX, ...SSH_BATCH, this.target, remote].map(shq).join(" ");
     await localRunner.exec("sh", ["-c", `tar -C ${shq(srcParent)} -cf - ${shq(base)} | ssh ${sshArgs}`]);
+  }
+
+  // Stream one local file to the remote over ssh (mirrors putDir's pipe shape).
+  async putFile(localSrc: string, dest: string) {
+    const destParent = path.dirname(dest);
+    const remote = `mkdir -p ${shq(destParent)} && cat > ${shq(dest)}`;
+    const sshArgs = [...SSH_MUX, ...SSH_BATCH, this.target, remote].map(shq).join(" ");
+    await localRunner.exec("sh", ["-c", `cat ${shq(localSrc)} | ssh ${sshArgs}`]);
   }
 
   ptySpec(file: string, args: string[]) {

@@ -123,6 +123,8 @@
       "toast.dispatchFailed": "派发失败：{error}",
       "toast.killed": "已 kill 并归档",
       "toast.worktreeRemoved": "worktree 已删除",
+      "toast.pasteOk": "图片已贴入终端（claude 显示为 [Image #N]）",
+      "toast.pasteFailed": "贴图失败：{error}",
 
       // machines (remote hosts)
       "host.new": "＋ 新建机器",
@@ -263,6 +265,8 @@
       "toast.dispatchFailed": "Dispatch failed: {error}",
       "toast.killed": "Killed and archived",
       "toast.worktreeRemoved": "worktree removed",
+      "toast.pasteOk": "Image pasted into the terminal (shows as [Image #N] in claude)",
+      "toast.pasteFailed": "Paste failed: {error}",
 
       "host.new": "＋ New machine",
       "host.heading": "Machines",

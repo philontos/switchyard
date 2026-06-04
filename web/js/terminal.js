@@ -4,8 +4,10 @@
 // the globals from the vendored xterm scripts. term/fit/ws are private to this
 // module; nothing else needs them.
 import { $ } from "./dom.js";
+import { toast } from "./feedback.js";
 
 let term, fit, ws;
+let pasteTaskId = null;   // the task whose session is attached (null for host shells)
 
 export function initTerm() {
   term = new Terminal({
@@ -33,6 +35,11 @@ export function initTerm() {
     }
     return true;
   });
+  // Cmd/Ctrl+V with an image in the clipboard: don't let xterm paste binary as
+  // text — upload it to the attached task; the server lands it on that machine
+  // and bracketed-pastes the path into claude, which attaches it as [Image #N].
+  // Text pastes fall through to xterm untouched. Only active for a TASK session.
+  term.element.addEventListener("paste", onPasteImage, true);
   try { fit.fit(); } catch {}
   window.addEventListener("resize", () => { try { fit.fit(); sendResize(); } catch {} });
   term.onData(d => ws && ws.readyState === 1 && ws.send(d));
@@ -40,13 +47,50 @@ export function initTerm() {
 function sendResize() {
   if (ws && ws.readyState === 1) ws.send("\x00resize:" + term.cols + "x" + term.rows);
 }
+
+// Intercept an image paste (screenshot in clipboard) and route it to the task;
+// non-image (text) pastes are left for xterm. getAsFile() must run synchronously
+// inside the event, so we grab the File first, then upload async.
+function onPasteImage(e) {
+  if (!pasteTaskId) return;                       // host shell / nothing attached
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  let file = null;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.kind === "file" && it.type.startsWith("image/")) { file = it.getAsFile(); break; }
+  }
+  if (!file) return;                              // not an image → let xterm paste text
+  e.preventDefault();
+  e.stopPropagation();
+  uploadPasteImage(pasteTaskId, file);
+}
+
+async function uploadPasteImage(taskId, blob) {
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/paste-image`, {
+      method: "POST",
+      headers: { "content-type": blob.type || "image/png", "X-Lang": I18N.lang },
+      body: blob,
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || res.statusText);
+    }
+    toast(I18N.t("toast.pasteOk"), "success");
+    term.focus();
+  } catch (err) {
+    toast(I18N.t("toast.pasteFailed", { error: err.message }), "error", 6000);
+  }
+}
 // The terminal is permanent (col3); the empty-state overlay shows when nothing
 // is attached. openPty() hides it; clearing a selection re-shows it.
 export function showTermEmpty() { $("term-empty").classList.remove("hidden"); }
 function hideTermEmpty() { $("term-empty").classList.add("hidden"); }
 
 // open the terminal dock against a /pty target (local session or remote host)
-export function openPty(query, title, desc, attach) {
+export function openPty(query, title, desc, attach, taskId = null) {
+  pasteTaskId = taskId;   // image-paste targets this task (null for host shells)
   if (ws) { ws.close(); ws = null; }
   hideTermEmpty();
   term.reset();

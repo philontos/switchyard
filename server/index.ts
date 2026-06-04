@@ -12,8 +12,9 @@ import {
 } from "./git.js";
 import { scanSkills, resolveSkills, defaultSources } from "./skills.js";
 import { renderDispatchPrompt, skillsLine } from "./presets.js";
+import { extForMime, pasteTargetBase, pastedDest, pasteFilename } from "./paste.js";
 import { listAvailable, installPlugin } from "./plugins.js";
-import { startSession, startShellSession, hasSession, killSession, listSessions, cancelCopyMode } from "./tmux.js";
+import { startSession, startShellSession, hasSession, killSession, listSessions, cancelCopyMode, pasteText } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
 import { repairWorktrees } from "./migrate.js";
 import { localRunner, runnerFor, type Runner } from "./runner.js";
@@ -315,6 +316,43 @@ app.post("/api/tasks/local", async (req, res) => {
     db.prepare("UPDATE tasks SET title=?, status='error', error=? WHERE id=?").run(title, String(e.message || e), id);
     res.status(500).json({ error: String(e.message || e) });
   }
+});
+
+// paste a screenshot into a task's claude: receive the raw image bytes, land
+// them ON the task's machine (worktree for a repo task, cwd for a local task)
+// via the Runner, then bracketed-paste the absolute path into the session so
+// claude attaches it as an inline image. Identical local + remote (Runner).
+app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25mb" }), async (req, res) => {
+  const lang = langFromReq(req);
+  const task = getTask.get(req.params.id) as Task | undefined;
+  if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (offline(taskHost(task))) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const ext = extForMime(req.headers["content-type"]);
+  if (!ext) return res.status(400).json({ error: tr(lang, "paste.badType") });
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: tr(lang, "paste.empty") });
+  const base = pasteTargetBase(task);
+  if (!base) return res.status(409).json({ error: tr(lang, "paste.noTarget") });
+
+  const runner = taskRunner(task);
+  const dest = pastedDest(base, pasteFilename(Date.now(), ext));
+  const tmp = path.join(os.tmpdir(), `tdsp-paste-${task.id}-${path.basename(dest)}`);
+  try {
+    fs.writeFileSync(tmp, req.body);
+    await runner.putFile(tmp, dest); // land it ON the task's machine (local fs / ssh)
+  } catch (e: any) {
+    return res.status(500).json({ error: String(e.message || e) });
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+  // keep pasted images out of git status (best-effort; a local task's cwd may
+  // not be a git repo at all — the guard makes that a clean no-op)
+  await runner.exec("sh", ["-c",
+    `cd ${JSON.stringify(base)} && p=$(git rev-parse --git-path info/exclude 2>/dev/null) && [ -n "$p" ] && ` +
+    `{ grep -qxF '.claude/pasted/' "$p" 2>/dev/null || printf '%s\\n' '.claude/pasted/' >> "$p"; }`,
+  ]).catch(() => {});
+  // inject the path as a bracketed paste → claude shows [Image #N] in its input
+  if (task.session) await pasteText(runner, task.session, dest).catch(() => {});
+  res.json({ ok: true, path: dest });
 });
 
 // archive: end the tmux session but KEEP the worktree (moves task to archived tab)

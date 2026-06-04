@@ -37,6 +37,9 @@ const messages: Record<Lang, Record<string, string>> = {
     "preset.notFound": "preset not found",
     "skill.missing": "skill(s) not found: {keys}",
     "plugin.idRequired": "pluginId required",
+    "paste.badType": "unsupported image type",
+    "paste.empty": "empty image data",
+    "paste.noTarget": "this task has no working directory for pasted images",
   },
   zh: {
     "repo.fieldsRequired": "名称和 git url 必填",
@@ -56,6 +59,9 @@ const messages: Record<Lang, Record<string, string>> = {
     "preset.notFound": "未找到预设",
     "skill.missing": "未找到 skill：{keys}",
     "plugin.idRequired": "缺少 pluginId",
+    "paste.badType": "不支持的图片类型",
+    "paste.empty": "空图片数据",
+    "paste.noTarget": "该任务没有可存放粘贴图片的工作目录",
   },
 };
 

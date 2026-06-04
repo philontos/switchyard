@@ -24,7 +24,7 @@ export function connect(id) {
   if (!t) return;
   state.selectedTaskId = id; paintSelection();
   openPty(`session=${encodeURIComponent(t.session)}`,
-    `#${t.id} ${t.title}`, t.prompt ? `· ${t.prompt}` : "", "tmux attach -t " + t.session);
+    `#${t.id} ${t.title}`, t.prompt ? `· ${t.prompt}` : "", "tmux attach -t " + t.session, t.id);
 }
 
 export function openTaskModal(repoId) {
