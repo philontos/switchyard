@@ -2,6 +2,7 @@ import express from "express";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import pty from "node-pty";
+import { spawnPty } from "./pty.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -566,7 +567,7 @@ wss.on("connection", (ws, req) => {
   // multiple clients can attach independently (tmux/ssh both handle this)
   let term: pty.IPty;
   try {
-    term = pty.spawn(file, args, {
+    term = spawnPty(file, args, {
       name: "xterm-256color",
       cols: 120,
       rows: 32,
