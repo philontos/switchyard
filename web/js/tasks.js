@@ -40,15 +40,16 @@ export function openTaskModal(repoId) {
 }
 export function closeTaskModal() { $("task-modal").style.display = "none"; }
 
-// Local quick task: one click, zero form. Opens a bare tmux shell in ~ on the
-// local machine — the server auto-names it ("Local task #N") and defaults the
-// cwd to home; the user then cd's and runs claude (or anything) themselves.
+// Shell: one click, zero form. Opens a bare tmux shell in the machine's home —
+// the server auto-names it and defaults the cwd to home; the user then cd's and
+// runs claude (or anything) themselves. hostId picks the machine (omit → local).
 // Deliberately bare-bones for a fast start; repo/branch/worktree/preset/prompt
 // all live in the richer repo dispatch flow instead.
-export async function addLocalTask() {
+export async function addLocalTask(hostId) {
   showLoading(t("local.starting"));
   try {
-    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const body = hostId != null ? JSON.stringify({ host_id: hostId }) : "{}";
+    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body });
     toast(t("toast.taskDispatched", { session: r.session }), "success");
     await loadTasks();
     connect(r.id);

@@ -1,7 +1,8 @@
 // Machines (hosts): col1 icon rail + col2 list. Loads the host list, renders the
 // rail (renderRail) and the active machine's repos+tasks (renderList, via
 // repoGroupHead from repos.js and taskCard from tasks.js), the register-machine
-// modal, delete, and connectHost() which attaches the terminal to a remote shell.
+// modal, and delete. Shells (local + remote) live in the per-machine Shells group
+// (rendered here, created via addLocalTask in tasks.js).
 import { $, api } from "./dom.js";
 import { toast } from "./feedback.js";
 import { confirmDialog } from "./dialog.js";
@@ -9,7 +10,6 @@ import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { repoGroupHead } from "./repos.js";
 import { paintSelection, taskCard, allTasks } from "./tasks.js";
-import { openPty } from "./terminal.js";
 
 let hostsOrder = [];               // API order: local machine first. Active machine is state.activeHostId.
 const collapsedRepos = new Set();  // collapsed repo groups (repo id) — read by renderList
@@ -65,8 +65,7 @@ function renderList() {
     : `<button class="mh-gear" title="${t("host.manage")}" onclick="event.stopPropagation();toggleHostMenu(${h.id})">⚙</button>`;
   const newRepo = `<button class="mh-act" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">＋${t("repo.repoWord")}</button>`;
   const menu = (menuHostId === h.id) ? `<div class="mh-menu">
-      <div class="mh-target">${h.target} · ${h.session}</div>
-      <button onclick="connectHost(${h.id})">${t("host.shell")}</button>
+      <div class="mh-target">${h.target}</div>
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
   const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${newRepo}${menu}</div>`;
@@ -82,14 +81,13 @@ function renderList() {
     return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, online, collapsed)}${body}</div>`;
   }).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`;
 
-  let localBlock = "";
-  if (isLocal) {
-    const locals = tasks.filter(tk => tk.kind === "local" && tk.host_id === h.id && tk.status !== "cleaned");
-    const add = `<button class="grp-act" title="${t("local.new")}" onclick="event.stopPropagation();addLocalTask()">＋</button>`;
-    localBlock = `<div class="grp open"><div class="grp-head static">
-        <span class="grp-name">${t("list.localGroup")}</span>${add}</div>
-        ${locals.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
-  }
+  // every machine (local + remote) gets a Shells group: bare tmux shells you can
+  // open many of, persistent like tasks. ＋ is disabled while the machine is offline.
+  const shells = tasks.filter(tk => tk.kind === "local" && tk.host_id === h.id && tk.status !== "cleaned");
+  const addShell = `<button class="grp-act" title="${t("local.new")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();addLocalTask(${h.id})">＋</button>`;
+  const shellBlock = `<div class="grp open"><div class="grp-head static">
+      <span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>
+      ${shells.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
 
   const archived = tasks.filter(tk => tk.status === "cleaned" && (tk.host_id ?? hostOf[tk.repo_id]) === h.id);
   const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
@@ -97,7 +95,7 @@ function renderList() {
       <span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
       ${archivedOpen ? (archived.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
 
-  $("m-list").innerHTML = header + repoBlocks + localBlock + archBlock;
+  $("m-list").innerHTML = header + repoBlocks + shellBlock + archBlock;
 }
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
 export function toggleArchived() { archivedOpen = !archivedOpen; renderList(); }
@@ -116,22 +114,13 @@ export function closeHostModal() { $("host-modal").style.display = "none"; }
 export async function addHost() {
   const body = {
     name: $("h-name").value.trim(), target: $("h-target").value.trim(),
-    kind: Selects["h-kind"].value, session: $("h-session").value.trim() || "main",
+    kind: Selects["h-kind"].value,
   };
   if (!body.name || !body.target) return toast(t("host.required"), "error");
   await api("/api/hosts", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
-  $("h-name").value = ""; $("h-target").value = ""; $("h-session").value = "";
+  $("h-name").value = ""; $("h-target").value = "";
   closeHostModal();
   toast(t("host.added"), "success");
   loadHosts();
 }
 export async function delHost(id){ if(!await confirmDialog(t("host.delConfirm"),{title:t("host.del"),okText:t("common.delete"),danger:true}))return; await api(`/api/hosts/${id}`,{method:"DELETE"}); loadHosts(); }
-
-export function connectHost(id) {
-  const h = state.hostsById[id];
-  if (!h) return;
-  state.selectedTaskId = null; menuHostId = null;
-  renderList(); paintSelection();   // close the ⚙ menu + drop any task highlight
-  openPty(`host=${id}`, `🖥 ${h.name}`, `· ${h.target} · ${h.session}`,
-    (h.kind === "mosh" ? "mosh " : "ssh -t ") + h.target);
-}

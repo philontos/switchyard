@@ -1,13 +1,13 @@
 // The xterm.js terminal + its collapsible bottom dock, and openPty() — the
-// generic "attach the terminal to a /pty target" entry point used by both task
-// sessions (tasks.js) and remote-host shells (hosts.js). Terminal/FitAddon are
-// the globals from the vendored xterm scripts. term/fit/ws are private to this
-// module; nothing else needs them.
+// generic "attach the terminal to a /pty target" entry point. Every attach is a
+// task session now (repo tasks + shells, local or remote), driven from tasks.js
+// connect(). Terminal/FitAddon are the globals from the vendored xterm scripts.
+// term/fit/ws are private to this module; nothing else needs them.
 import { $ } from "./dom.js";
 import { toast } from "./feedback.js";
 
 let term, fit, ws;
-let pasteTaskId = null;   // the task whose session is attached (null for host shells)
+let pasteTaskId = null;   // the task whose session is attached (image-paste target)
 
 export function initTerm() {
   term = new Terminal({
@@ -90,7 +90,7 @@ function hideTermEmpty() { $("term-empty").classList.add("hidden"); }
 
 // open the terminal dock against a /pty target (local session or remote host)
 export function openPty(query, title, desc, attach, taskId = null) {
-  pasteTaskId = taskId;   // image-paste targets this task (null for host shells)
+  pasteTaskId = taskId;   // image-paste targets this task
   if (ws) { ws.close(); ws = null; }
   hideTermEmpty();
   term.reset();

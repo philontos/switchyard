@@ -65,7 +65,6 @@ export interface Host {
   name: string;
   target: string;
   kind: string;          // local | ssh | mosh
-  session: string;
   data_dir: string | null;   // the machine's ~/.task-dispatcher
   status: string;            // online | offline | unknown
   last_checked: string | null;
