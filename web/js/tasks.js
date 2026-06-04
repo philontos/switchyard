@@ -135,8 +135,7 @@ export function taskCard(t, online) {
   // local quick tasks have no branch/MR — show their working dir + a "local" tag
   const meta = t.kind === "local"
     ? `<div class="muted">📂 <code>${t.cwd || "~"}</code> <span class="tag-local">${I18N.t("local.tag")}</span></div>`
-    : `<div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>
-       ${t.mr_url ? `<div><a href="${t.mr_url}" target="_blank" onclick="event.stopPropagation()">MR ↗</a></div>` : ""}`;
+    : `<div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>`;
   // dot: alive+waiting (blocked on a permission prompt) → yellow; alive → green; else status
   const dot = t.alive
     ? (t.waiting

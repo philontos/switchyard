@@ -34,7 +34,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   session TEXT NOT NULL,
   status TEXT DEFAULT 'running', -- running | done | error | cleaned
   error TEXT,
-  mr_url TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 

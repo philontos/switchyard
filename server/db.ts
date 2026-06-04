@@ -54,7 +54,6 @@ export interface Task {
   session: string;
   status: string;
   error: string | null;
-  mr_url: string | null;
   created_at: string;
   kind: string;              // 'repo' | 'local'
   host_id: number | null;    // local tasks: the machine they run on
