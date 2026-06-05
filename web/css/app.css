@@ -163,8 +163,10 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    cursor + dotted underline on hover hint "double-click to rename" */
 .tname { border-radius: 3px; cursor: text; }
 .tname:hover { text-decoration: underline dotted #7d7367; text-underline-offset: 2px; }
-/* the inline rename field that replaces the title text during an edit */
-.tname-edit { flex: 1 1 8em; min-width: 0; margin: 0; padding: 1px 6px; font: inherit; font-weight: 600;
+/* the inline rename field that replaces the title text during an edit.
+   flex-basis 0 + min-width 0 keeps it on the title's line (a non-zero basis makes
+   the flex-wrap container bump it to a second row); flex-grow fills the rest. */
+.tname-edit { flex: 1 1 0; min-width: 0; margin: 0; padding: 1px 6px; font: inherit; font-weight: 600;
   color: #ece6dd; background: #2a241e; border: 1px solid #d97757; border-radius: 5px; }
 .card.clickable { cursor: pointer; transition: border-color .12s, background .12s; }
 .card.clickable:hover { border-color: #d97757; background: #2a231c; }
