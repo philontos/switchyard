@@ -129,6 +129,7 @@
       // machines (remote hosts)
       "host.new": "＋ 新建机器",
       "host.heading": "机器",
+      "host.blocked": "· 有任务在等你",
       "host.local": "本机",
       "host.terminal": "终端",
       "host.noRepos": "还没有仓库",
@@ -269,6 +270,7 @@
 
       "host.new": "＋ New machine",
       "host.heading": "Machines",
+      "host.blocked": "· task needs you",
       "host.local": "Local",
       "host.terminal": "Terminal",
       "host.noRepos": "No repos yet",

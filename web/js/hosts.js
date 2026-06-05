@@ -33,16 +33,33 @@ export function rerender() {
     const first = hosts.find(h => h.kind === "local") || hosts[0];
     state.activeHostId = first ? first.id : null;
   }
-  renderRail(hosts);
+  renderRail(hosts, blockedHosts());
   renderList();
   paintSelection();
 }
-function renderRail(hosts) {
+// Machines with a task blocked on a permission prompt (alive + waiting). This is
+// how the per-task yellow ("needs you") gets pulled up to the machine's rail dot.
+// A task's machine is its host_id (shells) or its repo's host_id (repo tasks).
+function blockedHosts() {
+  const hostOf = Object.fromEntries(state.repos.map(r => [r.id, Number(r.host_id)]));
+  const blocked = new Set();
+  for (const tk of allTasks()) {
+    if (!(tk.alive && tk.waiting)) continue;
+    const hid = tk.host_id ?? hostOf[tk.repo_id];
+    if (hid != null) blocked.add(hid);
+  }
+  return blocked;
+}
+function renderRail(hosts, blocked) {
   const icon = h => {
     const online = h.kind === "local" || h.status === "online";
     const glyph = h.kind === "local" ? "🖥" : "▦";
-    const title = h.kind === "local" ? t("host.local") : `${h.name} · ${h.target}`;
-    return `<button class="rchip${h.id === state.activeHostId ? " active" : ""}" title="${title}" onclick="selectHost(${h.id})"><span class="rdot ${online ? "on" : "off"}"></span>${glyph}</button>`;
+    // offline wins (you can't act on it); else amber if a task here needs you; else green
+    const waiting = online && blocked.has(h.id);
+    const dotClass = !online ? "off" : waiting ? "waiting" : "on";
+    const base = h.kind === "local" ? t("host.local") : `${h.name} · ${h.target}`;
+    const title = waiting ? `${base} ${t("host.blocked")}` : base;
+    return `<button class="rchip${h.id === state.activeHostId ? " active" : ""}" title="${title}" onclick="selectHost(${h.id})"><span class="rdot ${dotClass}"></span>${glyph}</button>`;
   };
   $("m-rail").innerHTML = hosts.map(icon).join("")
     + `<button class="rchip add" title="${t("host.new")}" onclick="openHostModal()">＋</button>`;
