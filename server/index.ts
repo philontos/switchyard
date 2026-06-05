@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { db, Repo, Task, Host, Preset } from "./db.js";
+import { renameTask } from "./tasks.js";
 import {
   initMirror, fetchMirror, fetchBranch, listBranches, addWorktree, removeWorktree,
   mirrorPath,
@@ -395,6 +396,17 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
   }
+});
+
+// rename a task's display title only — pure DB update, no host/session touched
+app.patch("/api/tasks/:id", (req, res) => {
+  const lang = langFromReq(req);
+  const r = renameTask(db, Number(req.params.id), req.body?.title);
+  if ("error" in r) {
+    if (r.error === "empty") return res.status(400).json({ error: tr(lang, "task.titleRequired") });
+    return res.status(404).json({ error: tr(lang, "notFound") });
+  }
+  res.json(r);
 });
 
 // delete the task record — refused while its worktree still exists on disk

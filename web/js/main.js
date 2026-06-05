@@ -13,7 +13,7 @@ import { initTerm, showTermEmpty } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss } from "./hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, connect, openTaskModal, closeTaskModal, addLocalTask } from "./tasks.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask } from "./tasks.js";
 import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 
@@ -25,7 +25,7 @@ import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } f
 Object.assign(window, {
   // tasks
   addTask, openTaskModal, closeTaskModal, connect, archive, removeWt, deleteTask,
-  addLocalTask,
+  addLocalTask, renameTask,
   // repos
   delRepo, openRepoModal, closeRepoModal, addRepo,
   // hosts

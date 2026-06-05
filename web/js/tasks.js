@@ -11,6 +11,9 @@ import { openPty, showTermEmpty } from "./terminal.js";
 import { rerender } from "./hosts.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
+// id of the task whose title is being edited inline — set while a rename input
+// is open so the 4s poller's rerender() doesn't blow the input away mid-edit.
+let editingTaskId = null;
 
 // reflect the current selection onto the cards already in the DOM (no refetch)
 export function paintSelection() {
@@ -143,7 +146,9 @@ export function taskCard(t, online) {
         ? `<span class="sdot waiting" title="${I18N.t("task.waiting")}"></span>`
         : `<span class="sdot live" title="live"></span>`)
     : `<span class="sdot ${t.status}" title="${t.status}"></span>`;
-  const head = `<div class="t">${dot}#${t.id} ${t.title}</div>
+  // the title is its own click zone: single clicks don't bubble to the card (so
+  // they never connect()), double-click renames it in place.
+  const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" onclick="event.stopPropagation()" ondblclick="renameTask(event,${t.id})">${t.title}</span></div>
     ${meta}`;
   const open = active ? ` clickable" onclick="connect(${t.id})` : "";
   const sel = t.id === state.selectedTaskId ? " selected" : "";
@@ -161,7 +166,54 @@ export async function loadTasks() {
   if (!tasks) return;
   tasksById = Object.fromEntries(tasks.map(t => [t.id, t]));
   taskOrder = tasks.map(t => t.id);          // preserve the API's id-DESC order
+  if (editingTaskId != null) return;         // a rename input is open — refresh the cache but leave the DOM alone
   rerender();
+}
+
+// Inline rename: double-clicking a card's title swaps it for a text input.
+// Enter or click-away commits (PATCH /api/tasks/:id, title only); Esc cancels.
+// We only touch the display title — the tmux session & git branch are unchanged.
+export function renameTask(event, id) {
+  event.stopPropagation();                    // don't let the card's onclick connect()
+  const span = event.currentTarget;
+  if (!span || span.querySelector("input")) return;   // already editing this one
+  const current = tasksById[id]?.title ?? span.textContent;
+  editingTaskId = id;
+
+  const input = document.createElement("input");
+  input.className = "tname-edit";
+  input.value = current;
+  input.onclick = e => e.stopPropagation();   // clicks inside the field aren't card clicks
+  input.ondblclick = e => e.stopPropagation();
+
+  let done = false;                           // guards Enter-then-blur double commit
+  const finish = async commit => {
+    if (done) return; done = true;
+    editingTaskId = null;
+    const next = input.value.trim();
+    if (commit && next && next !== current) {
+      try {
+        const r = await api(`/api/tasks/${id}`, {
+          method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: next }),
+        });
+        if (tasksById[id]) tasksById[id].title = r.title;
+        // a double-click opens the task in the dock first — keep its header fresh
+        if (state.selectedTaskId === id) $("term-title").textContent = `#${id} ${r.title}`;
+      } catch (e) { toast(e.message, "error"); }
+    }
+    rerender();                               // rebuild the card from the (maybe) updated cache
+  };
+
+  input.onkeydown = e => {
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  };
+  input.onblur = () => finish(true);          // click away saves
+
+  span.textContent = "";
+  span.appendChild(input);
+  input.focus();
+  input.select();
 }
 
 // All cached tasks in API order (id-DESC). renderList (hosts.js) reads this to
