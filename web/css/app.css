@@ -69,6 +69,9 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .rdot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; }
 .rdot.on { background: #8aaa66; box-shadow: 0 0 5px #8aaa6699; }
 .rdot.off { background: #7d7367; }
+/* a task on this machine is blocked on a permission prompt — amber pulse pulls
+   the per-task "needs you" (.sdot.waiting) up to the machine's rail dot */
+.rdot.waiting { background: #e0b341; box-shadow: 0 0 7px #e0b341; animation: pulse 1.6s ease-in-out infinite; }
 .mempty { font-size: 11.5px; padding: 4px 2px 8px; }
 /* col2: machine header — a full-bleed band sitting a notch above the repo list
    (subtle lighter fill + a hairline under it), so the machine reads as the
