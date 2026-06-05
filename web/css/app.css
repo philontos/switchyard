@@ -159,6 +159,13 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 /* task card */
 .task { position: relative; }
 .task .t { padding-right: 24px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* the editable title text — its own click zone (doesn't open the task); the text
+   cursor + dotted underline on hover hint "double-click to rename" */
+.tname { border-radius: 3px; cursor: text; }
+.tname:hover { text-decoration: underline dotted #7d7367; text-underline-offset: 2px; }
+/* the inline rename field that replaces the title text during an edit */
+.tname-edit { flex: 1 1 8em; min-width: 0; margin: 0; padding: 1px 6px; font: inherit; font-weight: 600;
+  color: #ece6dd; background: #2a241e; border: 1px solid #d97757; border-radius: 5px; }
 .card.clickable { cursor: pointer; transition: border-color .12s, background .12s; }
 .card.clickable:hover { border-color: #d97757; background: #2a231c; }
 /* selected: the item currently open in the bottom terminal — left accent bar + tint, wins over hover */

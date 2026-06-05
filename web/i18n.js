@@ -94,6 +94,7 @@
 
       // task card
       "task.waiting": "等待你授权",
+      "task.renameHint": "双击重命名",
       "task.stopTitle": "停止会话并归档",
       "task.worktreeKept": "worktree 未删",
       "task.removeWorktree": "删除 worktree",
@@ -237,6 +238,7 @@
       "repo.emptyHintPost": "to start dispatching tasks",
 
       "task.waiting": "Waiting for your approval",
+      "task.renameHint": "Double-click to rename",
       "task.stopTitle": "Stop session & archive",
       "task.worktreeKept": "worktree kept",
       "task.removeWorktree": "Remove worktree",
