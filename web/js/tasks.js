@@ -176,13 +176,14 @@ export async function loadTasks() {
 export function renameTask(event, id) {
   event.stopPropagation();                    // don't let the card's onclick connect()
   const span = event.currentTarget;
-  if (!span || span.querySelector("input")) return;   // already editing this one
+  if (!span || editingTaskId === id) return;   // already editing this one
   const current = tasksById[id]?.title ?? span.textContent;
   editingTaskId = id;
 
   const input = document.createElement("input");
   input.className = "tname-edit";
   input.value = current;
+  input.size = 1;                             // tiny intrinsic width — let flex size it, never force a wrap
   input.onclick = e => e.stopPropagation();   // clicks inside the field aren't card clicks
   input.ondblclick = e => e.stopPropagation();
 
@@ -210,8 +211,11 @@ export function renameTask(event, id) {
   };
   input.onblur = () => finish(true);          // click away saves
 
-  span.textContent = "";
-  span.appendChild(input);
+  // Insert the field as a sibling of the (hidden) title span — i.e. a DIRECT flex
+  // child of `.t` — so its flex sizing actually applies and it edits in place,
+  // instead of rendering at its intrinsic width and wrapping onto a second line.
+  span.style.display = "none";
+  span.after(input);
   input.focus();
   input.select();
 }
