@@ -178,6 +178,10 @@
       "skill.loadFailed": "加载可用插件失败",
       "skill.availableEmpty": "没有可用插件",
       "skill.loading": "加载中…",
+
+      // theme toggle (header)
+      "theme.toLight": "切换到浅色",
+      "theme.toDark": "切换到深色",
     },
     en: {
       "repo.new": "＋ New repo",
@@ -319,6 +323,10 @@
       "skill.loadFailed": "Failed to load available plugins",
       "skill.availableEmpty": "No plugins available",
       "skill.loading": "Loading…",
+
+      // theme toggle (header)
+      "theme.toLight": "Switch to light",
+      "theme.toDark": "Switch to dark",
     },
   };
 

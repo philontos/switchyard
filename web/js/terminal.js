@@ -14,6 +14,21 @@ import { toast } from "./feedback.js";
 const panes = new Map();
 let activeId = null;   // the task whose pane is currently visible (null = none)
 
+// xterm paints to a canvas from a JS theme object, so it can't read the CSS
+// tokens in app.css — it carries its own light/dark pair. Kept in sync with the
+// --bg / --term-fg / --accent values for each theme. termTheme() picks by the
+// global Theme (falls back to dark before theme.js loads).
+const TERM_THEMES = {
+  dark:  { background: "#1a1613", foreground: "#ddd4c8", cursor: "#d97757", cursorAccent: "#1a1613", selectionBackground: "#d9775740" },
+  light: { background: "#fbf8f2", foreground: "#3a322a", cursor: "#c2603f", cursorAccent: "#fbf8f2", selectionBackground: "#c2603f33" },
+};
+function termTheme() { return TERM_THEMES[(window.Theme && Theme.theme) || "dark"]; }
+
+// Re-skin every live pane on a theme switch (xterm 5.x: assign options.theme).
+export function applyTermTheme() {
+  for (const p of panes.values()) { try { p.term.options.theme = termTheme(); } catch {} }
+}
+
 export function initTerm() {
   // Only the visible pane tracks the window size; background panes are re-fit
   // when they're next shown (they can't be measured while display:none anyway).
@@ -39,7 +54,7 @@ function createPane(id, query) {
 
   const term = new Terminal({
     fontSize: 13, fontFamily: "Menlo, monospace", cursorBlink: true,
-    theme: { background: "#1a1613", foreground: "#ddd4c8", cursor: "#d97757", cursorAccent: "#1a1613", selectionBackground: "#d9775740" },
+    theme: termTheme(),
     macOptionClickForcesSelection: true,   // mac: Option+拖拽 强制本地选区(绕开 TUI 鼠标模式)
     rightClickSelectsWord: true,
   });
