@@ -9,7 +9,7 @@ import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { repoGroupHead } from "./repos.js";
-import { paintSelection, taskCard, allTasks } from "./tasks.js";
+import { paintSelection, taskCard, allTasks, isEditingTask } from "./tasks.js";
 
 let hostsOrder = [];               // API order: local machine first. Active machine is state.activeHostId.
 const collapsedRepos = new Set();  // collapsed repo groups (repo id) — read by renderList
@@ -71,6 +71,12 @@ export function selectHost(id) { state.activeHostId = id; menuHostId = null; rer
 // a collapsed archived section. Task loop vars are named `tk` — `t` is the global
 // i18n function and must not be shadowed here.
 function renderList() {
+  // An inline rename input lives inside #m-list as a raw DOM node (not in the
+  // template), so rebuilding innerHTML would destroy it and steal focus. Bail
+  // while editing — this is the single chokepoint every re-render path passes
+  // through, so loadHosts (5s), loadRepos, and a language switch can't wipe it.
+  // The rail/selection in rerender() still refresh; finish() re-renders on exit.
+  if (isEditingTask()) return;
   const h = state.hostsById[state.activeHostId];
   if (!h) { $("m-list").innerHTML = ""; return; }
   const isLocal = h.kind === "local";

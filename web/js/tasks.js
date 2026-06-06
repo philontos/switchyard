@@ -11,9 +11,12 @@ import { openPty, showTermEmpty } from "./terminal.js";
 import { rerender } from "./hosts.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
-// id of the task whose title is being edited inline — set while a rename input
-// is open so the 4s poller's rerender() doesn't blow the input away mid-edit.
+// id of the task whose title is being edited inline. While set, renderList()
+// (the single place that rebuilds #m-list) bails, so NONE of the re-render paths
+// — loadTasks (4s), loadHosts (5s), loadRepos, a language switch — can blow the
+// open input away mid-edit. finish() re-renders once, on commit/cancel.
 let editingTaskId = null;
+export function isEditingTask() { return editingTaskId != null; }
 
 // reflect the current selection onto the cards already in the DOM (no refetch)
 export function paintSelection() {
