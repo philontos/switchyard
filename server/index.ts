@@ -600,6 +600,11 @@ startLivenessLoop();                // background ssh probe of remote machines
 syncReposManifest();                // bootstrap repos.json from the current catalog on boot
 
 const PORT = Number(process.env.PORT || 4500);
-server.listen(PORT, () => {
-  console.log(`task-dispatcher on http://localhost:${PORT}`);
+// Bind loopback by default — the web terminal is a live shell, so don't expose
+// it on the LAN unless explicitly asked. Set HOST=0.0.0.0 to listen on all
+// interfaces (then put auth / a reverse proxy in front), or use an ssh tunnel
+// (ssh -L 4500:localhost:4500 host) for remote access.
+const HOST = process.env.HOST || "127.0.0.1";
+server.listen(PORT, HOST, () => {
+  console.log(`task-dispatcher on http://${HOST}:${PORT}`);
 });
