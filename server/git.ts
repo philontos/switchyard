@@ -58,18 +58,24 @@ export async function listBranches(runner: Runner, mirror: string): Promise<stri
 }
 
 /**
- * Fetch just one branch's LATEST commit (shallow, depth 1) into the local bare
- * repo at dispatch time. Shallow keeps it to a few MB / seconds instead of
- * pulling the branch's full history. Push/MR still work against the remote.
+ * Fetch one branch at dispatch time as a BLOBLESS partial clone
+ * (--filter=blob:none): pull the full commit GRAPH but skip file blobs, which
+ * git then lazily fetches from the promisor remote on checkout. This stays close
+ * to a shallow clone on size/time, but — unlike the old --depth 1 — keeps real
+ * ancestry, so merge-base / rebase / "is this an ancestor of master" all work
+ * and finishing a task is a normal PR + merge (no bogus "unrelated histories",
+ * which --depth 1's parentless boundary commit caused). The first filtered fetch
+ * auto-configures origin as the promisor remote. Push/MR still work as before.
  */
 export async function fetchBranch(runner: Runner, mirror: string, branch: string) {
-  await git(runner, mirror, ["fetch", "--depth", "1", "origin", `+refs/heads/${branch}:refs/heads/${branch}`]);
+  await git(runner, mirror, ["fetch", "--filter=blob:none", "origin", `+refs/heads/${branch}:refs/heads/${branch}`]);
 }
 
-/** Manual full refresh of all branches (the repo card's "fetch" button). */
+/** Manual full refresh of all branches (the repo card's "fetch" button). Keeps
+ *  the blobless filter so refreshing many branches stays light (blobs stay lazy). */
 export async function fetchMirror(runner: Runner, mirror: string, gitUrl: string, token: string | null) {
   await git(runner, mirror, ["remote", "set-url", "origin", authUrl(gitUrl, token)]).catch(() => {});
-  await git(runner, mirror, ["fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*"]);
+  await git(runner, mirror, ["fetch", "--filter=blob:none", "--prune", "origin", "+refs/heads/*:refs/heads/*"]);
 }
 
 export async function addWorktree(runner: Runner, mirror: string, dest: string, workBranch: string, baseBranch: string) {
