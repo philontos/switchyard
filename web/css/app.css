@@ -195,8 +195,11 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .sdot.error { background: #f85149; box-shadow: 0 0 5px #f8514999; }
 .sdot.cleaned { background: #6b6356; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-/* permanent terminal column (col3) + empty state */
-#term { flex: 1; padding: 6px; min-height: 0; }
+/* permanent terminal column (col3) + empty state. #term is a stack: one
+   .term-pane per task, only the active one shown — switching just toggles
+   display, so kept-alive terminals are reused instead of rebuilt. */
+#term { flex: 1; min-height: 0; position: relative; }
+.term-pane { position: absolute; inset: 0; padding: 6px; }
 .term-empty { position: absolute; inset: 38px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #6b6356; pointer-events: none; }
 .term-empty.hidden { display: none; }
 .term-empty .te-ic { font-size: 34px; opacity: .6; }
