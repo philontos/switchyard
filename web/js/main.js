@@ -9,7 +9,7 @@ import { $ } from "./dom.js";
 import { toast } from "./feedback.js";
 import { closeDialog } from "./dialog.js";
 import { Selects, csMount } from "./select.js";
-import { initTerm, showTermEmpty } from "./terminal.js";
+import { initTerm, showTermEmpty, applyTermTheme } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss } from "./hosts.js";
@@ -44,19 +44,30 @@ window.addEventListener("unhandledrejection", (e) => {
 
 // ---- i18n wiring ----
 function renderSwitcher() { $("lang-toggle").textContent = I18N.lang === "zh" ? "EN" : "中"; }
+// theme toggle: icon = destination (☀️ → light, 🌙 → dark), title localized.
+function renderThemeToggle() {
+  const toLight = Theme.theme === "dark";
+  $("theme-toggle").textContent = toLight ? "☀️" : "🌙";
+  $("theme-toggle").title = t(toLight ? "theme.toLight" : "theme.toDark");
+}
 // re-render everything not covered by data-i18n attributes when the language flips
 I18N.onChange = () => {
   renderSwitcher();
+  renderThemeToggle();   // its title is localized
   const sel = Selects["t-base"];
   if (sel) { sel.ph = t("task.branchPh"); sel.repaint && sel.repaint(); }
   loadRepos();
   loadHosts();
   loadTasks();
 };
+// theme switch: relabel the button + re-skin the (canvas-painted) terminal,
+// which can't pick up the CSS-token swap on its own.
+Theme.onChange = () => { renderThemeToggle(); applyTermTheme(); };
 
 I18N.init();         // resolve locale from localStorage / browser before first t()
 I18N.applyStatic();  // fill all data-i18n / data-i18n-ph markup
 renderSwitcher();
+renderThemeToggle();
 
 function dismissBoot() { const b = $("boot"); if (b) b.classList.add("done"); }
 try { initTerm(); } catch (e) { console.error("terminal init failed:", e); }

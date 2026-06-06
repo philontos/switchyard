@@ -4,12 +4,16 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Task Dispatcher</title>
+<!-- No-flash theme init: set data-theme from storage BEFORE the stylesheet
+     applies, so the first paint is already light/dark with no flicker. Default
+     is dark (existing users unchanged). theme.js re-derives the same value. -->
+<script>try{var _t=localStorage.getItem("theme");document.documentElement.dataset.theme=_t==="light"?"light":"dark";}catch(e){document.documentElement.dataset.theme="dark";}</script>
 <link rel="stylesheet" href="/vendor/xterm.css" />
 <link rel="stylesheet" href="/css/app.css" />
 </head>
 <body>
 <div id="boot"><div class="spinner"></div></div>
-<header>🛰️ Task Dispatcher<span style="flex:1"></span><button id="skills-btn" class="sec" data-i18n="skill.manage" onclick="openSkillsModal()"></button><button id="preset-btn" class="sec" data-i18n="preset.manage" onclick="openPresetModal()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
+<header>🛰️ Task Dispatcher<span style="flex:1"></span><button id="skills-btn" class="sec" data-i18n="skill.manage" onclick="openSkillsModal()"></button><button id="preset-btn" class="sec" data-i18n="preset.manage" onclick="openPresetModal()"></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
   <div id="m-list" class="list"></div>
@@ -122,7 +126,8 @@
      terminal libs — keeps the first paint correct regardless of script timing.
      xterm is self-hosted under /vendor (no external CDN). -->
 <script src="/i18n.js"></script>
-<script>I18N.init(); I18N.applyStatic();
+<script src="/theme.js"></script>
+<script>I18N.init(); Theme.init(); I18N.applyStatic();
   // failsafe: reveal the page even if a downstream script never runs
   setTimeout(function () { var b = document.getElementById("boot"); if (b) b.classList.add("done"); }, 7000);
 </script>
