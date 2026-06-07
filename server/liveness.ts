@@ -1,5 +1,6 @@
 import { db, Host } from "./db.js";
 import { sshProbe } from "./runner.js";
+import { NS } from "./paths.js";
 
 /**
  * Probe one remote machine: prove reachability and, on first success, discover
@@ -10,7 +11,10 @@ export async function probeHost(host: Host) {
   if (host.kind === "local") return;
   try {
     const { home } = await sshProbe(host.target);
-    const dataDir = host.data_dir || `${home}/.task-dispatcher`;
+    // namespace the remote root by THIS controller's ns — its data on the remote
+    // lives at <remote-home>/.task-dispatcher/<ns>/, disjoint from any other
+    // controller (incl. the remote's own dispatcher) sharing that machine.
+    const dataDir = host.data_dir || `${home}/.task-dispatcher/${NS}`;
     db.prepare("UPDATE hosts SET status='online', last_checked=datetime('now'), data_dir=? WHERE id=?")
       .run(dataDir, host.id);
   } catch {

@@ -24,7 +24,7 @@ import { localRunner, runnerFor, type Runner } from "./runner.js";
 import { resolveCwd } from "./local.js";
 import { hookSettingsJson } from "./hooks.js";
 import { startLivenessLoop, probeHost } from "./liveness.js";
-import { WEB_DIR, DID_MIGRATE } from "./paths.js";
+import { WEB_DIR, DID_MIGRATE, NS } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
 
 // ensure child processes (git/tmux/glab/pty) find Homebrew/usr-local binaries
@@ -85,8 +85,9 @@ function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "task";
 }
 
-// matches dispatcher-owned sessions (new tdsp-* scheme + legacy task-N)
-const SESSION_RE = /^(tdsp|task)-\d+(-[a-z0-9-]+)?$/;
+// matches dispatcher-owned sessions: tdsp-[<ns>-]<id>[-slug] (+ legacy task-N).
+// the optional <ns> segment is this controller's namespace (a-z0-9).
+const SESSION_RE = /^(tdsp|task)-([a-z0-9]+-)?\d+(-[a-z0-9-]+)?$/;
 
 // ---------- repos ----------
 app.get("/api/repos", (_req, res) => {
@@ -245,7 +246,7 @@ app.post("/api/tasks", async (req, res) => {
   const worktree = path.join(path.dirname(repo.mirror_path), "..", "worktrees", `${repo.id}-${id}`);
   const wtAbs = path.resolve(worktree);
   // distinctive name so it never collides with unrelated tmux sessions
-  const session = `tdsp-${id}-${slug(repo.name)}-${s}`;
+  const session = `tdsp-${NS}-${id}-${slug(repo.name)}-${s}`;
 
   try {
     await fetchBranch(runner, repo.mirror_path, base_branch); // pull latest of base branch now
@@ -263,7 +264,7 @@ app.post("/api/tasks", async (req, res) => {
     // which the dispatcher reads back via runner.exists — same on the local box and
     // on remotes. Deliver settings.local.json through putDir (overlays the .claude
     // skills/ already there); keep both injected paths out of the repo's git status.
-    const hooksTmp = path.join(os.tmpdir(), `tdsp-hooks-${id}`, ".claude");
+    const hooksTmp = path.join(os.tmpdir(), `tdsp-hooks-${NS}-${id}`, ".claude");
     fs.mkdirSync(hooksTmp, { recursive: true });
     fs.writeFileSync(path.join(hooksTmp, "settings.local.json"), hookSettingsJson(wtAbs));
     await runner.putDir(hooksTmp, path.join(wtAbs, ".claude"));
@@ -316,7 +317,7 @@ app.post("/api/tasks/local", async (req, res) => {
   ).run(host.id, provided, cwd);
   const id = Number(info.lastInsertRowid);
   const title = provided || tr(lang, "task.localDefaultTitle", { id });
-  const session = `tdsp-${id}-local-${slug(title)}`;
+  const session = `tdsp-${NS}-${id}-local-${slug(title)}`;
 
   try {
     await startShellSession(runner, session, cwd);
@@ -345,7 +346,7 @@ app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25
 
   const runner = taskRunner(task);
   const dest = pastedDest(base, pasteFilename(Date.now(), ext));
-  const tmp = path.join(os.tmpdir(), `tdsp-paste-${task.id}-${path.basename(dest)}`);
+  const tmp = path.join(os.tmpdir(), `tdsp-paste-${NS}-${task.id}-${path.basename(dest)}`);
   try {
     fs.writeFileSync(tmp, req.body);
     await runner.putFile(tmp, dest); // land it ON the task's machine (local fs / ssh)
