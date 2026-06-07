@@ -70,7 +70,7 @@ export async function pasteText(runner: Runner, session: string, text: string) {
 export async function listSessions(runner: Runner): Promise<string[]> {
   try {
     const out = await tmux(runner, ["list-sessions", "-F", "#{session_name}"]);
-    return out.split("\n").map((s) => s.trim()).filter((s) => /^(tdsp|task)-\d+(-[a-z0-9-]+)?$/.test(s));
+    return out.split("\n").map((s) => s.trim()).filter((s) => /^(tdsp|task)-([a-z0-9]+-)?\d+(-[a-z0-9-]+)?$/.test(s));
   } catch {
     return []; // no server / no sessions
   }

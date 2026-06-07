@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
+import crypto from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,7 +23,31 @@ export function resolveDataDir(env: NodeJS.ProcessEnv = process.env, home: strin
   const override = env.TASK_DISPATCHER_DATA_DIR;
   return override && override.trim() ? path.resolve(override) : path.join(home, ".task-dispatcher");
 }
-export const DATA_DIR = resolveDataDir();
+export const BASE_DATA_DIR = resolveDataDir();
+
+// Per-controller namespace. Two controllers that share a machine's disk + tmux
+// server (e.g. two boxes that are each other's ssh remote) would otherwise
+// collide: their db ids both start at 1, and every path / session name is built
+// from those ids (mirrors/{repoId}-…, worktrees/{repoId}-{taskId}, tmux
+// tdsp-{taskId}-…). Slotting a stable per-controller id into the data root and
+// the tmux names keeps each controller's footprint disjoint on every machine it
+// touches. Stored as a flat file at the un-namespaced base so it's readable
+// before we build the namespaced DATA_DIR (chicken-and-egg); generated once.
+export function resolveNamespace(baseDir: string): string {
+  const idFile = path.join(baseDir, "controller-id");
+  try {
+    const existing = fs.readFileSync(idFile, "utf8").trim();
+    if (/^[a-z0-9]+$/.test(existing)) return existing;
+  } catch { /* not created yet */ }
+  const ns = crypto.randomBytes(4).toString("hex");
+  try {
+    fs.mkdirSync(baseDir, { recursive: true });
+    fs.writeFileSync(idFile, ns + "\n");
+  } catch { /* best effort */ }
+  return ns;
+}
+export const NS = resolveNamespace(BASE_DATA_DIR);
+export const DATA_DIR = path.join(BASE_DATA_DIR, NS);
 export const MIRRORS_DIR = path.join(DATA_DIR, "mirrors");
 export const WORKTREES_DIR = path.join(DATA_DIR, "worktrees");
 export const DB_PATH = path.join(DATA_DIR, "dispatcher.db");
