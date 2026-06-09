@@ -260,12 +260,15 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .card-x:hover { background: #f8514914; color: var(--red); }
 /* drag-to-reorder (reorder.js): repo task cards carry data-repo. touch-action:none
    lets a long-press own the touch gesture (so the drag isn't read as a scroll).
-   .dragging is the lifted state while held; .reordering kills text selection on the
-   group and shows the grab cursor for the duration. */
+   While held the card becomes a position:fixed float (left/top set inline) that
+   tracks the pointer; .reordering kills text selection on the group and shows the
+   grab cursor; .task-ph is the placeholder marking where the card will land. */
 .task[data-repo] { touch-action: none; }
 .grp.reordering { user-select: none; cursor: grabbing; }
-.task.dragging { opacity: .9; z-index: 5; cursor: grabbing; border-color: var(--accent);
-  background: var(--card-hover); box-shadow: 0 6px 16px rgba(0,0,0,.28); transform: scale(1.01); }
+.task.dragging { opacity: .95; cursor: grabbing; border-color: var(--accent);
+  background: var(--card-hover); box-shadow: 0 8px 22px rgba(0,0,0,.32); }
+.task-ph { margin: 0 0 6px 14px; border: 1px dashed var(--accent); border-radius: 8px;
+  box-sizing: border-box; background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .muted { color: var(--muted); font-size: 12px; }
 /* status dot: color = state, pulse = in-progress (replaces text pills) */
 .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint-2); }
