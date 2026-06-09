@@ -10,7 +10,7 @@ import path from "node:path";
 import { db, Repo, Task, Host, Preset } from "./db.js";
 import { renameTask } from "./tasks.js";
 import {
-  initMirror, fetchMirror, fetchBranch, listBranches, addWorktree, removeWorktree,
+  initMirror, fetchMirror, listBranches, addWorktreeFromBranch, removeWorktree,
   mirrorPath,
 } from "./git.js";
 import { scanSkills, resolveSkills, defaultSources } from "./skills.js";
@@ -249,8 +249,10 @@ app.post("/api/tasks", async (req, res) => {
   const session = `tdsp-${NS}-${id}-${slug(repo.name)}-${s}`;
 
   try {
-    await fetchBranch(runner, repo.mirror_path, base_branch); // pull latest of base branch now
-    await addWorktree(runner, repo.mirror_path, wtAbs, workBranch, base_branch);
+    // create the worktree from the base branch's latest origin tip (falls back to
+    // a local head for unpushed bases). The base is only a start point, so this
+    // works even when a live task currently has that branch checked out.
+    await addWorktreeFromBranch(runner, repo.mirror_path, wtAbs, workBranch, base_branch);
     // deliver each selected skill's whole dir into the worktree's .claude/skills/
     for (const sk of found) await runner.putDir(sk.dir, path.join(wtAbs, ".claude", "skills", sk.name));
     // keep delivered skills out of the repo's git status (worktree-local exclude)
@@ -394,6 +396,31 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
     if (repo?.mirror_path) await removeWorktree(runner, repo.mirror_path, task.worktree_path, task.work_branch);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
     res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// resume: bring a task's tmux session back when it died (mis-kill, host reboot,
+// claude crash) but its worktree is still on disk. Relaunches `claude --continue`
+// in the SAME worktree, which reopens the prior conversation (claude keys the
+// transcript by cwd). Idempotent: if the session is somehow already live, just
+// flip the row back to running.
+app.post("/api/tasks/:id/resume", async (req, res) => {
+  const lang = langFromReq(req);
+  const task = getTask.get(req.params.id) as Task | undefined;
+  if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!task.session || !task.worktree_path) return res.status(409).json({ error: tr(lang, "task.notResumable") });
+  if (offline(taskHost(task))) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const runner = taskRunner(task);
+  if (!(await runner.exists(task.worktree_path).catch(() => false))) {
+    return res.status(409).json({ error: tr(lang, "task.worktreeGone") });
+  }
+  try {
+    const alreadyAlive = await hasSession(runner, task.session).catch(() => false);
+    if (!alreadyAlive) await startSession(runner, task.session, task.worktree_path, null, { continue: true });
+    db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(task.id);
+    res.json({ ok: true, alreadyAlive });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
   }

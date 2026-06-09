@@ -9,9 +9,19 @@ async function tmux(runner: Runner, args: string[]): Promise<string> {
  * If a prompt is given it is passed as claude's initial message; the
  * session stays interactive (TUI), so permission prompts work normally.
  */
-export async function startSession(runner: Runner, session: string, cwd: string, prompt?: string | null) {
-  const cmd = ["new-session", "-d", "-s", session, "-c", cwd, "claude"];
-  if (prompt && prompt.trim()) cmd.push(prompt);
+export async function startSession(
+  runner: Runner,
+  session: string,
+  cwd: string,
+  prompt?: string | null,
+  opts?: { continue?: boolean },
+) {
+  // resume reattaches to the prior conversation: claude keys its transcript by
+  // cwd, so launching `claude --continue` from the same worktree reopens it. The
+  // original opening prompt is NOT re-sent — the conversation already has it.
+  const launch = opts?.continue ? ["claude", "--continue"] : ["claude"];
+  const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...launch];
+  if (prompt && prompt.trim() && !opts?.continue) cmd.push(prompt);
   await tmux(runner, cmd);
   // keep the pane around if claude exits so the user can read the result
   await tmux(runner, ["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});
@@ -30,8 +40,11 @@ export async function startShellSession(runner: Runner, session: string, cwd: st
 }
 
 export async function hasSession(runner: Runner, session: string): Promise<boolean> {
+  if (!session || !session.trim()) return false;
   try {
-    await tmux(runner, ["has-session", "-t", session]);
+    // "=" forces exact match — otherwise tmux prefix-matches and "tdsp-1" would be
+    // reported live whenever "tdsp-12" exists (a wrong green/alive light).
+    await tmux(runner, ["has-session", "-t", "=" + session]);
     return true;
   } catch {
     return false;
@@ -39,7 +52,13 @@ export async function hasSession(runner: Runner, session: string): Promise<boole
 }
 
 export async function killSession(runner: Runner, session: string) {
-  await tmux(runner, ["kill-session", "-t", session]).catch(() => {});
+  // An empty target makes tmux kill the CURRENT/most-recent session — so a task
+  // whose session was never set (a failed dispatch stores "") would, on cleanup,
+  // tear down whatever session you're actively using. Never let "" reach tmux.
+  if (!session || !session.trim()) return;
+  // "=" forces an exact-match target; without it tmux prefix-matches, so killing
+  // "tdsp-1" could also catch "tdsp-12".
+  await tmux(runner, ["kill-session", "-t", "=" + session]).catch(() => {});
 }
 
 /**
