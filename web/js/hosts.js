@@ -10,6 +10,7 @@ import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { repoGroupHead } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask } from "./tasks.js";
+import { orderTasks, isDraggingTask } from "./reorder.js";
 
 let hostsOrder = [];               // API order: local machine first. Active machine is state.activeHostId.
 const collapsedRepos = new Set();  // collapsed repo groups (repo id) — read by renderList
@@ -76,7 +77,9 @@ function renderList() {
   // while editing — this is the single chokepoint every re-render path passes
   // through, so loadHosts (5s), loadRepos, and a language switch can't wipe it.
   // The rail/selection in rerender() still refresh; finish() re-renders on exit.
-  if (isEditingTask()) return;
+  // Same bail while a card is mid-drag (reorder.js) — a poll must not rebuild
+  // #m-list and yank the dragged node; cleanup() re-renders once on drop.
+  if (isEditingTask() || isDraggingTask()) return;
   const h = state.hostsById[state.activeHostId];
   if (!h) { $("m-list").innerHTML = ""; return; }
   const isLocal = h.kind === "local";
@@ -96,7 +99,7 @@ function renderList() {
   const repos = state.repos.filter(r => Number(r.host_id) === h.id);
   const repoBlocks = repos.map(r => {
     const collapsed = collapsedRepos.has(r.id);
-    const mine = tasks.filter(tk => tk.repo_id === r.id && tk.status !== "cleaned");
+    const mine = orderTasks(r.id, tasks.filter(tk => tk.repo_id === r.id && tk.status !== "cleaned"));
     const body = collapsed ? ""
       : (mine.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("repo.noTasks")}</div>`);
     // `.open` (expanded) is what shows the state now — a left accent bar + faint

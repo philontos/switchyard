@@ -16,6 +16,7 @@ import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost,
 import { loadTasks, addTask, archive, removeWt, deleteTask, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask } from "./tasks.js";
 import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
+import { initReorder } from "./reorder.js";
 
 // ---- inline-onclick bridge ----
 // Every function referenced by an onclick="…" attribute (static markup in
@@ -73,6 +74,7 @@ function dismissBoot() { const b = $("boot"); if (b) b.classList.add("done"); }
 try { initTerm(); } catch (e) { console.error("terminal init failed:", e); }
 showTermEmpty();
 initHostMenuDismiss();   // close the machine ⚙ menu on any outside click
+initReorder();           // long-press drag-to-reorder of repo task cards (session-only)
 $("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
 csMount("t-preset").setOptions([{ value: "", label: t("task.presetNone") }], "");   // populated per open

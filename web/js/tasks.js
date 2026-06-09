@@ -155,7 +155,10 @@ export function taskCard(t, online) {
     ${meta}`;
   const open = active ? ` clickable" onclick="connect(${t.id})` : "";
   const sel = t.id === state.selectedTaskId ? " selected" : "";
-  return `<div class="card task${sel}${open}" data-id="${t.id}">
+  // data-repo marks a card as drag-reorderable (reorder.js) — only active repo
+  // tasks: shells have no repo group, archived/cleaned ones aren't reorderable.
+  const drag = active && t.kind !== "local" ? ` data-repo="${t.repo_id}"` : "";
+  return `<div class="card task${sel}${open}" data-id="${t.id}"${drag}>
     <button class="card-x" title="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
     ${head}${note}
   </div>`;
