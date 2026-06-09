@@ -29,13 +29,30 @@ export function applyTermTheme() {
   for (const p of panes.values()) { try { p.term.options.theme = termTheme(); } catch {} }
 }
 
-export function initTerm() {
-  // Only the visible pane tracks the window size; background panes are re-fit
-  // when they're next shown (they can't be measured while display:none anyway).
-  window.addEventListener("resize", () => {
+// Re-fit the visible pane (background panes can't be measured while display:none,
+// and are re-fit when next shown). Coalesced to one fit per frame: rAF both
+// batches a burst of resize notifications and defers the measurement until after
+// layout has settled, so we never fit against a half-laid-out box.
+let fitQueued = false;
+function fitActive() {
+  if (fitQueued) return;
+  fitQueued = true;
+  requestAnimationFrame(() => {
+    fitQueued = false;
     const p = activeId != null ? panes.get(activeId) : null;
     if (p) { try { p.fit.fit(); sendResize(p); } catch {} }
   });
+}
+
+export function initTerm() {
+  window.addEventListener("resize", fitActive);
+  // A one-shot fit (showPane / ws.onopen) can run before the layout is final and
+  // over-count columns; xterm then renders wider than the visible box, so the
+  // right edge is clipped and typing there pushes the cursor — and the whole
+  // page — sideways. Re-fitting whenever #term's box actually changes (first
+  // paint settling, a scrollbar toggling, browser zoom, window resize) keeps the
+  // column count matched to the real width, so neither happens.
+  try { new ResizeObserver(fitActive).observe($("term")); } catch {}
 }
 
 function sendResize(p) {
