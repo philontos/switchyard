@@ -271,8 +271,11 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 /* permanent terminal column (col3) + empty state. #term is a stack: one
    .term-pane per task, only the active one shown — switching just toggles
-   display, so kept-alive terminals are reused instead of rebuilt. */
-#term { flex: 1; min-height: 0; position: relative; }
+   display, so kept-alive terminals are reused instead of rebuilt. overflow:hidden
+   clips any momentary over-fit (xterm rendering a column or two wider than the
+   box) at the terminal edge, so it can never propagate up and scroll the whole
+   page sideways when the cursor reaches the right edge. */
+#term { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 .term-pane { position: absolute; inset: 0; padding: 6px; }
 .term-empty { position: absolute; inset: 38px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--faint-2); pointer-events: none; }
 .term-empty.hidden { display: none; }
