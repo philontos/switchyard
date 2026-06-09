@@ -269,6 +269,13 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   background: var(--card-hover); box-shadow: 0 8px 22px rgba(0,0,0,.32); }
 .task-ph { margin: 0 0 6px 14px; border: 1px dashed var(--accent); border-radius: 8px;
   box-sizing: border-box; background: color-mix(in srgb, var(--accent) 9%, transparent); }
+/* Resume CTA: shown when a live task's tmux session died but its worktree remains
+   (the card itself isn't click-to-connect in that state). Accent pill, matches .tag-local. */
+.t-resume { margin-top: 6px; padding: 2px 9px; font-size: 12px; line-height: 1.5;
+  color: var(--accent-text); background: #d977571f; border: 1px solid #d9775744;
+  border-radius: 6px; cursor: pointer; }
+.t-resume:hover { background: #d9775733; border-color: var(--accent); }
+.t-resume:disabled { opacity: .5; cursor: default; }
 .muted { color: var(--muted); font-size: 12px; }
 /* status dot: color = state, pulse = in-progress (replaces text pills) */
 .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint-2); }

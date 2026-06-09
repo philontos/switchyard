@@ -66,21 +66,54 @@ export async function listBranches(runner: Runner, mirror: string): Promise<stri
  * and finishing a task is a normal PR + merge (no bogus "unrelated histories",
  * which --depth 1's parentless boundary commit caused). The first filtered fetch
  * auto-configures origin as the promisor remote. Push/MR still work as before.
+ *
+ * Lands in the REMOTE-TRACKING ref `refs/remotes/origin/<branch>`, never the local
+ * head `refs/heads/<branch>`: the local-head namespace is reserved for per-task
+ * WORK branches, each checked out by exactly one worktree, and git refuses to
+ * fetch into a checked-out ref — so writing the base there used to break dispatch
+ * whenever the base was itself a live task's branch. Tracking refs are never
+ * checked out, so this is always safe.
  */
 export async function fetchBranch(runner: Runner, mirror: string, branch: string) {
-  await git(runner, mirror, ["fetch", "--filter=blob:none", "origin", `+refs/heads/${branch}:refs/heads/${branch}`]);
+  await git(runner, mirror, ["fetch", "--filter=blob:none", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`]);
 }
 
 /** Manual full refresh of all branches (the repo card's "fetch" button). Keeps
  *  the blobless filter so refreshing many branches stays light (blobs stay lazy). */
 export async function fetchMirror(runner: Runner, mirror: string, gitUrl: string, token: string | null) {
   await git(runner, mirror, ["remote", "set-url", "origin", authUrl(gitUrl, token)]).catch(() => {});
-  await git(runner, mirror, ["fetch", "--filter=blob:none", "--prune", "origin", "+refs/heads/*:refs/heads/*"]);
+  // into refs/remotes/origin/* (not local heads) for the same reason as fetchBranch:
+  // a wildcard into refs/heads/* would refuse the moment any work branch is checked out.
+  await git(runner, mirror, ["fetch", "--filter=blob:none", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"]);
 }
 
-export async function addWorktree(runner: Runner, mirror: string, dest: string, workBranch: string, baseBranch: string) {
+/** True if `ref` (a full refname) resolves in the mirror. */
+async function refExists(runner: Runner, mirror: string, ref: string): Promise<boolean> {
+  return git(runner, mirror, ["show-ref", "--verify", "--quiet", ref]).then(() => true).catch(() => false);
+}
+
+/** Low-level: create `workBranch` from `startPoint` and check it out at `dest`. */
+export async function addWorktree(runner: Runner, mirror: string, dest: string, workBranch: string, startPoint: string) {
   await runner.mkdirp(path.dirname(dest));
-  await git(runner, mirror, ["worktree", "add", "-b", workBranch, dest, baseBranch]);
+  await git(runner, mirror, ["worktree", "add", "-b", workBranch, dest, startPoint]);
+}
+
+/**
+ * Create a task's worktree from `baseBranch`. Refreshes the base's tracking ref
+ * (best-effort — a purely-local base has no origin counterpart), then branches
+ * the new work branch off `origin/<base>` when it exists, else off the local head
+ * `<base>` (so you can fork another task's unpushed work). The base is only ever a
+ * START POINT — never checked out or modified — so any number of tasks can spring
+ * from the same branch, even one a live task currently has checked out.
+ */
+export async function addWorktreeFromBranch(
+  runner: Runner, mirror: string, dest: string, workBranch: string, baseBranch: string,
+) {
+  await fetchBranch(runner, mirror, baseBranch).catch(() => {});
+  const startPoint = (await refExists(runner, mirror, `refs/remotes/origin/${baseBranch}`))
+    ? `origin/${baseBranch}`
+    : baseBranch;
+  await addWorktree(runner, mirror, dest, workBranch, startPoint);
 }
 
 export async function removeWorktree(runner: Runner, mirror: string, dest: string, workBranch?: string) {
