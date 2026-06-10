@@ -252,11 +252,16 @@ export async function openPreview(taskId, port) {
   }
   if (taskId !== previewTaskId || port !== previewPort) return;   // superseded by a newer open
   if (!r || !r.ok) { previewStatus("error", reasonMsg(r && r.reason)); return; }
+  // Always go through the proxy origin (t<task>-<port>.localhost), even for local
+  // tasks: it rides the SAME path you reach the dashboard by (direct, or an
+  // `ssh -L 4500` tunnel), and the controller proxies to the dev server's real
+  // machine. A bare localhost:<port> would resolve to the BROWSER's machine —
+  // wrong whenever the dashboard isn't served from the box you're sitting at.
   const proto = location.protocol === "https:" ? "https" : "http";
   const portSuffix = location.port ? ":" + location.port : "";
-  const local = r.kind === "local";
-  $("prev-host").textContent = local ? `localhost:${port}` : `t${taskId}-${port}.localhost`;
-  loadFrame(local ? `${proto}://localhost:${port}/` : `${proto}://t${taskId}-${port}.localhost${portSuffix}/`);
+  const host = `t${taskId}-${port}.localhost`;
+  $("prev-host").textContent = host;
+  loadFrame(`${proto}://${host}${portSuffix}/`);
 }
 
 // load the iframe; clear the overlay on load, or — if nothing renders within the

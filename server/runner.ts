@@ -77,9 +77,13 @@ const SSH_MUX = [
 const SSH_BATCH = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"];
 
 /** ssh args for a detached `-N -L` port-forward that rides the shared master —
- *  used to reach a remote task's 127.0.0.1:<port> for the web preview. */
+ *  used to reach a remote task's dev server for the web preview. The local end
+ *  is bound IPv4 (we own it); the remote target is `localhost` (NOT 127.0.0.1)
+ *  so the remote sshd resolves it and connects to whichever loopback family the
+ *  dev server bound — vite & friends default to ::1 (IPv6) on macOS, which a
+ *  hardcoded 127.0.0.1 target would miss. */
 export function sshForwardArgs(target: string, localPort: number, remotePort: number): string[] {
-  return ["-N", ...SSH_MUX, ...SSH_BATCH, "-L", `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`, target];
+  return ["-N", ...SSH_MUX, ...SSH_BATCH, "-L", `127.0.0.1:${localPort}:localhost:${remotePort}`, target];
 }
 
 export class RemoteRunner implements Runner {

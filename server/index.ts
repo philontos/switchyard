@@ -114,8 +114,22 @@ const forwards = createForwardRegistry(async (target, remotePort): Promise<Forwa
   return { localPort, close: () => { try { child.kill(); } catch {} } };
 });
 
+// A dev server may bind IPv4 (127.0.0.1) or IPv6 (::1) loopback — vite binds ::1
+// by default on macOS. Pick whichever family is actually listening (or null).
+// Cached briefly so a page load's burst of proxied requests doesn't re-probe.
+const lbCache = new Map<number, { host: string; exp: number }>();
+async function loopbackHostFor(port: number): Promise<string | null> {
+  const c = lbCache.get(port);
+  if (c && c.exp > Date.now()) return c.host;
+  let host: string | null = null;
+  if (await tcpProbe("127.0.0.1", port, 1500)) host = "127.0.0.1";
+  else if (await tcpProbe("::1", port, 1500)) host = "::1";
+  if (host) lbCache.set(port, { host, exp: Date.now() + 5000 });
+  return host;
+}
+
 // Resolve a preview to its upstream + kind. Resolves ONLY to a live task's own
-// 127.0.0.1:<port> (local) or that port reached via an ssh forward (remote) —
+// loopback <port> (local) or that port reached via an ssh forward (remote) —
 // never an arbitrary host:port, so the proxy can't become an open relay under
 // HOST=0.0.0.0. `reason` is a stable enum the UI localizes.
 type PreviewTarget =
@@ -125,7 +139,11 @@ async function previewTarget(taskId: number, port: number): Promise<PreviewTarge
   const task = getTask.get(taskId) as Task | undefined;
   if (!task || task.status === "cleaned") return { error: true, reason: "task-gone", status: 404 };
   const host = taskHost(task);
-  if (!host || host.kind === "local") return { kind: "local", host: "127.0.0.1", port };
+  if (!host || host.kind === "local") {
+    const lb = await loopbackHostFor(port); // 127.0.0.1 or ::1, whichever is listening
+    if (!lb) return { error: true, reason: "port-down", status: 404 };
+    return { kind: "local", host: lb, port };
+  }
   if (host.status !== "online") return { error: true, reason: "host-offline", status: 502 };
   try {
     const localPort = await forwards.acquire({ id: host.id, target: host.target }, port);
