@@ -265,10 +265,17 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    grab cursor; .task-ph is the placeholder marking where the card will land. */
 .task[data-repo] { touch-action: none; }
 .grp.reordering { user-select: none; cursor: grabbing; }
-.task.dragging { opacity: .95; cursor: grabbing; border-color: var(--accent);
-  background: var(--card-hover); box-shadow: 0 8px 22px rgba(0,0,0,.32); }
+/* pickup: scale up + deepen the shadow, animated. reorder.js sets the float's
+   position inline (left/top) every move, so those are deliberately NOT in the
+   transition list — only transform + box-shadow animate, so the card never lags
+   the pointer. The drop glide overrides this transition inline to add left/top. */
+.task.dragging { cursor: grabbing; border-color: var(--accent); background: var(--card-hover);
+  transform: scale(1.03); box-shadow: 0 12px 28px rgba(0,0,0,.34);
+  transition: transform .16s ease, box-shadow .16s ease; }
 .task-ph { margin: 0 0 6px 14px; border: 1px dashed var(--accent); border-radius: 8px;
-  box-sizing: border-box; background: color-mix(in srgb, var(--accent) 9%, transparent); }
+  box-sizing: border-box; background: color-mix(in srgb, var(--accent) 9%, transparent);
+  animation: phin .16s ease; }
+@keyframes phin { from { opacity: 0; } }
 /* Resume CTA: shown when a live task's tmux session died but its worktree remains
    (the card itself isn't click-to-connect in that state). Accent pill, matches .tag-local. */
 .t-resume { margin-top: 6px; padding: 2px 9px; font-size: 12px; line-height: 1.5;
