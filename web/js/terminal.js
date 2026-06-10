@@ -89,6 +89,12 @@ function createPane(id, query) {
   // 键盘复制: mac=Cmd+C, 其他=Ctrl+Shift+C; 仅在有选区时拦截,避免吃掉 ^C(SIGINT)
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown") return true;
+    // 组字途中按 CapsLock(macOS 切换中/英输入法的常用键)时,xterm 的 keydown 处理会先于
+    // compositionHelper 跑:它不在 229/Shift/Ctrl/Alt 的"忽略"名单里,于是被当成提交键,
+    // _finalizeComposition(false) 先把组字内容上屏一次;紧接着系统真正的 compositionend
+    // 又上屏一次 → 同一段拼音发两遍("nihao" 变 "ni haonihao")。CapsLock 和那几个修饰键
+    // 一样不该结束组字,组字途中直接吃掉它,让上屏只走 compositionend 一条路。
+    if (e.isComposing && e.keyCode === 20) return false;
     const isMac = navigator.platform.toUpperCase().includes("MAC");
     const isCopy = isMac ? (e.metaKey && e.code === "KeyC") : (e.ctrlKey && e.shiftKey && e.code === "KeyC");
     if (isCopy && term.hasSelection()) {
