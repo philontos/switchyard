@@ -76,6 +76,12 @@ const SSH_MUX = [
 ];
 const SSH_BATCH = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"];
 
+/** ssh args for a detached `-N -L` port-forward that rides the shared master —
+ *  used to reach a remote task's 127.0.0.1:<port> for the web preview. */
+export function sshForwardArgs(target: string, localPort: number, remotePort: number): string[] {
+  return ["-N", ...SSH_MUX, ...SSH_BATCH, "-L", `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`, target];
+}
+
 export class RemoteRunner implements Runner {
   kind = "ssh" as const;
   constructor(public target: string, public dataDir: string) {}

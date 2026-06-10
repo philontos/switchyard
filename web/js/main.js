@@ -13,7 +13,7 @@ import { initTerm, showTermEmpty, applyTermTheme } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss } from "./hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask } from "./tasks.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask } from "./tasks.js";
 import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 import { initReorder } from "./reorder.js";
@@ -25,7 +25,7 @@ import { initReorder } from "./reorder.js";
 // that exposes them. (I18N is already global, set by i18n.js.)
 Object.assign(window, {
   // tasks
-  addTask, openTaskModal, closeTaskModal, connect, archive, removeWt, deleteTask,
+  addTask, openTaskModal, closeTaskModal, connect, archive, removeWt, deleteTask, resume,
   addLocalTask, renameTask,
   // repos
   delRepo, openRepoModal, closeRepoModal, addRepo,

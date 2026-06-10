@@ -10,7 +10,7 @@ import path from "node:path";
 import { db, Repo, Task, Host, Preset } from "./db.js";
 import { renameTask } from "./tasks.js";
 import {
-  initMirror, fetchMirror, fetchBranch, listBranches, addWorktree, removeWorktree,
+  initMirror, fetchMirror, listBranches, addWorktreeFromBranch, removeWorktree,
   mirrorPath,
 } from "./git.js";
 import { scanSkills, resolveSkills, defaultSources } from "./skills.js";
@@ -20,12 +20,15 @@ import { listAvailable, installPlugin } from "./plugins.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions, cancelCopyMode, pasteText } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
 import { repairWorktrees } from "./migrate.js";
-import { localRunner, runnerFor, type Runner } from "./runner.js";
+import { localRunner, runnerFor, sshForwardArgs, type Runner } from "./runner.js";
+import net from "node:net";
+import { spawn as spawnChild } from "node:child_process";
 import { resolveCwd } from "./local.js";
 import { hookSettingsJson } from "./hooks.js";
 import { startLivenessLoop, probeHost } from "./liveness.js";
 import { WEB_DIR, DID_MIGRATE, NS } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
+import { createPreviewMiddleware, handlePreviewUpgrade, parsePreviewHost, tcpProbe, createForwardRegistry, type PreviewResolution, type ForwardHandle } from "./preview.js";
 
 // ensure child processes (git/tmux/glab/pty) find Homebrew/usr-local binaries
 // regardless of how the server was launched (a stripped PATH otherwise breaks
@@ -55,7 +58,6 @@ const MOSH_BIN = resolveBin("mosh", ["/opt/homebrew/bin/mosh", "/usr/local/bin/m
 
 const app = express();
 app.use(express.json());
-app.use(express.static(WEB_DIR));
 
 const getRepo = db.prepare("SELECT * FROM repos WHERE id = ?");
 const getTask = db.prepare("SELECT * FROM tasks WHERE id = ?");
@@ -80,6 +82,68 @@ function taskHost(task: Task): Host | undefined {
 function offline(host: Host | undefined): boolean {
   return !!host && host.kind !== "local" && host.status !== "online";
 }
+
+// ---------- web preview ----------
+// Reach a task's dev server (127.0.0.1:<port> ON its machine). Local tasks the
+// frontend hits directly; remote tasks are reverse-proxied through a t<task>-
+// <port>.localhost origin (see preview.ts) whose upstream is an ssh -L forward.
+
+// a free loopback port for an ssh -L forward's local end
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => { const p = (srv.address() as { port: number }).port; srv.close(() => resolve(p)); });
+  });
+}
+async function waitListening(port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await tcpProbe("127.0.0.1", port, 500)) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+// one ssh -N -L forward per (remote host, remote port), riding the shared
+// ControlMaster; the registry tears it down after idle.
+const forwards = createForwardRegistry(async (target, remotePort): Promise<ForwardHandle> => {
+  const localPort = await freePort();
+  const child = spawnChild(SSH_BIN, sshForwardArgs(target.target, localPort, remotePort), { stdio: "ignore" });
+  child.on("error", () => {});
+  if (!(await waitListening(localPort, 5000))) { child.kill(); throw new Error("ssh -L not ready"); }
+  return { localPort, close: () => { try { child.kill(); } catch {} } };
+});
+
+// Resolve a preview to its upstream + kind. Resolves ONLY to a live task's own
+// 127.0.0.1:<port> (local) or that port reached via an ssh forward (remote) —
+// never an arbitrary host:port, so the proxy can't become an open relay under
+// HOST=0.0.0.0. `reason` is a stable enum the UI localizes.
+type PreviewTarget =
+  | { kind: "local" | "ssh"; host: string; port: number }
+  | { error: true; reason: string; status: number };
+async function previewTarget(taskId: number, port: number): Promise<PreviewTarget> {
+  const task = getTask.get(taskId) as Task | undefined;
+  if (!task || task.status === "cleaned") return { error: true, reason: "task-gone", status: 404 };
+  const host = taskHost(task);
+  if (!host || host.kind === "local") return { kind: "local", host: "127.0.0.1", port };
+  if (host.status !== "online") return { error: true, reason: "host-offline", status: 502 };
+  try {
+    const localPort = await forwards.acquire({ id: host.id, target: host.target }, port);
+    return { kind: "ssh", host: "127.0.0.1", port: localPort };
+  } catch {
+    return { error: true, reason: "forward-failed", status: 502 };
+  }
+}
+
+// the proxy just needs the upstream host:port (or an error); kind is for the UI
+async function resolvePreviewUpstream(taskId: number, port: number): Promise<PreviewResolution> {
+  const t = await previewTarget(taskId, port);
+  return "error" in t ? { error: t.reason, status: t.status } : { host: t.host, port: t.port };
+}
+
+// register BEFORE static + the API routes so a preview Host wins on arrival
+app.use(createPreviewMiddleware(resolvePreviewUpstream));
+app.use(express.static(WEB_DIR));
 
 function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "task";
@@ -249,8 +313,10 @@ app.post("/api/tasks", async (req, res) => {
   const session = `tdsp-${NS}-${id}-${slug(repo.name)}-${s}`;
 
   try {
-    await fetchBranch(runner, repo.mirror_path, base_branch); // pull latest of base branch now
-    await addWorktree(runner, repo.mirror_path, wtAbs, workBranch, base_branch);
+    // create the worktree from the base branch's latest origin tip (falls back to
+    // a local head for unpushed bases). The base is only a start point, so this
+    // works even when a live task currently has that branch checked out.
+    await addWorktreeFromBranch(runner, repo.mirror_path, wtAbs, workBranch, base_branch);
     // deliver each selected skill's whole dir into the worktree's .claude/skills/
     for (const sk of found) await runner.putDir(sk.dir, path.join(wtAbs, ".claude", "skills", sk.name));
     // keep delivered skills out of the repo's git status (worktree-local exclude)
@@ -399,6 +465,31 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
   }
 });
 
+// resume: bring a task's tmux session back when it died (mis-kill, host reboot,
+// claude crash) but its worktree is still on disk. Relaunches `claude --continue`
+// in the SAME worktree, which reopens the prior conversation (claude keys the
+// transcript by cwd). Idempotent: if the session is somehow already live, just
+// flip the row back to running.
+app.post("/api/tasks/:id/resume", async (req, res) => {
+  const lang = langFromReq(req);
+  const task = getTask.get(req.params.id) as Task | undefined;
+  if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!task.session || !task.worktree_path) return res.status(409).json({ error: tr(lang, "task.notResumable") });
+  if (offline(taskHost(task))) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const runner = taskRunner(task);
+  if (!(await runner.exists(task.worktree_path).catch(() => false))) {
+    return res.status(409).json({ error: tr(lang, "task.worktreeGone") });
+  }
+  try {
+    const alreadyAlive = await hasSession(runner, task.session).catch(() => false);
+    if (!alreadyAlive) await startSession(runner, task.session, task.worktree_path, null, { continue: true });
+    db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(task.id);
+    res.json({ ok: true, alreadyAlive });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 // rename a task's display title only — pure DB update, no host/session touched
 app.patch("/api/tasks/:id", (req, res) => {
   const lang = langFromReq(req);
@@ -418,6 +509,23 @@ app.delete("/api/tasks/:id", async (req, res) => {
   }
   db.prepare("DELETE FROM tasks WHERE id=?").run(req.params.id);
   res.json({ ok: true });
+});
+
+// reachability pre-check for the preview UI: a precise reason ("port-down" /
+// "task-gone" / "host-offline" / "forward-failed") beats handing the iframe a
+// blank/refused page. For ssh tasks this also warms the forward. Returns the
+// `kind` so the frontend knows whether to hit localhost directly or the proxy.
+app.get("/api/preview-check", async (req, res) => {
+  const taskId = Number(req.query.task);
+  const port = Number(req.query.port);
+  if (!Number.isInteger(taskId) || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return res.status(400).json({ ok: false, reason: "bad-request" });
+  }
+  const t = await previewTarget(taskId, port);
+  if ("error" in t) return res.json({ ok: false, reason: t.reason });
+  const reachable = await tcpProbe(t.host, t.port, 2500);
+  if (!reachable) return res.json({ ok: false, reason: "port-down" });
+  res.json({ ok: true, kind: t.kind });
 });
 
 // ---------- sessions (raw tmux, incl. orphans) ----------
@@ -530,7 +638,21 @@ app.post("/api/plugins/install", async (req, res) => {
 
 // ---------- pty bridge ----------
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: "/pty" });
+const wss = new WebSocketServer({ noServer: true });
+
+// Route upgrades by Host first (a preview's HMR socket), then by path (/pty).
+server.on("upgrade", (req, socket, head) => {
+  if (parsePreviewHost(req.headers.host)) {
+    handlePreviewUpgrade(req, socket, head, resolvePreviewUpstream);
+    return;
+  }
+  const { pathname } = new URL(req.url || "", "http://localhost");
+  if (pathname === "/pty") {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+    return;
+  }
+  socket.destroy();
+});
 
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url || "", "http://localhost");

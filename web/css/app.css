@@ -276,6 +276,13 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   box-sizing: border-box; background: color-mix(in srgb, var(--accent) 9%, transparent);
   animation: phin .16s ease; }
 @keyframes phin { from { opacity: 0; } }
+/* Resume CTA: shown when a live task's tmux session died but its worktree remains
+   (the card itself isn't click-to-connect in that state). Accent pill, matches .tag-local. */
+.t-resume { margin-top: 6px; padding: 2px 9px; font-size: 12px; line-height: 1.5;
+  color: var(--accent-text); background: #d977571f; border: 1px solid #d9775744;
+  border-radius: 6px; cursor: pointer; }
+.t-resume:hover { background: #d9775733; border-color: var(--accent); }
+.t-resume:disabled { opacity: .5; cursor: default; }
 .muted { color: var(--muted); font-size: 12px; }
 /* status dot: color = state, pulse = in-progress (replaces text pills) */
 .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint-2); }
@@ -293,7 +300,21 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    clips any momentary over-fit (xterm rendering a column or two wider than the
    box) at the terminal edge, so it can never propagate up and scroll the whole
    page sideways when the cursor reaches the right edge. */
-#term { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+/* the terminal and an optional side-by-side web preview share a flex row */
+#workspace { flex: 1; min-height: 0; display: flex; }
+#term { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+#preview { flex: 1; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+#preview.hidden { display: none; }
+.prevbar { flex: none; display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.prev-host { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--accent-text); }
+.prev-port { width: 70px; flex: none; margin: 0; padding: 2px 7px; font-size: 12px; }
+.prev-btn { flex: none; width: auto; margin: 0; padding: 2px 8px; font-size: 13px; line-height: 1.2; }
+#prev-body { flex: 1; min-height: 0; position: relative; }
+#prev-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+#prev-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+#prev-status.hidden, #ps-spin.hidden, #ps-retry.hidden { display: none; }
+.ps-inner { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 82%; padding: 24px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.5; }
+#ps-retry { width: auto; margin: 0; }
 .term-pane { position: absolute; inset: 0; padding: 6px; }
 .term-empty { position: absolute; inset: 38px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--faint-2); pointer-events: none; }
 .term-empty.hidden { display: none; }

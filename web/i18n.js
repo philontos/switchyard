@@ -42,6 +42,23 @@
       "term.selectHintTitle": "终端开了鼠标模式,普通拖拽会发给会话;按住 Shift(或 mac 的 Option)拖拽即可选中,松手自动复制",
       "term.empty": "点左侧任务进入终端",
 
+      // web preview (click a localhost link in the terminal → side panel)
+      "preview.portPh": "端口",
+      "preview.go": "预览此端口",
+      "preview.reload": "刷新预览",
+      "preview.popout": "在新标签打开",
+      "preview.close": "关闭预览",
+      "preview.opening": "正在打开预览…",
+      "preview.retry": "重试",
+      "preview.err.port-down": "端口上没有服务在监听(dev server 还没起来?)",
+      "preview.err.task-gone": "任务不存在或已归档",
+      "preview.err.host-offline": "远程机当前离线",
+      "preview.err.forward-failed": "建立到远程机的转发失败",
+      "preview.err.bad-request": "请求参数不对",
+      "preview.err.network": "预检请求失败(dispatcher 没连上?)",
+      "preview.err.blocked": "页面没能加载——可能被站点的 X-Frame-Options 拦截。点右上角 ↗ 在新标签打开。",
+      "preview.err.unknown": "预览打不开",
+
       // terminal-centric layout: col2 list (groups + machine header)
       "repo.repoWord": "仓库",
       "repo.noTasks": "暂无任务",
@@ -97,6 +114,8 @@
       "task.renameHint": "双击重命名",
       "task.stopTitle": "停止会话并归档",
       "task.worktreeKept": "worktree 未删",
+      "task.resume": "恢复",
+      "task.resumeTitle": "会话已结束，重启并接回上次对话",
       "task.removeWorktree": "删除 worktree",
       "task.deleteRecord": "删除记录",
       "task.killConfirm": "kill 该任务的 tmux 会话？会话结束后自动归档（保留 worktree）。",
@@ -123,6 +142,8 @@
       "toast.dispatchFailed": "派发失败：{error}",
       "toast.killed": "已 kill 并归档",
       "toast.worktreeRemoved": "worktree 已删除",
+      "toast.resumed": "已恢复会话",
+      "toast.resumeFailed": "恢复失败：{error}",
       "toast.pasteOk": "图片已贴入终端（claude 显示为 [Image #N]）",
       "toast.pasteFailed": "贴图失败：{error}",
 
@@ -197,6 +218,23 @@
       "term.selectHintTitle": "The terminal runs in mouse mode, so a plain drag is sent to the session; hold Shift (or Option on mac) and drag to select, release to copy automatically.",
       "term.empty": "Pick a task on the left to open its terminal",
 
+      // web preview (click a localhost link in the terminal → side panel)
+      "preview.portPh": "port",
+      "preview.go": "Preview this port",
+      "preview.reload": "Reload preview",
+      "preview.popout": "Open in new tab",
+      "preview.close": "Close preview",
+      "preview.opening": "Opening preview…",
+      "preview.retry": "Retry",
+      "preview.err.port-down": "Nothing is listening on that port (dev server not up yet?)",
+      "preview.err.task-gone": "Task not found or archived",
+      "preview.err.host-offline": "The remote machine is offline",
+      "preview.err.forward-failed": "Couldn't open the forward to the remote machine",
+      "preview.err.bad-request": "Bad request",
+      "preview.err.network": "Pre-flight check failed (dispatcher unreachable?)",
+      "preview.err.blocked": "The page didn't load — possibly blocked by the site's X-Frame-Options. Click ↗ to open it in a new tab.",
+      "preview.err.unknown": "Couldn't open the preview",
+
       // terminal-centric layout: col2 list (groups + machine header)
       "repo.repoWord": "repo",
       "repo.noTasks": "No tasks yet",
@@ -246,6 +284,8 @@
       "task.renameHint": "Double-click to rename",
       "task.stopTitle": "Stop session & archive",
       "task.worktreeKept": "worktree kept",
+      "task.resume": "Resume",
+      "task.resumeTitle": "Session ended — relaunch and reattach the prior conversation",
       "task.removeWorktree": "Remove worktree",
       "task.deleteRecord": "Delete record",
       "task.killConfirm": "Kill this task's tmux session? It is archived automatically once the session ends (the worktree is kept).",
@@ -269,6 +309,8 @@
       "toast.dispatchFailed": "Dispatch failed: {error}",
       "toast.killed": "Killed and archived",
       "toast.worktreeRemoved": "worktree removed",
+      "toast.resumed": "Session resumed",
+      "toast.resumeFailed": "Resume failed: {error}",
       "toast.pasteOk": "Image pasted into the terminal (shows as [Image #N] in claude)",
       "toast.pasteFailed": "Paste failed: {error}",
 

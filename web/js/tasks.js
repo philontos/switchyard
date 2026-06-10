@@ -139,6 +139,13 @@ export function taskCard(t, online) {
     icon = { glyph: "🗑", title: I18N.t("task.deleteRecord"), fn: `deleteTask(${t.id})`, needsHost: false };
   }
   const disabled = icon.needsHost && !online;
+  // resumable: the task is still live (not archived) and its worktree is on disk,
+  // but its tmux session is gone (mis-kill / host reboot / claude crash). Offer a
+  // one-click relaunch (claude --continue) instead of attaching to a dead session.
+  const resumable = active && !t.alive && t.hasWorktree;
+  const resumeBtn = resumable
+    ? `<button class="t-resume" title="${I18N.t("task.resumeTitle")}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();resume(${t.id})">⟳ ${I18N.t("task.resume")}</button>`
+    : "";
   // local quick tasks have no branch/MR — show their working dir + a "local" tag
   const meta = t.kind === "local"
     ? `<div class="muted">📂 <code>${t.cwd || "~"}</code> <span class="tag-local">${I18N.t("local.tag")}</span></div>`
@@ -153,14 +160,16 @@ export function taskCard(t, online) {
   // they never connect()), double-click renames it in place.
   const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" onclick="event.stopPropagation()" ondblclick="renameTask(event,${t.id})">${t.title}</span></div>
     ${meta}`;
-  const open = active ? ` clickable" onclick="connect(${t.id})` : "";
+  // only attach-on-click when there's a live session to attach to; a resumable
+  // (dead-session) card routes through its Resume button instead.
+  const open = (active && t.alive) ? ` clickable" onclick="connect(${t.id})` : "";
   const sel = t.id === state.selectedTaskId ? " selected" : "";
   // data-repo marks a card as drag-reorderable (reorder.js) — only active repo
   // tasks: shells have no repo group, archived/cleaned ones aren't reorderable.
   const drag = active && t.kind !== "local" ? ` data-repo="${t.repo_id}"` : "";
   return `<div class="card task${sel}${open}" data-id="${t.id}"${drag}>
     <button class="card-x" title="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
-    ${head}${note}
+    ${head}${note}${resumeBtn}
   </div>`;
 }
 
@@ -247,6 +256,22 @@ export async function removeWt(id){
   disposePty(id);
   if (id === state.selectedTaskId) state.selectedTaskId = null;
   toast(t("toast.worktreeRemoved"),"success"); loadTasks();
+}
+// Resume: relaunch the dead tmux session (claude --continue, same worktree) so it
+// reattaches the prior conversation. After it reloads, the card goes live again
+// and a normal click connects.
+export async function resume(id){
+  showLoading(t("loading.default"));
+  try {
+    await api(`/api/tasks/${id}/resume`,{method:"POST"});
+    toast(t("toast.resumed"),"success");
+    await loadTasks();
+    connect(id);
+  } catch (e) {
+    toast(t("toast.resumeFailed",{error:e.message}),"error",6000);
+  } finally {
+    hideLoading();
+  }
 }
 export function deleteTask(id){
   disposePty(id);
