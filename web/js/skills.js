@@ -1,10 +1,9 @@
 // Skills management: install Claude Code skills from the official plugin
-// marketplace. Browse available plugins, pick a target (global ~/.claude or
-// dispatcher-local), install. Installed plugins' skills then show up in the
-// dispatch/preset skill lists (server scans both locations).
+// marketplace into the dispatcher's private library. Browse available plugins,
+// install. Installed plugins' skills then show up in the dispatch skill list
+// (server scans ~/.task-dispatcher, never the user's ~/.claude).
 import { $, api } from "./dom.js";
 import { toast, showLoading, hideLoading } from "./feedback.js";
-import { Selects } from "./select.js";
 
 let available = [];   // [{pluginId,name,description,marketplace,installed}]
 
@@ -46,12 +45,11 @@ export function filterSkillList(v) { renderList(v); }
 export async function installPluginUI(i) {
   const p = available[i];
   if (!p) return;
-  const target = Selects["sk-target"].value || "global";
   showLoading(t("skill.installing"));
   try {
     await api("/api/plugins/install", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pluginId: p.pluginId, target }),
+      body: JSON.stringify({ pluginId: p.pluginId }),
     });
     toast(t("skill.installedToast", { name: p.name }), "success");
   } catch (e) {

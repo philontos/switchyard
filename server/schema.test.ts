@@ -30,6 +30,29 @@ test("initSchema on a fresh DB has worktree_path and the newer columns", () => {
   for (const c of ["worktree_path", "kind", "host_id", "cwd"]) assert.ok(cols.includes(c), `missing ${c}`);
 });
 
+// The presets feature was removed: initSchema must drop a pre-existing presets
+// table and the orphaned tasks.preset_id column, and never recreate them.
+test("initSchema tears down the removed presets feature", () => {
+  const db = new Database(":memory:");
+  db.exec("CREATE TABLE tasks (id INTEGER PRIMARY KEY, repo_id INTEGER, preset_id INTEGER)");
+  db.exec("CREATE TABLE presets (id INTEGER PRIMARY KEY, name TEXT)");
+  db.prepare("INSERT INTO presets (name) VALUES ('legacy')").run();
+
+  initSchema(db, opts(false));
+
+  const presets = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='presets'").get();
+  assert.equal(presets, undefined, "presets table should be dropped");
+  const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
+  assert.ok(!cols.includes("preset_id"), "tasks.preset_id should be dropped");
+});
+
+test("initSchema on a fresh DB never creates a presets table", () => {
+  const db = new Database(":memory:");
+  initSchema(db, opts(false));
+  const presets = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='presets'").get();
+  assert.equal(presets, undefined);
+});
+
 test("path migration runs only when didMigrate is true", () => {
   const seed = (db: Database.Database) =>
     db.prepare(

@@ -216,13 +216,6 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .skopt { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: 12.5px; cursor: pointer; }
 .skopt input[type=checkbox] { width: auto; margin: 0; }
 .sksrc { margin-left: auto; font-size: 10.5px; color: var(--faint); background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
-/* preset management: existing-preset rows */
-#preset-list { margin-bottom: 10px; }
-.prow { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-bottom: 1px solid var(--surface-2); font-size: 13px; }
-.prow .pname { font-weight: 600; }
-.prow .pmeta { margin-left: auto; font-size: 11px; color: var(--faint); }
-.prow-x { width: auto; margin: 0; padding: 1px 6px; background: none; border: none; color: var(--faint); font-size: 13px; line-height: 1; }
-.prow-x:hover { background: #f8514914; color: var(--red); }
 /* skills modal: available-plugin rows */
 .pg-box { height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; margin-bottom: 7px; }
 .pg-state { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--faint); font-size: 12.5px; }
@@ -345,7 +338,7 @@ a { color: var(--accent-bar); }
 @keyframes tin { from { opacity: 0; transform: translateX(16px); } }
 @keyframes tout { to { opacity: 0; transform: translateX(16px); } }
 /* dialog — sits above the other modals so a confirm triggered from inside a
-   modal (e.g. delete a preset) is on top, not hidden behind it */
+   modal (e.g. delete a repo) is on top, not hidden behind it */
 #dialog { z-index: 90; }
 .dlg-msg { margin: 6px 0 12px; white-space: pre-wrap; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; }

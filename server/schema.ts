@@ -47,25 +47,24 @@ CREATE TABLE IF NOT EXISTS hosts (
   session TEXT DEFAULT 'main',    -- legacy/unused: shells are now per-machine task rows (kind='local'), not one named session per host
   created_at TEXT DEFAULT (datetime('now'))
 );
-
--- preset task templates: a named bundle = an opening prompt template + a list
--- of skills to inject (referenced by "source:name"). Skills themselves are NOT
--- stored — they're scanned read-through (server/skills.ts) and copied into the
--- task worktree at dispatch.
-CREATE TABLE IF NOT EXISTS presets (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  description TEXT,
-  dispatch_prompt TEXT,
-  skill_refs TEXT DEFAULT '[]',   -- JSON array of "source:name"
-  created_at TEXT DEFAULT (datetime('now'))
-);
 `;
 
 /** Add a column if it's missing — backfills schema drift on pre-existing DBs. */
 function addColumn(db: DB, table: string, col: string, def: string) {
   const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+
+/**
+ * Tear down schema for removed features. The presets feature was dropped, so
+ * delete its table and the now-orphaned tasks.preset_id column. Idempotent: a
+ * DB that never had them (or was already cleaned) is a no-op. DROP COLUMN needs
+ * SQLite ≥ 3.35, which better-sqlite3 bundles.
+ */
+function dropDeprecated(db: DB) {
+  db.exec("DROP TABLE IF EXISTS presets");
+  const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
+  if (cols.includes("preset_id")) db.exec("ALTER TABLE tasks DROP COLUMN preset_id");
 }
 
 /**
@@ -86,7 +85,6 @@ function reconcileColumns(db: DB) {
   addColumn(db, "hosts", "status", "TEXT DEFAULT 'unknown'");  // online | offline | unknown
   addColumn(db, "hosts", "last_checked", "TEXT");
   addColumn(db, "repos", "host_id", "INTEGER");                // which machine this repo lives on
-  addColumn(db, "tasks", "preset_id", "INTEGER");              // preset this task was dispatched with
   addColumn(db, "tasks", "skills", "TEXT DEFAULT '[]'");       // JSON: source:name actually delivered
   // repo-less local quick tasks (kind='local'): no mirror/worktree, repo_id=0,
   // branch/worktree columns are "" — they carry their own host_id and cwd.
@@ -116,5 +114,6 @@ export function runPathMigration(db: DB, legacyDir: string, dataDir: string) {
 export function initSchema(db: DB, opts: SchemaOpts) {
   db.exec(CREATE_SQL);
   reconcileColumns(db);
+  dropDeprecated(db);
   if (opts.didMigrate) runPathMigration(db, opts.legacyDir, opts.dataDir);
 }

@@ -70,12 +70,3 @@ export interface Host {
   last_checked: string | null;
   created_at: string;
 }
-
-export interface Preset {
-  id: number;
-  name: string;
-  description: string | null;
-  dispatch_prompt: string | null;
-  skill_refs: string;        // JSON array string of "source:name"
-  created_at: string;
-}

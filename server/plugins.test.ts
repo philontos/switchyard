@@ -21,14 +21,8 @@ test("parseAvailable tolerates missing sections / bad json", () => {
   assert.deepEqual(parseAvailable("not json"), []);
 });
 
-test("installPlan global = single install, no env", () => {
-  const p = installPlan("foo@claude-plugins-official", "global");
-  assert.deepEqual(p.env, {});
-  assert.deepEqual(p.steps, [["plugin", "install", "foo@claude-plugins-official"]]);
-});
-
-test("installPlan dispatcher = marketplace add + install under CLAUDE_CONFIG_DIR", () => {
-  const p = installPlan("foo@claude-plugins-official", "dispatcher");
+test("installPlan = marketplace add + install under the dispatcher CLAUDE_CONFIG_DIR", () => {
+  const p = installPlan("foo@claude-plugins-official");
   assert.ok(p.env.CLAUDE_CONFIG_DIR?.endsWith("claude-config"), "sets CLAUDE_CONFIG_DIR");
   assert.deepEqual(p.steps, [
     ["plugin", "marketplace", "add", "anthropics/claude-plugins-official"],

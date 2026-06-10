@@ -14,7 +14,6 @@ import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss } from "./hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask } from "./tasks.js";
-import { openPresetModal, closePresetModal, addPreset, delPreset } from "./presets.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 import { initReorder } from "./reorder.js";
 
@@ -32,8 +31,6 @@ Object.assign(window, {
   // hosts
   selectHost, openHostModal, closeHostModal, addHost, delHost,
   toggleRepo, toggleArchived, toggleHostMenu,
-  // presets
-  openPresetModal, closePresetModal, addPreset, delPreset,
   // skills (official-plugin install)
   openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList,
 });
@@ -77,8 +74,6 @@ initHostMenuDismiss();   // close the machine ⚙ menu on any outside click
 initReorder();           // long-press drag-to-reorder of repo task cards (session-only)
 $("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
-csMount("t-preset").setOptions([{ value: "", label: t("task.presetNone") }], "");   // populated per open
-csMount("sk-target").setOptions([{ value: "global", label: t("skill.targetGlobal") }, { value: "dispatcher", label: t("skill.targetDispatcher") }], "global");
 csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", label: "mosh" }]);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
 Promise.allSettled([loadRepos(), loadHosts(), loadTasks()]).then(dismissBoot);
@@ -89,13 +84,12 @@ setInterval(loadHosts, 5000);   // refresh machine liveness dots
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
 $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });
 $("host-modal").addEventListener("click", e => { if (e.target.id === "host-modal") closeHostModal(); });
-$("preset-modal").addEventListener("click", e => { if (e.target.id === "preset-modal") closePresetModal(); });
 $("skills-modal").addEventListener("click", e => { if (e.target.id === "skills-modal") closeSkillsModal(); });
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
   if ($("dialog").style.display === "flex") closeDialog(null);
-  else { closeRepoModal(); closeTaskModal(); closeHostModal(); closePresetModal(); closeSkillsModal(); }
+  else { closeRepoModal(); closeTaskModal(); closeHostModal(); closeSkillsModal(); }
 });
 // poll repos so cloning -> ready (and clone errors) show up without manual refresh
 setInterval(() => { if (state.repos.some(r => r.status === "cloning")) loadRepos(); }, 2000);

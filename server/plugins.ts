@@ -1,11 +1,10 @@
-// Official-channel plugin install (P1). Skills are distributed as Claude Code
+// Official-channel plugin install. Skills are distributed as Claude Code
 // plugins; this installs a plugin via the `claude` CLI so its bundled skills
-// land where server/skills.ts scans them. Two targets:
-//   - global:     the user's ~/.claude  (official marketplace already there)
-//   - dispatcher: an isolated CLAUDE_CONFIG_DIR under ~/.task-dispatcher, so we
-//                 never touch the user's global config.
-// All of this runs ON THE CONTROLLER (not via a per-task Runner) — installs are
-// a controller-side operation.
+// land where server/skills.ts scans them — the dispatcher's isolated
+// CLAUDE_CONFIG_DIR under ~/.task-dispatcher, so we never touch the user's
+// ~/.claude (which the dispatcher no longer scans anyway). All of this runs ON
+// THE CONTROLLER (not via a per-task Runner) — installs are a controller-side
+// operation.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -38,20 +37,17 @@ export function parseAvailable(jsonStr: string): AvailablePlugin[] {
   }));
 }
 
-/** The env + ordered command steps to install `pluginId` into the chosen
- *  target. Dispatcher target first registers the official marketplace in the
- *  isolated config (a fresh config has none; idempotent on an existing one). */
-export function installPlan(pluginId: string, target: "global" | "dispatcher"): { env: Record<string, string>; steps: string[][] } {
-  if (target === "dispatcher") {
-    return {
-      env: { CLAUDE_CONFIG_DIR: DISPATCHER_CLAUDE_CFG },
-      steps: [
-        ["plugin", "marketplace", "add", OFFICIAL_MARKETPLACE_SRC],
-        ["plugin", "install", pluginId],
-      ],
-    };
-  }
-  return { env: {}, steps: [["plugin", "install", pluginId]] };
+/** The env + ordered command steps to install `pluginId` into the dispatcher's
+ *  isolated config: first register the official marketplace there (a fresh
+ *  config has none; idempotent on an existing one), then install. */
+export function installPlan(pluginId: string): { env: Record<string, string>; steps: string[][] } {
+  return {
+    env: { CLAUDE_CONFIG_DIR: DISPATCHER_CLAUDE_CFG },
+    steps: [
+      ["plugin", "marketplace", "add", OFFICIAL_MARKETPLACE_SRC],
+      ["plugin", "install", pluginId],
+    ],
+  };
 }
 
 export async function listAvailable(): Promise<AvailablePlugin[]> {
@@ -67,8 +63,8 @@ export async function listAvailable(): Promise<AvailablePlugin[]> {
   }
 }
 
-export async function installPlugin(pluginId: string, target: "global" | "dispatcher"): Promise<void> {
-  const { env, steps } = installPlan(pluginId, target);
+export async function installPlugin(pluginId: string): Promise<void> {
+  const { env, steps } = installPlan(pluginId);
   for (const args of steps) {
     try {
       await localRunner.exec(CLAUDE_BIN, args, { env });
