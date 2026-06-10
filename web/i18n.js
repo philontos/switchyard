@@ -42,22 +42,10 @@
       "term.selectHintTitle": "终端开了鼠标模式,普通拖拽会发给会话;按住 Shift(或 mac 的 Option)拖拽即可选中,松手自动复制",
       "term.empty": "点左侧任务进入终端",
 
-      // web preview (click a localhost link in the terminal → side panel)
+      // web preview (click a localhost link in the terminal → new browser tab)
       "preview.portPh": "端口",
-      "preview.go": "预览此端口",
-      "preview.reload": "刷新预览",
-      "preview.popout": "在新标签打开",
-      "preview.close": "关闭预览",
-      "preview.opening": "正在打开预览…",
-      "preview.retry": "重试",
-      "preview.err.port-down": "端口上没有服务在监听(dev server 还没起来?)",
-      "preview.err.task-gone": "任务不存在或已归档",
-      "preview.err.host-offline": "远程机当前离线",
-      "preview.err.forward-failed": "建立到远程机的转发失败",
-      "preview.err.bad-request": "请求参数不对",
-      "preview.err.network": "预检请求失败(dispatcher 没连上?)",
-      "preview.err.blocked": "页面没能加载——可能被站点的 X-Frame-Options 拦截。点右上角 ↗ 在新标签打开。",
-      "preview.err.unknown": "预览打不开",
+      "preview.go": "在新标签打开预览",
+      "preview.portTitle": "填 dev server 端口,在新标签打开当前任务的页面(用于链接没被自动识别时)",
 
       // terminal-centric layout: col2 list (groups + machine header)
       "repo.repoWord": "仓库",
@@ -220,20 +208,8 @@
 
       // web preview (click a localhost link in the terminal → side panel)
       "preview.portPh": "port",
-      "preview.go": "Preview this port",
-      "preview.reload": "Reload preview",
-      "preview.popout": "Open in new tab",
-      "preview.close": "Close preview",
-      "preview.opening": "Opening preview…",
-      "preview.retry": "Retry",
-      "preview.err.port-down": "Nothing is listening on that port (dev server not up yet?)",
-      "preview.err.task-gone": "Task not found or archived",
-      "preview.err.host-offline": "The remote machine is offline",
-      "preview.err.forward-failed": "Couldn't open the forward to the remote machine",
-      "preview.err.bad-request": "Bad request",
-      "preview.err.network": "Pre-flight check failed (dispatcher unreachable?)",
-      "preview.err.blocked": "The page didn't load — possibly blocked by the site's X-Frame-Options. Click ↗ to open it in a new tab.",
-      "preview.err.unknown": "Couldn't open the preview",
+      "preview.go": "Open preview in a new tab",
+      "preview.portTitle": "Enter a dev-server port to open the current task's page in a new tab (for when the printed link isn't auto-detected)",
 
       // terminal-centric layout: col2 list (groups + machine header)
       "repo.repoWord": "repo",
