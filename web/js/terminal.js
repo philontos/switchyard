@@ -13,9 +13,6 @@ import { toast } from "./feedback.js";
 // taskId -> { id, pane, term, fit, ws, query, title, desc, attach }
 const panes = new Map();
 let activeId = null;   // the task whose pane is currently visible (null = none)
-let previewTaskId = null;   // the task whose page is open in the side preview (null = closed)
-let previewPort = null;     // and its port (for retry / reload / manual entry)
-let prevTimer = null;       // iframe load watchdog (catches an X-Frame-Options block)
 
 // xterm paints to a canvas from a JS theme object, so it can't read the CSS
 // tokens in app.css — it carries its own light/dark pair. Kept in sync with the
@@ -54,16 +51,11 @@ export function initTerm() {
   // right edge is clipped and typing there pushes the cursor — and the whole
   // page — sideways. Re-fitting whenever #term's box actually changes (first
   // paint settling, a scrollbar toggling, browser zoom, window resize) keeps the
-  // column count matched to the real width, so neither happens. The preview panel
-  // opening/closing resizes #term the same way, so this covers it too.
+  // column count matched to the real width, so neither happens.
   try { new ResizeObserver(fitActive).observe($("term")); } catch {}
-  // preview bar controls
-  $("prev-reload").addEventListener("click", reloadPreview);
-  $("prev-pop").addEventListener("click", popoutPreview);
-  $("prev-close").addEventListener("click", closePreview);
+  // manual preview-port fallback (for when the printed link isn't auto-detected)
   $("prev-go").addEventListener("click", goPreviewPort);
   $("prev-port").addEventListener("keydown", (e) => { if (e.key === "Enter") goPreviewPort(); });
-  $("ps-retry").addEventListener("click", reloadPreview);
 }
 
 function sendResize(p) {
@@ -202,11 +194,25 @@ export function showTermEmpty() { $("term-empty").classList.remove("hidden"); }
 function hideTermEmpty() { $("term-empty").classList.add("hidden"); }
 
 // ---- web preview ----
-// A localhost link clicked in the terminal opens that task's page in the side
-// panel. The preview is served from a SIBLING origin (t<task>-<port>.localhost)
-// that the dispatcher reverse-proxies to the task's machine, so the iframe is
-// cross-origin — we only ever set/clear .src, never touch its document.
+// A localhost link the session prints (e.g. a dev server's "Local:
+// http://localhost:5173") is opened in a NEW BROWSER TAB pointed at the
+// dispatcher's proxy origin (t<task>-<port>.localhost), which reverse-proxies to
+// the dev server on the task's machine. The new tab rides the SAME path you
+// reach the dashboard by (direct, or an `ssh -L 4500` tunnel), so it works
+// whether the dispatcher is local or remote — and the browser handles
+// *.localhost + IPv4/IPv6 itself. A bare localhost:<port> would instead hit the
+// BROWSER's own machine, which is wrong whenever you aren't sitting at the box.
 const LOCALHOST_URL = /https?:\/\/(?:localhost|127\.0\.0\.1):(\d{1,5})(?:\/[^\s"'`]*)?/g;
+
+function previewUrl(taskId, port) {
+  const proto = location.protocol === "https:" ? "https" : "http";
+  const portSuffix = location.port ? ":" + location.port : "";
+  return `${proto}://t${taskId}-${port}.localhost${portSuffix}/`;
+}
+
+function openPreviewTab(taskId, port) {
+  window.open(previewUrl(taskId, port), "_blank", "noopener");
+}
 
 function localhostLinks(term, taskId) {
   return {
@@ -224,7 +230,7 @@ function localhostLinks(term, taskId) {
         links.push({
           text: m[0],
           range: { start: { x: start + 1, y }, end: { x: start + m[0].length, y } },
-          activate: () => openPreview(taskId, port),
+          activate: () => openPreviewTab(taskId, port),
         });
       }
       callback(links.length ? links : undefined);
@@ -232,75 +238,11 @@ function localhostLinks(term, taskId) {
   };
 }
 
-// Open task <taskId>'s page on <port> in the side panel. We pre-check
-// reachability first (a precise message beats a blank/refused iframe), then load
-// the iframe: a LOCAL task is hit straight at localhost:<port> (the browser is on
-// the controller — no proxy, no *.localhost dependency); a REMOTE task goes
-// through the dispatcher's proxy origin (t<task>-<port>.localhost).
-export async function openPreview(taskId, port) {
-  previewTaskId = taskId; previewPort = port;
-  $("prev-port").value = String(port);
-  $("preview").classList.remove("hidden");
-  fitActive();
-  previewStatus("loading", I18N.t("preview.opening"));
-  let r;
-  try {
-    r = await fetch(`/api/preview-check?task=${taskId}&port=${port}`).then((x) => x.json());
-  } catch {
-    previewStatus("error", I18N.t("preview.err.network"));
-    return;
-  }
-  if (taskId !== previewTaskId || port !== previewPort) return;   // superseded by a newer open
-  if (!r || !r.ok) { previewStatus("error", reasonMsg(r && r.reason)); return; }
-  const proto = location.protocol === "https:" ? "https" : "http";
-  const portSuffix = location.port ? ":" + location.port : "";
-  const local = r.kind === "local";
-  $("prev-host").textContent = local ? `localhost:${port}` : `t${taskId}-${port}.localhost`;
-  loadFrame(local ? `${proto}://localhost:${port}/` : `${proto}://t${taskId}-${port}.localhost${portSuffix}/`);
-}
-
-// load the iframe; clear the overlay on load, or — if nothing renders within the
-// timeout (most likely an X-Frame-Options block) — show a hint to pop it out.
-function loadFrame(url) {
-  const f = $("prev-frame");
-  previewStatus("loading", I18N.t("preview.opening"));
-  f.onload = () => { clearTimeout(prevTimer); hidePreviewStatus(); };
-  f.src = url;
-  clearTimeout(prevTimer);
-  prevTimer = setTimeout(() => previewStatus("error", I18N.t("preview.err.blocked")), 8000);
-}
-
-export function closePreview() {
-  clearTimeout(prevTimer);
-  $("preview").classList.add("hidden");
-  $("prev-frame").src = "about:blank";
-  hidePreviewStatus();
-  previewTaskId = null; previewPort = null;
-  fitActive();
-}
-
-function previewStatus(kind, msg) {
-  $("prev-status").classList.remove("hidden");
-  $("ps-spin").classList.toggle("hidden", kind !== "loading");
-  $("ps-retry").classList.toggle("hidden", kind !== "error");
-  $("ps-msg").textContent = msg;
-}
-function hidePreviewStatus() { $("prev-status").classList.add("hidden"); }
-
-// map the check endpoint's stable reason enum to a localized message
-function reasonMsg(reason) {
-  const key = "preview.err." + (reason || "unknown");
-  const m = I18N.t(key);
-  return m === key ? I18N.t("preview.err.unknown") : m;   // t() returns the key when missing
-}
-
-// reload / retry both just re-open (re-checks reachability, then reloads)
-function reloadPreview() { if (previewTaskId != null && previewPort != null) openPreview(previewTaskId, previewPort); }
-function popoutPreview() { const f = $("prev-frame"); if (f.src && f.src !== "about:blank") window.open(f.src, "_blank", "noopener"); }
+// manual fallback: a port typed into the term bar opens the active task's page
+// in a new tab — for when the printed link is wrapped/truncated in a TUI.
 function goPreviewPort() {
   const port = Number($("prev-port").value);
-  const taskId = previewTaskId != null ? previewTaskId : activeId;
-  if (taskId != null && port >= 1 && port <= 65535) openPreview(taskId, port);
+  if (activeId != null && port >= 1 && port <= 65535) openPreviewTab(activeId, port);
 }
 
 // Attach the dock to a task's session: reuse its live pane if we have one (just
@@ -327,7 +269,6 @@ export function disposePty(id) {
   try { p.term.dispose(); } catch {}
   p.pane.remove();
   if (activeId === id) { activeId = null; showTermEmpty(); }
-  if (previewTaskId === id) closePreview();   // its page can no longer be served
 }
 
 // Drop every pane whose task is no longer keepable (gone from the list, or its

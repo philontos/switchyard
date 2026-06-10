@@ -23,31 +23,11 @@
       <span id="term-desc"></span>
       <span class="hint" style="flex:none" data-i18n="term.selectHint" data-i18n-title="term.selectHintTitle"></span>
       <code id="term-attach"></code>
+      <span style="flex:1"></span>
+      <input id="prev-port" class="prev-port" data-i18n-ph="preview.portPh" data-i18n-title="preview.portTitle" />
+      <button id="prev-go" class="prev-btn" data-i18n-title="preview.go">↗</button>
     </div>
-    <div id="workspace">
-      <div id="term"></div>
-      <div id="preview" class="hidden">
-        <div class="prevbar">
-          <span id="prev-host" class="prev-host"></span>
-          <span style="flex:1"></span>
-          <input id="prev-port" class="prev-port" data-i18n-ph="preview.portPh" />
-          <button id="prev-go" class="prev-btn" data-i18n-title="preview.go">▶</button>
-          <button id="prev-reload" class="prev-btn" data-i18n-title="preview.reload">⟳</button>
-          <button id="prev-pop" class="prev-btn" data-i18n-title="preview.popout">↗</button>
-          <button id="prev-close" class="prev-btn" data-i18n-title="preview.close">✕</button>
-        </div>
-        <div id="prev-body">
-          <iframe id="prev-frame" src="about:blank"></iframe>
-          <div id="prev-status" class="hidden">
-            <div class="ps-inner">
-              <div id="ps-spin" class="spinner"></div>
-              <div id="ps-msg"></div>
-              <button id="ps-retry" class="hidden sec" data-i18n="preview.retry"></button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <div id="term"></div>
     <div id="term-empty" class="term-empty"><div class="te-ic">🖥</div><div data-i18n="term.empty"></div></div>
   </div>
 </div>

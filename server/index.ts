@@ -114,28 +114,47 @@ const forwards = createForwardRegistry(async (target, remotePort): Promise<Forwa
   return { localPort, close: () => { try { child.kill(); } catch {} } };
 });
 
-// Resolve a preview to its upstream + kind. Resolves ONLY to a live task's own
-// 127.0.0.1:<port> (local) or that port reached via an ssh forward (remote) —
-// never an arbitrary host:port, so the proxy can't become an open relay under
-// HOST=0.0.0.0. `reason` is a stable enum the UI localizes.
+// A dev server may bind IPv4 (127.0.0.1) or IPv6 (::1) loopback — vite binds ::1
+// by default on macOS. Pick whichever family is actually listening (or null).
+// Cached briefly so a page load's burst of proxied requests doesn't re-probe.
+const lbCache = new Map<number, { host: string; exp: number }>();
+async function loopbackHostFor(port: number): Promise<string | null> {
+  const c = lbCache.get(port);
+  if (c && c.exp > Date.now()) return c.host;
+  let host: string | null = null;
+  if (await tcpProbe("127.0.0.1", port, 1500)) host = "127.0.0.1";
+  else if (await tcpProbe("::1", port, 1500)) host = "::1";
+  if (host) lbCache.set(port, { host, exp: Date.now() + 5000 });
+  return host;
+}
+
+// Resolve a preview to its upstream. Resolves ONLY to a live task's own loopback
+// <port> (local) or that port reached via an ssh forward (remote) — never an
+// arbitrary host:port, so the proxy can't become an open relay under
+// HOST=0.0.0.0. `error` is a human-readable line: previews open in a plain
+// browser tab, so on failure the proxy serves this text as the page.
 type PreviewTarget =
   | { kind: "local" | "ssh"; host: string; port: number }
   | { error: true; reason: string; status: number };
 async function previewTarget(taskId: number, port: number): Promise<PreviewTarget> {
   const task = getTask.get(taskId) as Task | undefined;
-  if (!task || task.status === "cleaned") return { error: true, reason: "task-gone", status: 404 };
+  if (!task || task.status === "cleaned") return { error: true, reason: `Preview: task ${taskId} not found or archived.`, status: 404 };
   const host = taskHost(task);
-  if (!host || host.kind === "local") return { kind: "local", host: "127.0.0.1", port };
-  if (host.status !== "online") return { error: true, reason: "host-offline", status: 502 };
+  if (!host || host.kind === "local") {
+    const lb = await loopbackHostFor(port); // 127.0.0.1 or ::1, whichever is listening
+    if (!lb) return { error: true, reason: `Preview: nothing is listening on port ${port} (dev server not up yet?).`, status: 404 };
+    return { kind: "local", host: lb, port };
+  }
+  if (host.status !== "online") return { error: true, reason: `Preview: machine "${host.name}" is offline.`, status: 502 };
   try {
     const localPort = await forwards.acquire({ id: host.id, target: host.target }, port);
     return { kind: "ssh", host: "127.0.0.1", port: localPort };
   } catch {
-    return { error: true, reason: "forward-failed", status: 502 };
+    return { error: true, reason: `Preview: couldn't open the ssh forward to "${host.name}".`, status: 502 };
   }
 }
 
-// the proxy just needs the upstream host:port (or an error); kind is for the UI
+// the proxy just needs the upstream host:port (or an error message + status)
 async function resolvePreviewUpstream(taskId: number, port: number): Promise<PreviewResolution> {
   const t = await previewTarget(taskId, port);
   return "error" in t ? { error: t.reason, status: t.status } : { host: t.host, port: t.port };
@@ -509,23 +528,6 @@ app.delete("/api/tasks/:id", async (req, res) => {
   }
   db.prepare("DELETE FROM tasks WHERE id=?").run(req.params.id);
   res.json({ ok: true });
-});
-
-// reachability pre-check for the preview UI: a precise reason ("port-down" /
-// "task-gone" / "host-offline" / "forward-failed") beats handing the iframe a
-// blank/refused page. For ssh tasks this also warms the forward. Returns the
-// `kind` so the frontend knows whether to hit localhost directly or the proxy.
-app.get("/api/preview-check", async (req, res) => {
-  const taskId = Number(req.query.task);
-  const port = Number(req.query.port);
-  if (!Number.isInteger(taskId) || !Number.isInteger(port) || port < 1 || port > 65535) {
-    return res.status(400).json({ ok: false, reason: "bad-request" });
-  }
-  const t = await previewTarget(taskId, port);
-  if ("error" in t) return res.json({ ok: false, reason: t.reason });
-  const reachable = await tcpProbe(t.host, t.port, 2500);
-  if (!reachable) return res.json({ ok: false, reason: "port-down" });
-  res.json({ ok: true, kind: t.kind });
 });
 
 // ---------- sessions (raw tmux, incl. orphans) ----------
