@@ -30,16 +30,25 @@ export async function loadRepos() {
 // shifts. Dispatch (＋) only exists when ready, so a cloning/erroring repo offers
 // just the hover 🗑 — delete is its only available action there.
 //
-// Status read: `ready` shows NO dot — the nested task cards carry the live dots,
-// so a repo dot here would just duplicate them. `cloning` shows a breathing amber
-// dot; `error` washes the head faint red + shows a "!" with the message.
-export function repoGroupHead(r, online, collapsed) {
+// Status read: `ready` shows NO dot while expanded — the nested task cards carry
+// the live dots, so a repo dot here would just duplicate them. Collapsed, those
+// cards are hidden, so the head takes over: a muted task count plus summary dots
+// (amber if any hidden task waits on a permission prompt, green if any is live —
+// the cards' own classes, so the colors read identically). `cloning` shows a
+// breathing amber dot; `error` washes the head faint red + shows a "!".
+export function repoGroupHead(r, online, collapsed, tasks = []) {
   const dot = r.status === "cloning" ? `<span class="sdot cloning" title="${r.status}"></span>` : "";
   const disp = r.status === "ready"
     ? `<button class="grp-act" title="${t("task.dispatch")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskModal(${r.id})">＋</button>` : "";
+  const summary = collapsed && tasks.length
+    ? `<span class="muted">(${tasks.length})</span>`
+      + (tasks.some(tk => tk.alive && tk.waiting) ? `<span class="sdot waiting" title="${t("task.waiting")}"></span>` : "")
+      + (tasks.some(tk => tk.alive && !tk.waiting) ? `<span class="sdot live" title="live"></span>` : "")
+    : "";
   return `<div class="grp-head${r.status === "error" ? " err" : ""}" onclick="toggleRepo(${r.id})">
     ${dot}
     <span class="grp-name">${r.name}</span>
+    ${summary}
     ${r.error ? `<span class="grp-err" title="${r.error}">!</span>` : ""}
     <button class="grp-del" title="${t("repo.delTitle")}" onclick="event.stopPropagation();delRepo(${r.id})">🗑</button>
     ${disp}

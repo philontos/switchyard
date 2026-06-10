@@ -104,7 +104,7 @@ function renderList() {
       : (mine.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("repo.noTasks")}</div>`);
     // `.open` (expanded) is what shows the state now — a left accent bar + faint
     // wash on the whole group, in place of the old ▸/▾ caret glyph.
-    return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, online, collapsed)}${body}</div>`;
+    return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, online, collapsed, mine)}${body}</div>`;
   }).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`;
 
   // every machine (local + remote) gets a Shells group: bare tmux shells you can
