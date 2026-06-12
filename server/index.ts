@@ -7,14 +7,13 @@ import { attachCommand } from "./attach.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { db, Repo, Task, Host, Preset } from "./db.js";
+import { db, Repo, Task, Host } from "./db.js";
 import { renameTask } from "./tasks.js";
 import {
   initMirror, fetchMirror, listBranches, addWorktreeFromBranch, removeWorktree,
   mirrorPath,
 } from "./git.js";
-import { scanSkills, resolveSkills, defaultSources } from "./skills.js";
-import { renderDispatchPrompt, skillsLine } from "./presets.js";
+import { scanSkills, resolveSkills, defaultSources, skillsLine } from "./skills.js";
 import { extForMime, pasteTargetBase, pastedDest, pasteFilename } from "./paste.js";
 import { listAvailable, installPlugin } from "./plugins.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions, cancelCopyMode, pasteText } from "./tmux.js";
@@ -309,20 +308,17 @@ app.post("/api/tasks", async (req, res) => {
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
   const runner = runnerFor(host as Host); // dispatch ON the repo's machine
 
-  // Resolve the preset + skills to inject and PREFLIGHT them: if any referenced
-  // skill is missing, fail now — before any worktree/task is created — so we
-  // never leave a half-built task pointing at a nonexistent skill.
-  const presetId = req.body?.preset_id ?? null;
+  // Resolve the skills to inject and PREFLIGHT them: if any selected skill is
+  // missing, fail now — before any worktree/task is created — so we never leave
+  // a half-built task pointing at a nonexistent skill.
   const extraSkills: string[] = Array.isArray(req.body?.extra_skills) ? req.body.extra_skills.map(String) : [];
-  const preset = presetId ? (db.prepare("SELECT * FROM presets WHERE id=?").get(presetId) as Preset | undefined) : undefined;
-  if (presetId && !preset) return res.status(404).json({ error: tr(lang, "preset.notFound") });
-  const wantKeys = [...new Set([...(preset ? (JSON.parse(preset.skill_refs) as string[]) : []), ...extraSkills])];
+  const wantKeys = [...new Set(extraSkills)];
   const { found, missing } = resolveSkills(wantKeys, defaultSources());
   if (missing.length) return res.status(400).json({ error: tr(lang, "skill.missing", { keys: missing.join(", ") }) });
 
   const info = db.prepare(
-    "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, preset_id, skills) VALUES (?,?,?,?,?,?,?,?,?,?)"
-  ).run(repo_id, base_branch, "", title, prompt || null, "", "", "creating", presetId, JSON.stringify(found.map((f) => f.key)));
+    "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, skills) VALUES (?,?,?,?,?,?,?,?,?)"
+  ).run(repo_id, base_branch, "", title, prompt || null, "", "", "creating", JSON.stringify(found.map((f) => f.key)));
   const id = Number(info.lastInsertRowid);
   const s = slug(title);
   const workBranch = `feat/${id}-${s}`;
@@ -358,10 +354,8 @@ app.post("/api/tasks", async (req, res) => {
       `cd ${JSON.stringify(wtAbs)} && p=$(git rev-parse --git-path info/exclude) && ` +
       `for f in '.claude/settings.local.json' '.claude/waiting'; do grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
     ]).catch(() => {});
-    // opening message: preset template (if any) else the freeform prompt, + skills line
-    const vars = { title, slug: s, branch: workBranch, prompt: prompt || "" };
-    const opening = (preset ? renderDispatchPrompt(preset.dispatch_prompt || "", vars) : (prompt || ""))
-      + skillsLine(found.map((f) => f.name));
+    // opening message: the freeform prompt + the "skills delivered" line
+    const opening = (prompt || "") + skillsLine(found.map((f) => f.name));
     await startSession(runner, session, wtAbs, opening.trim() ? opening : null);
     db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
       .run(workBranch, wtAbs, session, id);
@@ -601,26 +595,6 @@ app.get("/api/skills", (_req, res) => {
   res.json(scanSkills(defaultSources()).map(({ key, name, description, source }) => ({ key, name, description, source })));
 });
 
-// ---------- presets (preset task templates: opening prompt + referenced skills) ----------
-app.get("/api/presets", (_req, res) => {
-  res.json(db.prepare("SELECT * FROM presets ORDER BY id DESC").all());
-});
-
-app.post("/api/presets", (req, res) => {
-  const { name, description, dispatch_prompt, skill_refs } = req.body ?? {};
-  if (!name || !String(name).trim()) return res.status(400).json({ error: tr(langFromReq(req), "preset.nameRequired") });
-  const refs = Array.isArray(skill_refs) ? skill_refs.map(String) : [];
-  const info = db.prepare(
-    "INSERT INTO presets (name, description, dispatch_prompt, skill_refs) VALUES (?,?,?,?)"
-  ).run(String(name).trim(), description ?? null, dispatch_prompt ?? null, JSON.stringify(refs));
-  res.json({ id: Number(info.lastInsertRowid) });
-});
-
-app.delete("/api/presets/:id", (req, res) => {
-  db.prepare("DELETE FROM presets WHERE id=?").run(req.params.id);
-  res.json({ ok: true });
-});
-
 // ---------- plugin install (official channel; populates the skill sources) ----------
 app.get("/api/plugins/available", async (_req, res) => {
   try { res.json(await listAvailable()); }
@@ -628,10 +602,10 @@ app.get("/api/plugins/available", async (_req, res) => {
 });
 
 app.post("/api/plugins/install", async (req, res) => {
-  const { pluginId, target } = req.body ?? {};
+  const { pluginId } = req.body ?? {};
   if (!pluginId) return res.status(400).json({ error: tr(langFromReq(req), "plugin.idRequired") });
   try {
-    await installPlugin(String(pluginId), target === "dispatcher" ? "dispatcher" : "global");
+    await installPlugin(String(pluginId));
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });

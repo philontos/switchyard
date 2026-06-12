@@ -11,13 +11,17 @@ import path from "node:path";
 export interface SkillSource { source: string; root: string; }
 export interface SkillEntry { key: string; name: string; description: string; source: string; dir: string; }
 
-/** Where P0 looks for skills, on the controller. */
+/** The dispatcher's private skill library, on the controller. Deliberately does
+ *  NOT scan the user's ~/.claude: a LOCAL task's claude already discovers those
+ *  natively (user-level), so injecting them would be redundant; and a REMOTE
+ *  task should get a curated, dispatcher-owned set, not whatever happens to sit
+ *  in the operator's personal config. Populate this by hand
+ *  (~/.task-dispatcher/skills) or via official-marketplace installs (plugins.ts)
+ *  into the isolated config. */
 export function defaultSources(home = os.homedir()): SkillSource[] {
   return [
-    { source: "local",      root: path.join(home, ".claude", "skills") },
-    { source: "plugin",     root: path.join(home, ".claude", "plugins", "cache") },
     { source: "dispatcher", root: path.join(home, ".task-dispatcher", "skills") },
-    // dispatcher-local plugin installs land here (CLAUDE_CONFIG_DIR=<DATA_DIR>/claude-config)
+    // official-marketplace installs land here (CLAUDE_CONFIG_DIR=<DATA_DIR>/claude-config)
     { source: "dispatcher", root: path.join(home, ".task-dispatcher", "claude-config", "plugins", "cache") },
   ];
 }
@@ -68,4 +72,10 @@ export function resolveSkills(keys: string[], sources: SkillSource[]): { found: 
   const found: SkillEntry[] = [], missing: string[] = [];
   for (const k of keys) { const s = byKey.get(k); s ? found.push(s) : missing.push(k); }
   return { found, missing };
+}
+
+/** The "本任务已带入 skills: …" line appended to a task's opening message so the
+ *  user and Claude both see what was delivered. Empty when nothing was. */
+export function skillsLine(names: string[]): string {
+  return names.length ? `\n\n本任务已带入 skills: ${names.join(", ")}` : "";
 }

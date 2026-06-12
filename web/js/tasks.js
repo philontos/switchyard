@@ -49,7 +49,7 @@ export function closeTaskModal() { $("task-modal").style.display = "none"; }
 // Shell: one click, zero form. Opens a bare tmux shell in the machine's home —
 // the server auto-names it and defaults the cwd to home; the user then cd's and
 // runs claude (or anything) themselves. hostId picks the machine (omit → local).
-// Deliberately bare-bones for a fast start; repo/branch/worktree/preset/prompt
+// Deliberately bare-bones for a fast start; repo/branch/worktree/prompt
 // all live in the richer repo dispatch flow instead.
 export async function addLocalTask(hostId) {
   showLoading(t("local.starting"));
@@ -66,19 +66,16 @@ export async function addLocalTask(hostId) {
   }
 }
 
-// preset dropdown + extra-skill checkboxes for the dispatch modal. Both reset
-// each open; dispatch works fine even if these fail to load (no preset).
+// extra-skill checkboxes for the dispatch modal; reset each open. Dispatch works
+// fine even if this fails to load (just no skills offered).
 async function loadDispatchOptions() {
-  const none = { value: "", label: t("task.presetNone") };
-  Selects["t-preset"].setOptions([none], "");
   $("t-skills").innerHTML = "";
   try {
-    const [presets, skills] = await Promise.all([api("/api/presets"), api("/api/skills")]);
-    Selects["t-preset"].setOptions([none, ...presets.map(p => ({ value: String(p.id), label: p.name }))], "");
+    const skills = await api("/api/skills");
     $("t-skills").innerHTML = skills.length
       ? skills.map(s => `<label class="skopt"><input type="checkbox" value="${s.key}"> ${s.name} <span class="sksrc">${s.source}</span></label>`).join("")
       : `<div class="muted">${t("skill.none")}</div>`;
-  } catch (e) { /* leave defaults — a task can still be dispatched without a preset */ }
+  } catch (e) { /* leave empty — a task can still be dispatched without skills */ }
 }
 function selectedExtraSkills() {
   return [...document.querySelectorAll("#t-skills input:checked")].map(i => i.value);
@@ -104,7 +101,6 @@ export async function addTask() {
   const body = {
     repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
-    preset_id: Selects["t-preset"].value ? Number(Selects["t-preset"].value) : null,
     extra_skills: selectedExtraSkills(),
   };
   if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
