@@ -32,22 +32,28 @@
 
 ## 快速开始
 
-前置：Node 22+、`tmux`、已登录的 `claude` —— 且这三个命令在**非交互、非登录 shell** 里都能被找到（原因见下方 PATH）。
+**前置**（每台要跑任务的机器都过一遍）：
+
+1. **装 Node 22+**（其余命令交给下一步校验）。
+2. **跑预检脚本**，校验 + 自动把缺的 PATH 写进 `~/.zshenv`：
+
+   ```sh
+   ./scripts/setup.sh          # 校验 claude / tmux / git，把「已装但不在 PATH」的目录写进 ~/.zshenv（幂等、自动备份 .bak）
+   ./scripts/setup.sh --check  # 只看会改什么、不写
+   ```
+
+   它按 dispatcher 实际用的非交互 shell（tmux / ssh → `zsh -c`，只读 `~/.zshenv`）来检查；命令真没装的话只提示装法、不替你装。nvm 装的 `claude` 路径带版本号、升级即失效，脚本会提醒你软链固定。
+
+前置过了就能起服务：
 
 ```bash
 npm install
 npm run dev      # http://localhost:4500（PORT 可改）
 ```
 
-**PATH（最容易踩的坑）**：dispatcher 用 `tmux new-session … claude` 拉起每个会话（远程走 `ssh host '<cmd>'`），跑的是**非交互、非登录 shell** —— zsh 下**只读 `~/.zshenv`**，不读 `.zshrc` / `.zprofile`。所以 `claude` / `tmux` / `git` 必须出现在 `~/.zshenv` 的 PATH 里，否则任务一起就 `command not found: claude`、pane 直接死（状态 127）。**每台**要跑任务的机器（本机 + 各远程机）都要配：
+> **为什么要第 2 步**：dispatcher 用 `zsh -c 'claude …'` 起每个任务，跑的是非交互、非登录 shell —— PATH 里没有 `claude` 就 `command not found`、pane 直接死（状态 127）。`~/.zshenv` 对每次 zsh 调用都生效，把 PATH 修在那里最稳。远程机暂时手动配（把 claude / tmux / git 加进**远程那台**的 `~/.zshenv`），脚本化以后再说。
 
-```sh
-# ~/.zshenv（没有就新建）
-eval "$(/opt/homebrew/bin/brew shellenv)"   # git / tmux 等（按需）
-export PATH="$HOME/.local/bin:$PATH"          # claude（按 `command -v claude` 改）
-```
-
-验证 `zsh -c 'command -v claude tmux git'`，三个都打印路径即就绪。nvm 装的 `claude` 路径带 node 版本号、node 一升级就失效，建议软链到固定位置再写进 PATH：`ln -s "$(command -v claude)" ~/.local/bin/claude`。
+**用起来**：
 
 1. **新建仓库**：填名称 + git url（GitHub / GitLab，https 私有库可填 token，SSH 留空）→ 注册并克隆，状态变 `ready`。
 2. **派发任务**：选仓库 → 选基分支 → 填标题 + 给 claude 的开场指令 →（可选）勾附加 skill → 建 worktree + 起会话。
@@ -58,7 +64,6 @@ export PATH="$HOME/.local/bin:$PATH"          # claude（按 `command -v claude`
 
 ## 注意
 
-- **远程机**：PATH 规则同「快速开始」那条 —— 在**远程机自己**的 `~/.zshenv` 里也配好 `git / tmux / claude`（dispatcher 走 `ssh host '<cmd>'`，同样只读 `.zshenv`，不读 `.zshrc` / `.zprofile`）。
 - **安全**：服务**默认只绑环回 `127.0.0.1`**，局域网内别的机器连不上。要暴露到局域网需显式 `HOST=0.0.0.0`（此时网页终端 = 把 shell 开放给能访问该端口的人，**务必自加鉴权 / 反代，别裸暴露公网**）；想远程访问更建议走 ssh 隧道 `ssh -L 4500:localhost:4500 host`。token 目前**明文**存 sqlite，仅供本机自用。
 - **终端手感**：给 claude 开全屏渲染——会话内 `/tui fullscreen`，或 `~/.claude/settings.json` 设 `{"tui":"fullscreen"}`（per-machine，各机各配）——输入框钉死、滚动顺滑、不再横跳。
 
@@ -67,6 +72,7 @@ export PATH="$HOME/.local/bin:$PATH"          # claude（按 `command -v claude`
 ```
 server/   REST API + /pty WebSocket；git / tmux / pty / 多机 Runner（本地 + ssh）编排
 web/      看板 + xterm 终端（原生 ES Module，无构建）
+scripts/  setup.sh —— 跑任务前的本机预检：校验 claude/tmux/git 并修 ~/.zshenv 的 PATH
 ~/.task-dispatcher/   每台机器：mirrors/ worktrees/（+ 控制端的 dispatcher.db）
 ```
 
