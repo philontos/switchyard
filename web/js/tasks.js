@@ -25,10 +25,23 @@ export function paintSelection() {
   });
 }
 
+// The machine a task lives on: shells carry host_id directly; repo tasks inherit
+// it from their repo. Returns null if it can't be resolved (e.g. repo not loaded).
+export function hostOfTask(t) {
+  if (t.host_id != null) return Number(t.host_id);
+  const repo = state.repos.find(r => r.id === t.repo_id);
+  return repo ? Number(repo.host_id) : null;
+}
+
 export function connect(id) {
   const t = tasksById[id];
   if (!t) return;
-  state.selectedTaskId = id; paintSelection();
+  state.selectedTaskId = id;
+  // remember this as the machine's "current" task so a later switch back to it
+  // re-attaches the dock here instead of stranding it on another machine's session
+  const hid = hostOfTask(t);
+  if (hid != null) state.lastTaskByHost[hid] = id;
+  paintSelection();
   openPty(`session=${encodeURIComponent(t.session)}`,
     `#${t.id} ${t.title}`, t.prompt ? `· ${t.prompt}` : "", "tmux attach -t " + t.session, t.id);
 }

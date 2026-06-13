@@ -6,6 +6,10 @@
 //   selectedTaskId — the card currently open in the terminal dock (tasks ↔ hosts)
 //   activeHostId   — the machine tab in focus; filters both the sidebar repos
 //                    (hosts.js) AND the task/archive lists (tasks.js)
+//   lastTaskByHost — per-machine memory of the last task opened there (host id →
+//                    task id); on a machine switch hosts.js re-attaches the dock
+//                    to it so col3 never keeps showing another machine's session
+//                    (tasks.js writes it in connect()).
 // Each module's own private state (term/fit/ws, branchReq, taskRepoId, …) stays
 // local to that module. This module imports nothing, so it can't form a cycle.
 export const state = {
@@ -13,4 +17,5 @@ export const state = {
   hostsById: {},
   selectedTaskId: null,
   activeHostId: null,
+  lastTaskByHost: {},
 };
