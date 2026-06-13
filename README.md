@@ -25,22 +25,32 @@
 - **并行隔离** —— 每个任务独立 worktree；多个任务的终端**常驻**，切换即时、不重连、不重绘。
 - **多机编排** —— 本机 + 任意可 ssh 的远程机统一纳管；worktree / tmux / claude 都跑在目标机上，网页只做中继；后台探活实时显示在线状态。
 - **一眼看状态** —— 跑中 / 就绪 / 克隆中 / 出错用状态点表示；会话卡在权限确认等你时，卡片亮**黄灯**提醒「等你」。
-- **预设 + skill 注入** —— 把一段开场模板 + 若干 Claude skill 打包成预设，一键带进任务的 worktree。
+- **skill 注入** —— 派发时可勾选若干 Claude skill（官方插件，先在右上角「Skills」里装好），一键带进任务的 worktree。
 - **省 token** —— 拉代码全是纯 git（blobless 部分克隆，文件按需懒取），不花任何 Claude token。
 - **深 / 浅色 + 中英双语** —— 右上角一键切换并记住选择。
 - **零前端构建** —— 原生 HTML / CSS / ES Module + 自托管 xterm，没有打包步骤。
 
 ## 快速开始
 
-前置：Node 22+、`tmux`、已登录的 `claude`。
+前置：Node 22+、`tmux`、已登录的 `claude` —— 且这三个命令在**非交互、非登录 shell** 里都能被找到（原因见下方 PATH）。
 
 ```bash
 npm install
 npm run dev      # http://localhost:4500（PORT 可改）
 ```
 
+**PATH（最容易踩的坑）**：dispatcher 用 `tmux new-session … claude` 拉起每个会话（远程走 `ssh host '<cmd>'`），跑的是**非交互、非登录 shell** —— zsh 下**只读 `~/.zshenv`**，不读 `.zshrc` / `.zprofile`。所以 `claude` / `tmux` / `git` 必须出现在 `~/.zshenv` 的 PATH 里，否则任务一起就 `command not found: claude`、pane 直接死（状态 127）。**每台**要跑任务的机器（本机 + 各远程机）都要配：
+
+```sh
+# ~/.zshenv（没有就新建）
+eval "$(/opt/homebrew/bin/brew shellenv)"   # git / tmux 等（按需）
+export PATH="$HOME/.local/bin:$PATH"          # claude（按 `command -v claude` 改）
+```
+
+验证 `zsh -c 'command -v claude tmux git'`，三个都打印路径即就绪。nvm 装的 `claude` 路径带 node 版本号、node 一升级就失效，建议软链到固定位置再写进 PATH：`ln -s "$(command -v claude)" ~/.local/bin/claude`。
+
 1. **新建仓库**：填名称 + git url（GitHub / GitLab，https 私有库可填 token，SSH 留空）→ 注册并克隆，状态变 `ready`。
-2. **派发任务**：选仓库 → 选基分支 → 填标题 + 给 claude 的开场指令 →（可选）挑预设 / 勾额外 skill → 建 worktree + 起会话。
+2. **派发任务**：选仓库 → 选基分支 → 填标题 + 给 claude 的开场指令 →（可选）勾附加 skill → 建 worktree + 起会话。
 3. **进终端**：右侧自动连上该会话，直接跟 claude 交互；卡片「进终端」可随时重连。
 4. **收尾**：归档（杀会话、留 worktree）/ 清理（杀会话 + 删 worktree）/ 删除（删记录）。
 
@@ -48,14 +58,7 @@ npm run dev      # http://localhost:4500（PORT 可改）
 
 ## 注意
 
-- **远程机**：`git / tmux / claude` 必须在远程机 `~/.zshenv` 配好的 PATH 里 —— dispatcher 走 `ssh host '<cmd>'`，跑的是非交互、非登录 shell，zsh 下只读 `.zshenv`（不读 `.zshrc` / `.zprofile`）。
-
-```sh
-# 远程机 ~/.zshenv
-eval "$(/opt/homebrew/bin/brew shellenv)"   # git / tmux 等
-export PATH="$HOME/.local/bin:$PATH"          # claude（按 which claude 改）
-```
-
+- **远程机**：PATH 规则同「快速开始」那条 —— 在**远程机自己**的 `~/.zshenv` 里也配好 `git / tmux / claude`（dispatcher 走 `ssh host '<cmd>'`，同样只读 `.zshenv`，不读 `.zshrc` / `.zprofile`）。
 - **安全**：服务**默认只绑环回 `127.0.0.1`**，局域网内别的机器连不上。要暴露到局域网需显式 `HOST=0.0.0.0`（此时网页终端 = 把 shell 开放给能访问该端口的人，**务必自加鉴权 / 反代，别裸暴露公网**）；想远程访问更建议走 ssh 隧道 `ssh -L 4500:localhost:4500 host`。token 目前**明文**存 sqlite，仅供本机自用。
 - **终端手感**：给 claude 开全屏渲染——会话内 `/tui fullscreen`，或 `~/.claude/settings.json` 设 `{"tui":"fullscreen"}`（per-machine，各机各配）——输入框钉死、滚动顺滑、不再横跳。
 
