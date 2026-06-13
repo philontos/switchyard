@@ -194,6 +194,15 @@ async function uploadPasteImage(taskId, blob) {
   }
 }
 
+// Detach the dock from any task WITHOUT tearing panes down: hide every pane and
+// show the empty state. Used when switching to a machine that has no connectable
+// task — the backgrounded panes stay alive for an instant switch back.
+export function detachDock() {
+  for (const o of panes.values()) o.pane.style.display = "none";
+  activeId = null;
+  showTermEmpty();
+}
+
 // The terminal column is permanent (col3); the empty-state overlay shows when no
 // pane is attached. showPane() hides it; disposing the last/active pane re-shows it.
 export function showTermEmpty() { $("term-empty").classList.remove("hidden"); }

@@ -9,7 +9,8 @@ import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { repoGroupHead } from "./repos.js";
-import { paintSelection, taskCard, allTasks, isEditingTask } from "./tasks.js";
+import { paintSelection, taskCard, allTasks, isEditingTask, connect } from "./tasks.js";
+import { detachDock } from "./terminal.js";
 import { orderTasks, isDraggingTask } from "./reorder.js";
 
 let hostsOrder = [];               // API order: local machine first. Active machine is state.activeHostId.
@@ -65,7 +66,33 @@ function renderRail(hosts, blocked) {
   $("m-rail").innerHTML = hosts.map(icon).join("")
     + `<button class="rchip add" title="${t("host.new")}" onclick="openHostModal()">＋</button>`;
 }
-export function selectHost(id) { state.activeHostId = id; menuHostId = null; rerender(); }
+export function selectHost(id) { state.activeHostId = id; menuHostId = null; rerender(); followHostTask(id); }
+
+// On a user-initiated machine switch, point the dock at THIS machine's task so
+// col3 never keeps showing the previous machine's session. Preference order,
+// matching what's visibly connectable in renderList (active + alive; archived is
+// never connectable): the last task opened here → the first connectable task in
+// list order (repos in sidebar order, then shells) → nothing, fall back to the
+// empty state. Only selectHost triggers this — the 5s poll's rerender() doesn't,
+// so a background refresh never yanks the dock around.
+function followHostTask(hostId) {
+  const tasks = allTasks();
+  const connectable = tk => tk.status !== "cleaned" && tk.alive;
+
+  const remembered = tasks.find(tk => tk.id === state.lastTaskByHost[hostId]);
+  if (remembered && connectable(remembered)) { connect(remembered.id); return; }
+
+  for (const r of state.repos.filter(r => Number(r.host_id) === hostId)) {
+    const mine = orderTasks(r.id, tasks.filter(tk => tk.repo_id === r.id && connectable(tk)));
+    if (mine.length) { connect(mine[0].id); return; }
+  }
+  const shell = tasks.find(tk => tk.kind === "local" && tk.host_id === hostId && connectable(tk));
+  if (shell) { connect(shell.id); return; }
+
+  state.selectedTaskId = null;
+  detachDock();
+  paintSelection();
+}
 
 // col2: machine header (name + ＋register-repo + remote ⚙ menu) then collapsible
 // repo groups with nested tasks, the local quick-task group (local machine), and
