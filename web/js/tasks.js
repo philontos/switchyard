@@ -148,10 +148,12 @@ export function taskCard(t, online) {
     icon = { glyph: "🗑", title: I18N.t("task.deleteRecord"), fn: `deleteTask(${t.id})`, needsHost: false };
   }
   const disabled = icon.needsHost && !online;
-  // resumable: the task is still live (not archived) and its worktree is on disk,
-  // but its tmux session is gone (mis-kill / host reboot / claude crash). Offer a
-  // one-click relaunch (claude --continue) instead of attaching to a dead session.
-  const resumable = active && !t.alive && t.hasWorktree;
+  // resumable: the worktree is on disk but the tmux session is gone — whether the
+  // task is still live (mis-kill / host reboot / claude crash) OR already archived
+  // (cleaned, worktree kept). Offer a one-click relaunch (claude --continue) that
+  // reattaches the prior conversation; resuming an archived task flips it back to
+  // running (server side), so it rejoins the active list on the next poll.
+  const resumable = (active || t.status === "cleaned") && !t.alive && t.hasWorktree;
   const resumeBtn = resumable
     ? `<button class="t-resume" title="${I18N.t("task.resumeTitle")}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();resume(${t.id})">⟳ ${I18N.t("task.resume")}</button>`
     : "";
