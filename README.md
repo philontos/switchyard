@@ -1,79 +1,79 @@
 # Task Dispatcher
 
-> 一个网页控制台，把「派发编程任务给 Claude Code」变成开卡片的事。每个任务在独立的 git worktree + tmux 会话里跑一个**真·交互式 Claude**，你在浏览器里直接进终端盯着它干、随时接管。多任务并行互不干扰，还能跨多台机器统一调度。
+> A web console that turns "handing a coding task to Claude Code" into dealing out a card. Each task runs a **real, interactive Claude** inside its own git worktree + tmux session, and you drop straight into that terminal from the browser to watch it work and take over anytime. Many tasks run in parallel without stepping on each other, and the whole thing schedules across multiple machines.
 
-## 关键词：小 · 快 · 多主机 · Claude native
+## Keywords: small · fast · multi-host · Claude native
 
-一句话讲，它就奔着这几点设计 —— 详细机制见下面的「特点」：
+In one line, it's built around exactly these — see **Features** below for the mechanics:
 
-- **小** —— 4 个运行时依赖、零构建步骤，整个服务端 + 前端约 4.5k 行；服务端 `tsx` 直跑、前端原生 ES Module，clone 完 `npm i` 就能上。
-- **快** —— 多任务终端**常驻**，切换即时、不重连不重绘；拉代码全走纯 git（blobless 部分克隆 + 文件懒取），不烧一个 Claude token。
-- **多主机** —— 本机 + 任意可 ssh 的远程机统一纳管，worktree / tmux / claude 都在**目标机本地**跑，网页只做中继与探活。
-- **Claude native** —— 网页终端直接 attach 到真 tmux 里的真 claude，权限弹窗 / 追问 / 斜杠命令原样可用，不套壳、不重写交互。
-- **状态透传** —— 跑中 / 就绪 / 克隆中 / 出错都有状态点；会话卡在权限确认等你时，靠 Claude Code **原生 hook** 把卡片点成**黄灯**喊「等你」—— 本机和远程同一套机制。
+- **Small** — 4 runtime dependencies, zero build step, ~4.5k lines for the whole server + frontend. The server runs straight under `tsx`, the frontend is native ES Modules; clone, `npm i`, and you're up.
+- **Fast** — task terminals stay **resident**, so switching is instant — no reconnect, no redraw. Pulling code is pure git (blobless partial clone + lazy file fetch) and burns zero Claude tokens.
+- **Multi-host** — your local machine plus any ssh-reachable remote, managed as one. The worktree / tmux / claude all run **locally on the target machine**; the web layer only relays and probes liveness.
+- **Claude native** — the web terminal attaches to the real claude inside a real tmux. Permission prompts, follow-up questions, and slash commands all work as-is — no wrapper, no rewritten interaction.
+- **State passthrough** — running / ready / cloning / errored each get a status dot. When a session is parked on a permission confirmation waiting for you, a Claude Code **native hook** flips the card to a **yellow light** that says "your turn" — same mechanism local and remote.
 
-## 它解决什么
+## What it solves
 
-- 想同时让 AI 跑好几个 feature，又不想它们互相踩工作目录、互相打断。
-- 想在**一个地方**统一看 / 控这些会话，而不是开一堆终端 tab、记一堆 tmux 名字。
-- 想把任务派到不同机器（本机 + 远程服务器 / GPU 机）上跑，但只在一个网页里操作。
+- You want to let AI work several features at once without them clobbering each other's working directory or interrupting one another.
+- You want to watch and control all those sessions in **one place**, instead of juggling a pile of terminal tabs and memorizing a pile of tmux names.
+- You want to dispatch tasks to different machines (local + a remote server / GPU box) but drive them all from one web page.
 
-## 特点
+## Features
 
-- **任务即卡片** —— 派发 = 选仓库 / 分支 + 一句开场指令；自动建 worktree、起 tmux、跑 claude。
-- **真 TUI，不是套壳** —— 权限弹窗、追问、斜杠命令全部正常。网页终端只是 attach 到同一个 tmux，你也能在自己终端 `tmux attach` 双向共享同一会话。
-- **并行隔离** —— 每个任务独立 worktree；多个任务的终端**常驻**，切换即时、不重连、不重绘。
-- **多机编排** —— 本机 + 任意可 ssh 的远程机统一纳管；worktree / tmux / claude 都跑在目标机上，网页只做中继；后台探活实时显示在线状态。
-- **一眼看状态** —— 跑中 / 就绪 / 克隆中 / 出错用状态点表示；会话卡在权限确认等你时，卡片亮**黄灯**提醒「等你」。
-- **skill 注入** —— 派发时可勾选若干 Claude skill（官方插件，先在右上角「Skills」里装好），一键带进任务的 worktree。
-- **省 token** —— 拉代码全是纯 git（blobless 部分克隆，文件按需懒取），不花任何 Claude token。
-- **深 / 浅色 + 中英双语** —— 右上角一键切换并记住选择。
-- **零前端构建** —— 原生 HTML / CSS / ES Module + 自托管 xterm，没有打包步骤。
+- **Tasks as cards** — dispatching = pick a repo / branch + one opening instruction; it auto-creates the worktree, starts tmux, and runs claude.
+- **Real TUI, not a wrapper** — permission prompts, follow-up questions, and slash commands all work. The web terminal just attaches to the same tmux, so you can `tmux attach` from your own terminal too and share the session both ways.
+- **Parallel isolation** — every task gets its own worktree; multiple task terminals stay **resident**, so switching is instant with no reconnect and no redraw.
+- **Multi-host orchestration** — your local machine plus any ssh-reachable remote, managed as one. The worktree / tmux / claude all run on the target machine; the web layer only relays. A background prober shows online status in real time.
+- **Status at a glance** — running / ready / cloning / errored are shown with status dots. When a session is parked on a permission confirmation waiting for you, the card lights up **yellow** to flag "your turn".
+- **Skill injection** — at dispatch time you can check off Claude skills (official plugins; install them first via "Skills" in the top-right) and pull them straight into the task's worktree.
+- **Token-thrifty** — pulling code is all pure git (blobless partial clone, files fetched lazily) and costs no Claude tokens.
+- **Dark / light + bilingual (EN/中文)** — toggle in the top-right; your choice is remembered.
+- **Zero frontend build** — native HTML / CSS / ES Modules + self-hosted xterm, no bundling step.
 
-## 快速开始
+## Quick start
 
-**前置**（每台要跑任务的机器都过一遍）：
+**Prerequisites** (do this once on every machine that will run tasks):
 
-1. **装 Node 22+**（其余命令交给下一步校验）。
-2. **跑预检脚本**，校验 + 自动把缺的 PATH 写进 `~/.zshenv`：
+1. **Install Node 22+** (the rest is validated by the next step).
+2. **Run the preflight script**, which validates and auto-writes any missing PATH entries into `~/.zshenv`:
 
    ```sh
-   ./scripts/setup.sh          # 校验 claude / tmux / git，把「已装但不在 PATH」的目录写进 ~/.zshenv（幂等、自动备份 .bak）
-   ./scripts/setup.sh --check  # 只看会改什么、不写
+   ./scripts/setup.sh          # validates claude / tmux / git, writes "installed but not on PATH" dirs into ~/.zshenv (idempotent, auto-backs up to .bak)
+   ./scripts/setup.sh --check  # show what it would change, write nothing
    ```
 
-   它按 dispatcher 实际用的非交互 shell（tmux / ssh → `zsh -c`，只读 `~/.zshenv`）来检查；命令真没装的话只提示装法、不替你装。nvm 装的 `claude` 路径带版本号、升级即失效，脚本会提醒你软链固定。
+   It checks things the way the dispatcher actually invokes them — a non-interactive shell (tmux / ssh → `zsh -c`, which only reads `~/.zshenv`). If a command genuinely isn't installed, it tells you how to install it rather than installing it for you. nvm-installed `claude` paths carry a version number and break on upgrade, so the script reminds you to pin a stable symlink.
 
-前置过了就能起服务：
+Once prerequisites pass, start the server:
 
 ```bash
 npm install
-npm run dev      # http://localhost:4500（PORT 可改）
+npm run dev      # http://localhost:4500 (PORT is configurable)
 ```
 
-> **为什么要第 2 步**：dispatcher 用 `zsh -c 'claude …'` 起每个任务，跑的是非交互、非登录 shell —— PATH 里没有 `claude` 就 `command not found`、pane 直接死（状态 127）。`~/.zshenv` 对每次 zsh 调用都生效，把 PATH 修在那里最稳。远程机暂时手动配（把 claude / tmux / git 加进**远程那台**的 `~/.zshenv`），脚本化以后再说。
+> **Why step 2 matters**: the dispatcher launches each task with `zsh -c 'claude …'`, a non-interactive, non-login shell — if `claude` isn't on PATH you get `command not found` and the pane dies outright (exit status 127). `~/.zshenv` applies to every zsh invocation, so fixing PATH there is the most reliable. Remote machines are configured by hand for now (add claude / tmux / git to the `~/.zshenv` on **that** machine); scripting it is a later job.
 
-**用起来**：
+**Using it**:
 
-1. **新建仓库**：填名称 + git url（GitHub / GitLab，https 私有库可填 token，SSH 留空）→ 注册并克隆，状态变 `ready`。
-2. **派发任务**：选仓库 → 选基分支 → 填标题 + 给 claude 的开场指令 →（可选）勾附加 skill → 建 worktree + 起会话。
-3. **进终端**：右侧自动连上该会话，直接跟 claude 交互；卡片「进终端」可随时重连。
-4. **收尾**：归档（杀会话、留 worktree）/ 清理（杀会话 + 删 worktree）/ 删除（删记录）。
+1. **Add a repo**: enter a name + git url (GitHub / GitLab; for an https private repo you can supply a token, leave it blank for SSH) → it registers and clones, status goes `ready`.
+2. **Dispatch a task**: pick a repo → pick a base branch → fill in a title + the opening instruction for claude → (optional) check extra skills → it creates the worktree and starts the session.
+3. **Enter the terminal**: the right pane auto-connects to that session and you interact with claude directly; "Enter terminal" on the card reconnects anytime.
+4. **Wrap up**: archive (kill the session, keep the worktree) / clean up (kill the session + delete the worktree) / delete (remove the record).
 
-> 不想建仓库时用「本地快速任务」：在本机某目录直接开个裸 tmux shell，自己 `cd`、跑 claude 或任何命令，同一套列表 / 连接 / 归档照用。
+> Don't want to register a repo? Use a **local quick task**: it opens a bare tmux shell in some directory on your local machine, you `cd` yourself and run claude or any command — the same list / connect / archive flow applies.
 
-## 注意
+## Notes
 
-- **安全**：服务**默认只绑环回 `127.0.0.1`**，局域网内别的机器连不上。要暴露到局域网需显式 `HOST=0.0.0.0`（此时网页终端 = 把 shell 开放给能访问该端口的人，**务必自加鉴权 / 反代，别裸暴露公网**）；想远程访问更建议走 ssh 隧道 `ssh -L 4500:localhost:4500 host`。token 目前**明文**存 sqlite，仅供本机自用。
-- **终端手感**：给 claude 开全屏渲染——会话内 `/tui fullscreen`，或 `~/.claude/settings.json` 设 `{"tui":"fullscreen"}`（per-machine，各机各配）——输入框钉死、滚动顺滑、不再横跳。
+- **Security**: the service **binds loopback `127.0.0.1` only by default**, so other machines on the LAN can't reach it. To expose it on the LAN you must set `HOST=0.0.0.0` explicitly (at which point the web terminal = handing a shell to anyone who can reach that port, so **add your own auth / reverse proxy — never expose it raw on the public internet**). For remote access, an ssh tunnel is preferable: `ssh -L 4500:localhost:4500 host`. Tokens are currently stored **in plaintext** in sqlite, intended for local personal use only.
+- **Terminal feel**: give claude full-screen rendering — `/tui fullscreen` inside the session, or set `{"tui":"fullscreen"}` in `~/.claude/settings.json` (per-machine, configured on each) — to pin the input box, keep scrolling smooth, and stop the horizontal jumping.
 
-## 结构
+## Structure
 
 ```
-server/   REST API + /pty WebSocket；git / tmux / pty / 多机 Runner（本地 + ssh）编排
-web/      看板 + xterm 终端（原生 ES Module，无构建）
-scripts/  setup.sh —— 跑任务前的本机预检：校验 claude/tmux/git 并修 ~/.zshenv 的 PATH
-~/.task-dispatcher/   每台机器：mirrors/ worktrees/（+ 控制端的 dispatcher.db）
+server/   REST API + /pty WebSocket; git / tmux / pty / multi-host Runner (local + ssh) orchestration
+web/      board + xterm terminal (native ES Modules, no build)
+scripts/  setup.sh — preflight on each machine before running tasks: validates claude/tmux/git and fixes the PATH in ~/.zshenv
+~/.task-dispatcher/   per machine: mirrors/ worktrees/ (+ dispatcher.db on the control host)
 ```
 
-> 服务端 / 前端文案各有一份 zh/en 字典（`server/i18n.ts`、`web/i18n.js`），是各自层的唯一真源。更细的数据模型、多机账本语义、i18n 约定见源码注释。
+> The server and frontend each carry their own zh/en string dictionary (`server/i18n.ts`, `web/i18n.js`), the single source of truth for that layer. For the finer data model, multi-host ledger semantics, and i18n conventions, see the source comments.
