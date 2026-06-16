@@ -280,14 +280,29 @@ app.get("/api/tasks", async (_req, res) => {
   const withLive = await Promise.all(
     tasks.map(async (t) => {
       const runner = taskRunner(t);
+      const hasWt = !!t.worktree_path && (await runner.exists(t.worktree_path).catch(() => false));
+      // Claude session id: the SessionStart hook writes it to <wt>/.claude/session-id;
+      // read it back the same way the yellow light reads .claude/waiting, and persist
+      // it so the value survives once the worktree is gone (e.g. archived). It only
+      // changes on /clear (a fresh conversation), so refreshing each poll keeps it
+      // accurate; we fall back to the stored value when the worktree isn't there.
+      let claudeSession = t.claude_session ?? null;
+      if (hasWt && t.status !== "cleaned") {
+        const sid = (await runner.readText(path.join(t.worktree_path, ".claude/session-id")).catch(() => null))?.trim();
+        if (sid && sid !== claudeSession) {
+          db.prepare("UPDATE tasks SET claude_session=? WHERE id=?").run(sid, t.id);
+          claudeSession = sid;
+        }
+      }
       return {
         ...t,
+        claude_session: claudeSession,
         alive: t.status === "cleaned" ? false : await hasSession(runner, t.session).catch(() => false),
-        hasWorktree: !!t.worktree_path && (await runner.exists(t.worktree_path).catch(() => false)),
+        hasWorktree: hasWt,
         // yellow light: the session's hook touches <wt>/.claude/waiting when it
         // blocks on a permission prompt; runner.exists reads it back the same way
         // on the local box (fs) and on a remote (ssh test -e). No worktree → never.
-        waiting: t.status !== "cleaned" && !!t.worktree_path
+        waiting: t.status !== "cleaned" && hasWt
           && (await runner.exists(path.join(t.worktree_path, ".claude/waiting")).catch(() => false)),
       };
     })
@@ -352,7 +367,7 @@ app.post("/api/tasks", async (req, res) => {
     fs.rmSync(path.dirname(hooksTmp), { recursive: true, force: true });
     await runner.exec("sh", ["-c",
       `cd ${JSON.stringify(wtAbs)} && p=$(git rev-parse --git-path info/exclude) && ` +
-      `for f in '.claude/settings.local.json' '.claude/waiting'; do grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
+      `for f in '.claude/settings.local.json' '.claude/waiting' '.claude/session-id'; do grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
     ]).catch(() => {});
     // opening message: the freeform prompt + the "skills delivered" line
     const opening = (prompt || "") + skillsLine(found.map((f) => f.name));

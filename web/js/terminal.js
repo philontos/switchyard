@@ -56,6 +56,15 @@ export function initTerm() {
   // manual preview-port fallback (for when the printed link isn't auto-detected)
   $("prev-go").addEventListener("click", goPreviewPort);
   $("prev-port").addEventListener("keydown", (e) => { if (e.key === "Enter") goPreviewPort(); });
+  // click the Claude session-id chip → copy the full uuid (dataset.sid, never the
+  // possibly-truncated visible text) to the clipboard.
+  $("term-claude").addEventListener("click", () => {
+    const sid = $("term-claude").dataset.sid;
+    if (!sid) return;
+    navigator.clipboard.writeText(sid)
+      .then(() => toast(I18N.t("toast.claudeCopied"), "success"))
+      .catch(() => {});
+  });
 }
 
 function sendResize(p) {
@@ -87,7 +96,7 @@ function createPane(id, query) {
   // instead of navigating the browser to the user's OWN (empty) localhost.
   try { term.registerLinkProvider(localhostLinks(term, id)); } catch {}
 
-  const p = { id, pane, term, fit, ws: null, query, title: "", desc: "", attach: "" };
+  const p = { id, pane, term, fit, ws: null, query, title: "", desc: "", attach: "", claude: "" };
 
   // claude TUI 开了鼠标上报,普通拖拽会被转发给应用; Shift/Option 拖拽走本地选区,松手即复制
   term.element.addEventListener("mouseup", () => {
@@ -157,6 +166,34 @@ function applyBar(p) {
   $("term-desc").textContent = p.desc;
   $("term-desc").title = p.desc;           // full text on hover
   $("term-attach").textContent = p.attach;
+  applyClaude(p.claude);
+}
+
+// Fill (or hide) the Claude-session-id chip. The raw id is stashed in dataset.sid
+// so the click handler copies the FULL uuid even when the bar truncated it; title
+// shows it complete on hover. Empty (local shell tasks, or claude not booted) hides.
+function applyClaude(sid) {
+  const el = $("term-claude");
+  if (sid) {
+    el.dataset.sid = sid;
+    el.textContent = "claude: " + sid;
+    el.title = sid + " — " + I18N.t("term.claudeCopy");
+    el.style.display = "";
+  } else {
+    delete el.dataset.sid;
+    el.textContent = "";
+    el.style.display = "none";
+  }
+}
+
+// Update a task's stored Claude session id and, if it's the visible pane, the bar.
+// Called from the task poll so the chip appears as soon as claude writes its id,
+// without waiting for a reconnect.
+export function setClaudeSession(taskId, sid) {
+  const p = panes.get(taskId);
+  if (!p || p.claude === (sid || "")) return;
+  p.claude = sid || "";
+  if (activeId === taskId) applyClaude(p.claude);
 }
 
 // Intercept an image paste (screenshot in clipboard) and route it to the pane's
@@ -263,12 +300,12 @@ function goPreviewPort() {
 // Attach the dock to a task's session: reuse its live pane if we have one (just
 // show it — instant, no reconnect), else build a new pane. Either way refresh the
 // dock bar (title/desc may have changed, e.g. after a rename) and ensure a socket.
-export function openPty(query, title, desc, attach, taskId = null) {
+export function openPty(query, title, desc, attach, taskId = null, claude = "") {
   if (taskId == null) return;
   let p = panes.get(taskId);
   if (!p) p = createPane(taskId, query);
   else p.query = query;                  // session normally unchanged; keep it fresh
-  p.title = title; p.desc = desc || ""; p.attach = attach || "";
+  p.title = title; p.desc = desc || ""; p.attach = attach || ""; p.claude = claude || "";
   showPane(p);
   ensureSocket(p);
 }

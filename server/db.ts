@@ -58,6 +58,7 @@ export interface Task {
   kind: string;              // 'repo' | 'local'
   host_id: number | null;    // local tasks: the machine they run on
   cwd: string | null;        // local tasks: working dir
+  claude_session: string | null;  // Claude session id (UUID), captured by the SessionStart hook
 }
 
 export interface Host {

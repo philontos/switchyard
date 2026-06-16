@@ -26,6 +26,15 @@ test("LocalRunner.putFile copies a single file, creating parent dirs", async () 
   assert.equal(fs.readFileSync(dest, "utf8"), "PNGDATA");
 });
 
+test("LocalRunner.readText returns file contents, and null when missing", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rt-"));
+  const f = path.join(tmp, ".claude", "session-id");
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, "abc123-de45-6789");
+  assert.equal(await localRunner.readText(f), "abc123-de45-6789");
+  assert.equal(await localRunner.readText(path.join(tmp, "nope")), null);
+});
+
 test("sshForwardArgs: forwards to the remote's localhost so sshd picks IPv4/IPv6", () => {
   const args = sshForwardArgs("phil@10.10.0.2", 41000, 5173);
   const i = args.indexOf("-L");

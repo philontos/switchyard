@@ -26,6 +26,8 @@ export interface Runner {
   exec(file: string, args: string[], opts?: ExecOpts): Promise<string>;
   mkdirp(dir: string): Promise<void>;
   exists(p: string): Promise<boolean>;
+  /** Read a text file's contents ON the target machine; null if it's missing. */
+  readText(p: string): Promise<string | null>;
   rmrf(p: string): Promise<void>;
   /** Copy a local directory tree to `dest` ON the target machine. */
   putDir(localSrc: string, dest: string): Promise<void>;
@@ -48,6 +50,7 @@ export class LocalRunner implements Runner {
   }
   async mkdirp(dir: string) { fs.mkdirSync(dir, { recursive: true }); }
   async exists(p: string) { return fs.existsSync(p); }
+  async readText(p: string) { try { return fs.readFileSync(p, "utf8"); } catch { return null; } }
   async rmrf(p: string) { fs.rmSync(p, { recursive: true, force: true }); }
   async putDir(localSrc: string, dest: string) {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -106,6 +109,8 @@ export class RemoteRunner implements Runner {
   }
   async mkdirp(dir: string) { await this.exec("mkdir", ["-p", dir]); }
   async exists(p: string) { try { await this.exec("test", ["-e", p]); return true; } catch { return false; } }
+  // `cat` a missing file errors → null, matching LocalRunner's swallow-and-null.
+  async readText(p: string) { try { return await this.exec("cat", [p]); } catch { return null; } }
   async rmrf(p: string) { await this.exec("rm", ["-rf", p]); }
 
   // Stream the local dir to the remote with tar-over-ssh. We need a real pipe,

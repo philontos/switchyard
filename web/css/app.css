@@ -315,6 +315,12 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .termbar code { background: var(--bg); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); flex: none; }
 #term-title { color: var(--text); font-weight: 600; white-space: nowrap; flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 #term-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 12px; }
+/* Claude session id: show the full UUID when the bar has room, ellipsis it when
+   it doesn't (flex:0 1 auto + min-width:0 lets it shrink past its content). Click
+   copies the full id (wired in terminal.js); the title shows the complete value.
+   The flex override matters — `.termbar code` is flex:none, which would never shrink. */
+.term-claude { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--faint); }
+.term-claude:hover { color: var(--text); border-color: var(--accent); }
 a { color: var(--accent-bar); }
 .hint { font-size: 11px; color: var(--faint); }
 .modal-bg { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 50; }
