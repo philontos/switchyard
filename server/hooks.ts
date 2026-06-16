@@ -18,11 +18,23 @@
  *   Notification (permission_prompt) → touch .claude/waiting   (yellow)
  *   PostToolUse / UserPromptSubmit / Stop → rm -f .claude/waiting
  *                              (a tool ran / user replied / turn ended → cleared)
+ *   SessionStart → write the Claude session id to .claude/session-id
+ *                  (so the dispatcher can show it above the task; see below)
  */
 export function hookSettingsJson(worktreePath: string): string {
   const marker = `${worktreePath}/.claude/waiting`;
   const wait = `touch "${marker}" >/dev/null 2>&1 || true`;
   const clear = `rm -f "${marker}" >/dev/null 2>&1 || true`;
+  // SessionStart's hook input arrives as JSON on stdin (no env var for it). Pull
+  // session_id out with a pure-shell sed — robust whether the JSON is compact or
+  // pretty-printed (the key and its value always share a line) — and write it to
+  // .claude/session-id. SessionStart re-fires on --continue/--resume/clear, and a
+  // resumed id is unchanged, so the file stays correct across the Resume button.
+  // Never fails the session (trailing `; true`), like the markers above.
+  const sidFile = `${worktreePath}/.claude/session-id`;
+  const captureSid =
+    `s=$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' | head -n1); ` +
+    `[ -n "$s" ] && printf %s "$s" > "${sidFile}" 2>/dev/null; true`;
   const hook = (command: string, matcher = "") =>
     [{ matcher, hooks: [{ type: "command", command }] }];
   return JSON.stringify(
@@ -32,6 +44,7 @@ export function hookSettingsJson(worktreePath: string): string {
         PostToolUse: hook(clear),
         UserPromptSubmit: hook(clear),
         Stop: hook(clear),
+        SessionStart: hook(captureSid),
       },
     },
     null,

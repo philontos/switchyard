@@ -91,6 +91,7 @@ function reconcileColumns(db: DB) {
   addColumn(db, "tasks", "kind", "TEXT DEFAULT 'repo'");       // 'repo' | 'local'
   addColumn(db, "tasks", "host_id", "INTEGER");                // local tasks: which machine
   addColumn(db, "tasks", "cwd", "TEXT");                       // local tasks: working dir
+  addColumn(db, "tasks", "claude_session", "TEXT");           // Claude session id, captured by the SessionStart hook
 }
 
 /**

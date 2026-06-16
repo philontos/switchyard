@@ -41,6 +41,7 @@
       "term.selectHint": "⇧ 拖拽选中",
       "term.selectHintTitle": "终端开了鼠标模式,普通拖拽会发给会话;按住 Shift(或 mac 的 Option)拖拽即可选中,松手自动复制",
       "term.empty": "点左侧任务进入终端",
+      "term.claudeCopy": "点击复制完整 session id",
 
       // web preview (click a localhost link in the terminal → new browser tab)
       "preview.portPh": "端口",
@@ -134,6 +135,7 @@
       "toast.resumeFailed": "恢复失败：{error}",
       "toast.pasteOk": "图片已贴入终端（claude 显示为 [Image #N]）",
       "toast.pasteFailed": "贴图失败：{error}",
+      "toast.claudeCopied": "已复制 Claude session id",
 
       // machines (remote hosts)
       "host.new": "＋ 新建机器",
@@ -186,6 +188,7 @@
       "term.selectHint": "⇧ Drag-select",
       "term.selectHintTitle": "The terminal runs in mouse mode, so a plain drag is sent to the session; hold Shift (or Option on mac) and drag to select, release to copy automatically.",
       "term.empty": "Pick a task on the left to open its terminal",
+      "term.claudeCopy": "Click to copy the full session id",
 
       // web preview (click a localhost link in the terminal → side panel)
       "preview.portPh": "port",
@@ -270,6 +273,7 @@
       "toast.resumeFailed": "Resume failed: {error}",
       "toast.pasteOk": "Image pasted into the terminal (shows as [Image #N] in claude)",
       "toast.pasteFailed": "Paste failed: {error}",
+      "toast.claudeCopied": "Copied the Claude session id",
 
       "host.new": "＋ New machine",
       "host.heading": "Machines",

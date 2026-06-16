@@ -35,3 +35,26 @@ test("hookSettingsJson: hook command can never fail the claude session", () => {
   assert.match(s.hooks.Notification[0].hooks[0].command, /\|\| true\s*$/);
   assert.match(s.hooks.Stop[0].hooks[0].command, /\|\| true\s*$/);
 });
+
+test("hookSettingsJson: SessionStart captures session_id into the worktree", () => {
+  const s = JSON.parse(hookSettingsJson(WT));
+  const cmd = s.hooks.SessionStart[0].hooks[0].command;
+  assert.match(cmd, new RegExp(`> "${WT}/\\.claude/session-id"`));
+  assert.match(cmd, /sed -n/);          // extracts from stdin JSON, not an env var
+  assert.match(cmd, /; true\s*$/);      // can never fail the session
+});
+
+test("hookSettingsJson: the SessionStart sed actually extracts a session_id", () => {
+  // mirror the shell sed in JS to prove the regex pulls the id out of real hook
+  // JSON — both compact and pretty-printed (key+value share a line either way).
+  const cmd = JSON.parse(hookSettingsJson(WT)).hooks.SessionStart[0].hooks[0].command;
+  const re = /"session_id"[ \t]*:[ \t]*"([^"]*)"/;   // === the [[:space:]] sed, JS-side
+  const id = "abc123-de45-6789-0000-deadbeef0000";
+  assert.ok(cmd.includes('"session_id"'), "command should grep the session_id key");
+  for (const json of [
+    `{"session_id":"${id}","cwd":"/x","hook_event_name":"SessionStart"}`,
+    `{\n  "session_id": "${id}",\n  "source": "resume"\n}`,
+  ]) {
+    assert.equal(json.match(re)?.[1], id);
+  }
+});

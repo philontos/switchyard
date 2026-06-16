@@ -7,7 +7,7 @@ import { toast, showLoading, hideLoading } from "./feedback.js";
 import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
-import { openPty, disposePty, prunePanes } from "./terminal.js";
+import { openPty, disposePty, prunePanes, setClaudeSession } from "./terminal.js";
 import { rerender } from "./hosts.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
@@ -43,7 +43,7 @@ export function connect(id) {
   if (hid != null) state.lastTaskByHost[hid] = id;
   paintSelection();
   openPty(`session=${encodeURIComponent(t.session)}`,
-    `#${t.id} ${t.title}`, t.prompt ? `· ${t.prompt}` : "", "tmux attach -t " + t.session, t.id);
+    `#${t.id} ${t.title}`, t.prompt ? `· ${t.prompt}` : "", "tmux attach -t " + t.session, t.id, t.claude_session || "");
 }
 
 export function openTaskModal(repoId) {
@@ -192,6 +192,9 @@ export async function loadTasks() {
   if (!tasks) return;
   tasksById = Object.fromEntries(tasks.map(t => [t.id, t]));
   taskOrder = tasks.map(t => t.id);          // preserve the API's id-DESC order
+  // push each task's latest Claude session id into its live pane so the term-bar
+  // chip lights up as soon as claude writes its id — no reconnect needed.
+  for (const t of tasks) setClaudeSession(t.id, t.claude_session || "");
   // drop kept-alive terminals whose task is gone or whose session was killed
   // (status 'cleaned' == not connectable, mirrors taskCard's `active`). If the
   // open card was one of them, clear the now-dangling selection.
