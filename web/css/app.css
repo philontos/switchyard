@@ -301,6 +301,17 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .term-empty { position: absolute; inset: 38px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--faint-2); pointer-events: none; }
 .term-empty.hidden { display: none; }
 .term-empty .te-ic { font-size: 34px; opacity: .6; }
+/* in-window placeholder while a task is being created (replaces the old global
+   blocking overlay) — shown via inline display:flex by terminal.js */
+.term-pane.pending { align-items: center; justify-content: center; }
+.pending-box { display: flex; flex-direction: column; align-items: center; gap: 14px;
+  max-width: 80%; text-align: center; }
+.pending-text { color: var(--text); font-size: 14px; }
+.pending-box.error { gap: 12px; }
+.pending-title { color: var(--red-text); font-size: 15px; font-weight: 600; }
+.pending-err { color: var(--faint-2); font-size: 12.5px; font-family: Menlo, monospace;
+  white-space: pre-wrap; word-break: break-word; max-height: 50vh; overflow: auto; }
+.pending-x { width: auto; margin: 0; padding: 6px 18px; background: var(--surface-2); border-color: var(--border); }
 .empty { grid-column: 1 / -1; text-align: center; color: var(--faint); padding: 56px 16px; }
 .empty-ic { font-size: 34px; margin-bottom: 10px; opacity: .7; }
 .empty-hint { font-size: 12px; margin-top: 6px; color: var(--faint-2); }

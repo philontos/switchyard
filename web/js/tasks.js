@@ -7,7 +7,8 @@ import { toast, showLoading, hideLoading } from "./feedback.js";
 import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
-import { openPty, disposePty, prunePanes, setClaudeSession } from "./terminal.js";
+import { openPty, disposePty, prunePanes, setClaudeSession,
+         openPending, failPending, closePending, pendingIsActive } from "./terminal.js";
 import { rerender } from "./hosts.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
@@ -65,17 +66,17 @@ export function closeTaskModal() { $("task-modal").style.display = "none"; }
 // Deliberately bare-bones for a fast start; repo/branch/worktree/prompt
 // all live in the richer repo dispatch flow instead.
 export async function addLocalTask(hostId) {
-  showLoading(t("local.starting"));
+  const tmpId = nextTmpId();
+  openPending(tmpId, t("term.creating"), "", t("local.starting"));
   try {
     const body = hostId != null ? JSON.stringify({ host_id: hostId }) : "{}";
     const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body });
-    toast(t("toast.taskDispatched", { session: r.session }), "success");
     await loadTasks();
-    connect(r.id);
+    settlePending(tmpId, r.id);
+    toast(t("toast.taskDispatched", { session: r.session }), "success");
   } catch (e) {
-    toast(t("toast.dispatchFailed", { error: e.message }), "error", 6000);
-  } finally {
-    hideLoading();
+    await loadTasks();
+    rejectPending(tmpId, e.message);
   }
 }
 
@@ -117,19 +118,42 @@ export async function addTask() {
     extra_skills: selectedExtraSkills(),
   };
   if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
-  showLoading(t("loading.creatingWorktree"));
+  // Open the dock placeholder BEFORE clearing the form so its title can label it,
+  // then close the modal immediately — no global overlay, the loading lives in the
+  // window. The POST runs in the background and resolves into the same window.
+  const tmpId = nextTmpId();
+  openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
+  $("t-title").value = ""; $("t-prompt").value = "";
+  closeTaskModal();
   try {
     const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
-    $("t-title").value = ""; $("t-prompt").value = "";
-    closeTaskModal();
-    toast(t("toast.taskDispatched", { session: r.session }), "success");
     await loadTasks();
-    connect(r.id);
+    settlePending(tmpId, r.id);
+    toast(t("toast.taskDispatched", { session: r.session }), "success");
   } catch (e) {
-    toast(t("toast.dispatchFailed", { error: e.message }), "error", 6000);
-  } finally {
-    hideLoading();
+    await loadTasks();
+    rejectPending(tmpId, e.message);
   }
+}
+
+// client-side temp ids for in-flight creation placeholders (no real task id yet)
+let tmpSeq = 0;
+function nextTmpId() { return "tmp" + (++tmpSeq); }
+
+// Creation succeeded: if its placeholder is still the visible dock view, swap to
+// the live terminal; otherwise just drop the (backgrounded) placeholder — the task
+// is now a normal card the user can click.
+function settlePending(tmpId, taskId) {
+  if (pendingIsActive(tmpId)) connect(taskId);   // showPane() clears the placeholder
+  closePending(tmpId);
+}
+
+// Creation failed: show the error in its window if still visible, else fall back to
+// a toast (the failed task also surfaces as an error card via loadTasks()).
+function rejectPending(tmpId, message) {
+  if (pendingIsActive(tmpId)) { failPending(tmpId, message); return; }
+  closePending(tmpId);
+  toast(t("toast.dispatchFailed", { error: message }), "error", 6000);
 }
 
 export function taskCard(t, online) {
