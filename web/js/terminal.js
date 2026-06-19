@@ -148,6 +148,7 @@ function ensureSocket(p) {
 // may have been display:none and unmeasurable), repaint, refresh the dock bar
 // and grab the keyboard.
 function showPane(p) {
+  hidePendingView();   // a real pane takes over the dock → drop any placeholder overlay
   for (const o of panes.values()) o.pane.style.display = o === p ? "block" : "none";
   activeId = p.id;
   hideTermEmpty();
@@ -235,6 +236,7 @@ async function uploadPasteImage(taskId, blob) {
 // show the empty state. Used when switching to a machine that has no connectable
 // task — the backgrounded panes stay alive for an instant switch back.
 export function detachDock() {
+  hidePendingView();
   for (const o of panes.values()) o.pane.style.display = "none";
   activeId = null;
   showTermEmpty();
@@ -244,6 +246,82 @@ export function detachDock() {
 // pane is attached. showPane() hides it; disposing the last/active pane re-shows it.
 export function showTermEmpty() { $("term-empty").classList.remove("hidden"); }
 function hideTermEmpty() { $("term-empty").classList.add("hidden"); }
+
+// ---- pending creation windows ----
+// A task being created has no tmux session yet, so it can't own a real pane. While
+// the POST is in flight we drop a lightweight placeholder into the #term stack: a
+// spinner that the success path swaps for the live terminal, or an inline error on
+// failure. These live OUTSIDE the panes Map (which is keyed by real task id and
+// pruned by loadTasks) — keyed by a client temp id instead, so a stray placeholder
+// is never mistaken for a real task. Concurrency: many creations can be in flight,
+// but only the newest placeholder is shown; the rest resolve in the background
+// (success → a normal card; failure → a toast) without stealing the dock.
+const pending = new Map();   // tmpId -> { el }
+let activePending = null;    // tmpId of the placeholder currently shown (or null)
+
+// Hide every placeholder without destroying it (in-flight ones must survive to
+// resolve). Called when a real pane / empty state takes over the dock.
+function hidePendingView() {
+  for (const v of pending.values()) v.el.style.display = "none";
+  activePending = null;
+}
+
+// Paint the shared dock bar for a placeholder (no real pane object to read from).
+function pendingBar(title, desc) {
+  $("term-title").removeAttribute("data-i18n");
+  $("term-title").textContent = title;
+  $("term-desc").textContent = desc || "";
+  $("term-desc").title = desc || "";
+  $("term-attach").textContent = "";
+  applyClaude("");
+}
+
+// Open a spinner placeholder for a just-submitted creation and make it the visible
+// dock view. text = the loading line (e.g. "Creating worktree…").
+export function openPending(tmpId, title, desc, text) {
+  const el = document.createElement("div");
+  el.className = "term-pane pending";
+  el.dataset.pending = String(tmpId);
+  el.innerHTML = `<div class="pending-box"><div class="spinner"></div><div class="pending-text"></div></div>`;
+  el.querySelector(".pending-text").textContent = text;
+  $("term").appendChild(el);
+  pending.set(tmpId, { el });
+  for (const o of panes.values()) o.pane.style.display = "none";
+  for (const [k, v] of pending) v.el.style.display = k === tmpId ? "flex" : "none";
+  activeId = null;
+  activePending = tmpId;
+  hideTermEmpty();
+  pendingBar(title, desc);
+}
+
+export function pendingIsActive(tmpId) { return activePending === tmpId; }
+
+// Swap a placeholder's spinner for an inline error + dismiss button. Returns false
+// if the placeholder is already gone (caller falls back to a toast).
+export function failPending(tmpId, message) {
+  const pe = pending.get(tmpId);
+  if (!pe) return false;
+  pe.el.innerHTML = `<div class="pending-box error">
+      <div class="pending-title"></div>
+      <div class="pending-err"></div>
+      <button class="pending-x"></button>
+    </div>`;
+  pe.el.querySelector(".pending-title").textContent = I18N.t("term.creationFailed");
+  pe.el.querySelector(".pending-err").textContent = message || "";
+  const x = pe.el.querySelector(".pending-x");
+  x.textContent = I18N.t("term.dismiss");
+  x.onclick = () => closePending(tmpId);
+  return true;
+}
+
+// Destroy a placeholder. If it was the visible one, fall back to the empty state.
+export function closePending(tmpId) {
+  const pe = pending.get(tmpId);
+  if (!pe) return;
+  pending.delete(tmpId);
+  pe.el.remove();
+  if (activePending === tmpId) { activePending = null; showTermEmpty(); }
+}
 
 // ---- web preview ----
 // A localhost link the session prints (e.g. a dev server's "Local:
