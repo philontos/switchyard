@@ -8,8 +8,8 @@ import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { openPty, disposePty, prunePanes, setClaudeSession,
-         openPending, failPending, closePending, pendingIsActive } from "./terminal.js";
-import { rerender } from "./hosts.js";
+         openPending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
+import { rerender, expandRepo } from "./hosts.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 // id of the task whose title is being edited inline. While set, renderList()
@@ -19,10 +19,15 @@ let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 let editingTaskId = null;
 export function isEditingTask() { return editingTaskId != null; }
 
-// reflect the current selection onto the cards already in the DOM (no refetch)
+// reflect the current selection onto the cards already in the DOM (no refetch).
+// Placeholder cards (data-pending) light up while their loading window is the
+// active dock view; real cards (data-id) match state.selectedTaskId.
 export function paintSelection() {
   document.querySelectorAll("#m-list .task").forEach(el => {
-    el.classList.toggle("selected", Number(el.dataset.id) === state.selectedTaskId);
+    const on = el.dataset.pending != null
+      ? pendingIsActive(el.dataset.pending)
+      : Number(el.dataset.id) === state.selectedTaskId;
+    el.classList.toggle("selected", on);
   });
 }
 
@@ -67,14 +72,18 @@ export function closeTaskModal() { $("task-modal").style.display = "none"; }
 // all live in the richer repo dispatch flow instead.
 export async function addLocalTask(hostId) {
   const tmpId = nextTmpId();
+  const hid = hostId != null ? hostId : localHostId();
   openPending(tmpId, t("term.creating"), "", t("local.starting"));
+  addPendingCard(tmpId, { kind: "local", repoId: null, hostId: hid, title: t("term.creating") });
   try {
     const body = hostId != null ? JSON.stringify({ host_id: hostId }) : "{}";
     const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body });
+    dropPendingCard(tmpId);          // the real card replaces the placeholder
     await loadTasks();
     settlePending(tmpId, r.id);
     toast(t("toast.taskDispatched", { session: r.session }), "success");
   } catch (e) {
+    dropPendingCard(tmpId);
     await loadTasks();
     rejectPending(tmpId, e.message);
   }
@@ -118,19 +127,25 @@ export async function addTask() {
     extra_skills: selectedExtraSkills(),
   };
   if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
-  // Open the dock placeholder BEFORE clearing the form so its title can label it,
-  // then close the modal immediately — no global overlay, the loading lives in the
-  // window. The POST runs in the background and resolves into the same window.
+  // Spin up BOTH placeholders before clearing the form (so the title can label them):
+  // a card in the left list (selected, replacing the old selection) and the dock
+  // loading window. Expand the repo group so the new card is visible even if it was
+  // collapsed. The POST runs in the background and resolves into the same window —
+  // success → live terminal, failure → inline error — with no global overlay.
   const tmpId = nextTmpId();
   openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
+  expandRepo(body.repo_id);
+  addPendingCard(tmpId, { kind: "repo", repoId: body.repo_id, hostId: null, title: body.title });
   $("t-title").value = ""; $("t-prompt").value = "";
   closeTaskModal();
   try {
     const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
+    dropPendingCard(tmpId);          // the real card replaces the placeholder
     await loadTasks();
     settlePending(tmpId, r.id);
     toast(t("toast.taskDispatched", { session: r.session }), "success");
   } catch (e) {
+    dropPendingCard(tmpId);
     await loadTasks();
     rejectPending(tmpId, e.message);
   }
@@ -139,6 +154,65 @@ export async function addTask() {
 // client-side temp ids for in-flight creation placeholders (no real task id yet)
 let tmpSeq = 0;
 function nextTmpId() { return "tmp" + (++tmpSeq); }
+
+// ---- optimistic placeholder cards (left list) ----
+// Mirror the dock loading window (terminal.js) with a card in the list, so creation
+// gives instant feedback in BOTH places. Keyed by the same client temp id, dropped
+// the moment the POST resolves; loadTasks() then renders the real card. repoId/hostId
+// /kind place the card in the right group; title labels it.
+let pendingCards = new Map();   // tmpId -> { tmpId, repoId, hostId, kind, title }
+
+// Register a placeholder and make it the selection (clearing whatever card was open —
+// the new task takes over the dock), then re-render so it paints into the list.
+function addPendingCard(tmpId, info) {
+  pendingCards.set(tmpId, { tmpId, ...info });
+  state.selectedTaskId = null;
+  rerender();
+}
+function dropPendingCard(tmpId) { pendingCards.delete(tmpId); }
+
+// the local machine's id, for shell placeholders dispatched without an explicit host
+function localHostId() {
+  const h = Object.values(state.hostsById).find(h => h.kind === "local");
+  return h ? h.id : null;
+}
+
+// pending cards belonging to a repo group / a machine's Shells group (hosts.js renderList)
+export function pendingRepoCards(repoId) {
+  return [...pendingCards.values()].filter(p => p.kind !== "local" && p.repoId === repoId);
+}
+export function pendingShellCards(hostId) {
+  return [...pendingCards.values()].filter(p => p.kind === "local" && p.hostId === hostId);
+}
+// A real (server-polled) 'creating' task is hidden while its optimistic placeholder
+// is still up, so the two never double-render in the gap before the POST resolves.
+// Repo tasks match on repo + title; shells match on host (a shell has no real title
+// until the server assigns one).
+export function isShadowedByPending(tk) {
+  if (tk.status !== "creating") return false;
+  for (const p of pendingCards.values()) {
+    if (p.kind === "local") { if (tk.kind === "local" && p.hostId === tk.host_id) return true; }
+    else if (tk.repo_id === p.repoId && p.title === tk.title) return true;
+  }
+  return false;
+}
+// One placeholder card: a pulsing "creating" dot + the title, selected while its
+// loading window is the active dock view, clickable to re-focus that window. No
+// data-id/data-repo — it isn't connectable or drag-reorderable until it's real.
+export function pendingCard(p) {
+  const sel = pendingIsActive(p.tmpId) ? " selected" : "";
+  return `<div class="card task pending-card clickable${sel}" data-pending="${p.tmpId}" onclick="focusPending('${p.tmpId}')">
+    <div class="t"><span class="sdot cloning" title="${I18N.t("task.creating")}"></span>
+      <span class="tname" onclick="event.stopPropagation()">${p.title}</span></div>
+    <div class="muted">${I18N.t("task.creating")}</div>
+  </div>`;
+}
+// Clicking a still-loading placeholder card brings its window back to the dock.
+export function focusPending(tmpId) {
+  if (!showPending(tmpId)) return;   // already resolved — nothing to focus
+  state.selectedTaskId = null;
+  paintSelection();
+}
 
 // Creation succeeded: if its placeholder is still the visible dock view, swap to
 // the live terminal; otherwise just drop the (backgrounded) placeholder — the task

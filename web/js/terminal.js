@@ -285,13 +285,29 @@ export function openPending(tmpId, title, desc, text) {
   el.innerHTML = `<div class="pending-box"><div class="spinner"></div><div class="pending-text"></div></div>`;
   el.querySelector(".pending-text").textContent = text;
   $("term").appendChild(el);
-  pending.set(tmpId, { el });
+  pending.set(tmpId, { el, title, desc });   // keep title/desc so showPending() can restore the bar
   for (const o of panes.values()) o.pane.style.display = "none";
   for (const [k, v] of pending) v.el.style.display = k === tmpId ? "flex" : "none";
   activeId = null;
   activePending = tmpId;
   hideTermEmpty();
   pendingBar(title, desc);
+}
+
+// Re-show an existing placeholder as the dock view — e.g. clicking its still-loading
+// list card after switching away to another pane. Returns false if it's already
+// resolved (gone from the map), so the caller can no-op. The spinner/error markup is
+// whatever openPending/failPending last left in the element; only the bar is restored.
+export function showPending(tmpId) {
+  const pe = pending.get(tmpId);
+  if (!pe) return false;
+  for (const o of panes.values()) o.pane.style.display = "none";
+  for (const [k, v] of pending) v.el.style.display = k === tmpId ? "flex" : "none";
+  activeId = null;
+  activePending = tmpId;
+  hideTermEmpty();
+  pendingBar(pe.title, pe.desc);
+  return true;
 }
 
 export function pendingIsActive(tmpId) { return activePending === tmpId; }

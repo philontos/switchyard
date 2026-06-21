@@ -9,7 +9,8 @@ import { confirmDialog } from "./dialog.js";
 import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { repoGroupHead } from "./repos.js";
-import { paintSelection, taskCard, allTasks, isEditingTask, connect } from "./tasks.js";
+import { paintSelection, taskCard, allTasks, isEditingTask, connect,
+         pendingRepoCards, pendingShellCards, isShadowedByPending, pendingCard } from "./tasks.js";
 import { detachDock } from "./terminal.js";
 import { orderTasks, isDraggingTask } from "./reorder.js";
 
@@ -125,10 +126,14 @@ function renderList() {
 
   const repos = state.repos.filter(r => Number(r.host_id) === h.id);
   const repoBlocks = repos.map(r => {
+    // an in-flight create expands its own group (addTask), so pending cards are never
+    // hidden by a collapsed body; still render them when collapsed, just in case.
     const collapsed = collapsedRepos.has(r.id);
-    const mine = orderTasks(r.id, tasks.filter(tk => tk.repo_id === r.id && tk.status !== "cleaned"));
-    const body = collapsed ? ""
-      : (mine.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("repo.noTasks")}</div>`);
+    const mine = orderTasks(r.id, tasks.filter(tk => tk.repo_id === r.id && tk.status !== "cleaned" && !isShadowedByPending(tk)));
+    const pend = pendingRepoCards(r.id).map(pendingCard).join("");   // newest-on-top, like new real tasks
+    const cards = pend + mine.map(tk => taskCard(tk, online)).join("");
+    const body = collapsed ? pend
+      : (cards || `<div class="grp-empty">${t("repo.noTasks")}</div>`);
     // `.open` (expanded) is what shows the state now — a left accent bar + faint
     // wash on the whole group, in place of the old ▸/▾ caret glyph.
     return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, online, collapsed, mine)}${body}</div>`;
@@ -136,11 +141,13 @@ function renderList() {
 
   // every machine (local + remote) gets a Shells group: bare tmux shells you can
   // open many of, persistent like tasks. ＋ is disabled while the machine is offline.
-  const shells = tasks.filter(tk => tk.kind === "local" && tk.host_id === h.id && tk.status !== "cleaned");
+  const shells = tasks.filter(tk => tk.kind === "local" && tk.host_id === h.id && tk.status !== "cleaned" && !isShadowedByPending(tk));
+  const pendShells = pendingShellCards(h.id).map(pendingCard).join("");
+  const shellCards = pendShells + shells.map(tk => taskCard(tk, online)).join("");
   const addShell = `<button class="grp-act" title="${t("local.new")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();addLocalTask(${h.id})">＋</button>`;
   const shellBlock = `<div class="grp open"><div class="grp-head static">
       <span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>
-      ${shells.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
+      ${shellCards || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
 
   const archived = tasks.filter(tk => tk.status === "cleaned" && (tk.host_id ?? hostOf[tk.repo_id]) === h.id);
   const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
@@ -151,6 +158,9 @@ function renderList() {
   $("m-list").innerHTML = header + repoBlocks + shellBlock + archBlock;
 }
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
+// Force a repo group open (no re-render — the caller renders). Used on dispatch so a
+// just-created task's placeholder card is visible even if its group was collapsed.
+export function expandRepo(id) { collapsedRepos.delete(id); }
 export function toggleArchived() { archivedOpen = !archivedOpen; renderList(); }
 export function toggleHostMenu(id) { menuHostId = (menuHostId === id) ? null : id; renderList(); }
 
