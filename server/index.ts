@@ -18,6 +18,7 @@ import { extForMime, pasteTargetBase, pastedDest, pasteFilename } from "./paste.
 import { listAvailable, installPlugin } from "./plugins.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions, cancelCopyMode, pasteText } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
+import { writeTaskManifest, removeTaskManifest, readTaskManifests, adoptTaskManifests } from "./taskmanifest.js";
 import { repairWorktrees } from "./migrate.js";
 import { localRunner, runnerFor, sshForwardArgs, type Runner } from "./runner.js";
 import net from "node:net";
@@ -25,7 +26,7 @@ import { spawn as spawnChild } from "node:child_process";
 import { resolveCwd } from "./local.js";
 import { hookSettingsJson } from "./hooks.js";
 import { startLivenessLoop, probeHost } from "./liveness.js";
-import { WEB_DIR, DID_MIGRATE, NS } from "./paths.js";
+import { WEB_DIR, DID_MIGRATE, NS, DATA_DIR } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
 import { createPreviewMiddleware, handlePreviewUpgrade, parsePreviewHost, tcpProbe, createForwardRegistry, type PreviewResolution, type ForwardHandle } from "./preview.js";
 
@@ -80,6 +81,18 @@ function taskHost(task: Task): Host | undefined {
 // (the local machine is always reachable). Reads stay allowed.
 function offline(host: Host | undefined): boolean {
   return !!host && host.kind !== "local" && host.status !== "online";
+}
+
+// Write-convergence: every task mutation funnels through here so the on-disk
+// manifest (the durable, edge-resident truth) mirrors the row. We only write the
+// manifest for tasks THIS machine owns — a task running on a remote is owned and
+// manifested by that machine's own tdsp (once control sinks to the edge), never
+// stamped into this controller's data dir.
+function syncTaskManifest(id: number) {
+  const t = getTask.get(id) as Task | undefined;
+  if (!t) return;
+  const host = taskHost(t);
+  if (!host || host.kind === "local") writeTaskManifest(DATA_DIR, t);
 }
 
 // ---------- web preview ----------
@@ -292,6 +305,7 @@ app.get("/api/tasks", async (_req, res) => {
         if (sid && sid !== claudeSession) {
           db.prepare("UPDATE tasks SET claude_session=? WHERE id=?").run(sid, t.id);
           claudeSession = sid;
+          syncTaskManifest(t.id);
         }
       }
       return {
@@ -374,12 +388,14 @@ app.post("/api/tasks", async (req, res) => {
     await startSession(runner, session, wtAbs, opening.trim() ? opening : null);
     db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
       .run(workBranch, wtAbs, session, id);
+    syncTaskManifest(id);
     res.json({ id, session, work_branch: workBranch });
   } catch (e: any) {
     // a partial dispatch (e.g. session start failed after the worktree was made)
     // would orphan the worktree — remove it so nothing is left behind
     await removeWorktree(runner, repo.mirror_path, wtAbs, workBranch).catch(() => {});
     db.prepare("UPDATE tasks SET status='error', error=? WHERE id=?").run(String(e.message || e), id);
+    syncTaskManifest(id);
     res.status(500).json({ error: String(e.message || e) });
   }
 });
@@ -416,9 +432,11 @@ app.post("/api/tasks/local", async (req, res) => {
   try {
     await startShellSession(runner, session, cwd);
     db.prepare("UPDATE tasks SET title=?, session=?, status='running' WHERE id=?").run(title, session, id);
+    syncTaskManifest(id);
     res.json({ id, session });
   } catch (e: any) {
     db.prepare("UPDATE tasks SET title=?, status='error', error=? WHERE id=?").run(title, String(e.message || e), id);
+    syncTaskManifest(id);
     res.status(500).json({ error: String(e.message || e) });
   }
 });
@@ -469,6 +487,7 @@ app.post("/api/tasks/:id/archive", async (req, res) => {
   try {
     await killSession(taskRunner(task), task.session);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+    syncTaskManifest(task.id);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -487,6 +506,7 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
     await killSession(runner, task.session);
     if (repo?.mirror_path) await removeWorktree(runner, repo.mirror_path, task.worktree_path, task.work_branch);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+    syncTaskManifest(task.id);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -512,6 +532,7 @@ app.post("/api/tasks/:id/resume", async (req, res) => {
     const alreadyAlive = await hasSession(runner, task.session).catch(() => false);
     if (!alreadyAlive) await startSession(runner, task.session, task.worktree_path, null, { continue: true });
     db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(task.id);
+    syncTaskManifest(task.id);
     res.json({ ok: true, alreadyAlive });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -526,6 +547,7 @@ app.patch("/api/tasks/:id", (req, res) => {
     if (r.error === "empty") return res.status(400).json({ error: tr(lang, "task.titleRequired") });
     return res.status(404).json({ error: tr(lang, "notFound") });
   }
+  syncTaskManifest(Number(req.params.id));
   res.json(r);
 });
 
@@ -536,6 +558,7 @@ app.delete("/api/tasks/:id", async (req, res) => {
     return res.status(409).json({ error: tr(langFromReq(req), "task.worktreeExists") });
   }
   db.prepare("DELETE FROM tasks WHERE id=?").run(req.params.id);
+  removeTaskManifest(DATA_DIR, Number(req.params.id));
   res.json({ ok: true });
 });
 
@@ -571,9 +594,11 @@ app.post("/api/sessions/:name/kill", async (req, res) => {
       const repo = getRepo.get(task.repo_id) as Repo | undefined;
       if (repo?.mirror_path) await removeWorktree(runner, repo.mirror_path, task.worktree_path, task.work_branch);
       db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+      syncTaskManifest(task.id);
       removedWorktree = true;
     } else {
       db.prepare("UPDATE tasks SET status='done' WHERE id=?").run(task.id);
+      syncTaskManifest(task.id);
     }
   }
   res.json({ ok: true, removedWorktree });
@@ -712,6 +737,11 @@ wss.on("connection", (ws, req) => {
 if (DID_MIGRATE) repairWorktrees(); // fix git worktree links after the ./data move
 startLivenessLoop();                // background ssh probe of remote machines
 syncReposManifest();                // bootstrap repos.json from the current catalog on boot
+// adopt any task manifests on disk this DB is missing (recover a wiped db / own
+// tasks present locally), then backfill manifests for every task we own so the
+// on-disk catalog mirrors the table.
+adoptTaskManifests(db, readTaskManifests(DATA_DIR));
+for (const { id } of db.prepare("SELECT id FROM tasks").all() as { id: number }[]) syncTaskManifest(id);
 
 const PORT = Number(process.env.PORT || 4500);
 // Bind loopback by default — the web terminal is a live shell, so don't expose
