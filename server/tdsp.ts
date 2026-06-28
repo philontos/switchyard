@@ -8,7 +8,8 @@
 import os from "node:os";
 import { runCli } from "./cli.js";
 import { db, type Task } from "./db.js";
-import { NS, DATA_DIR } from "./paths.js";
+import { NS, DATA_DIR, ROOT } from "./paths.js";
+import { applyInstall } from "./bootstrap.js";
 import { localRunner } from "./runner.js";
 import { startShellSession, killSession } from "./tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./createtask.js";
@@ -66,4 +67,9 @@ process.exitCode = await runCli(process.argv.slice(2), {
       },
       id,
     ),
+  // set up THIS machine's global tdsp from its clone (point src here + the wrapper)
+  install: () => {
+    const p = applyInstall(os.homedir(), ROOT);
+    return { src: p.src, binPath: p.binPath, localBin: p.localBin, clone: ROOT };
+  },
 });

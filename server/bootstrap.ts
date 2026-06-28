@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 // Bootstrap a remote machine into a usable tdsp node WITHOUT assuming anything
 // about how it provides node. `ssh host "cmd"` runs a non-interactive, non-login
 // shell with a stripped environment, and machines vary wildly: nvm is a shell
@@ -97,66 +100,124 @@ exec node "$APP/node_modules/.bin/tsx" "$APP/server/tdsp.ts" "$@"
 `;
 }
 
-// ---------- one-time install orchestration ----------
-// Injected ops so the sequence is testable without a real ssh: `run` executes a
-// shell script on the target (via `ssh target sh -s`, stdin-fed — NOT nested
-// quotes, which would let the remote shell eat `$(fnm env)`); `pushDir` streams a
-// local dir over (tar-over-ssh).
+// ---------- symmetric local install (`tdsp install`) ----------
+// One model for EVERY machine: a single canonical code pointer at
+// ~/.task-dispatcher/src (a real clone, or a symlink to the clone you already
+// have), plus a global `tdsp` wrapper that always execs <src>/server/tdsp.ts. The
+// machine you sit at and the machine A reaches over ssh run the exact same setup —
+// no second copy, no drift.
+export interface InstallPlan {
+  src: string; // canonical code pointer: <home>/.task-dispatcher/src
+  binDir: string;
+  binPath: string; // the wrapper A invokes over ssh: <home>/.task-dispatcher/bin/tdsp
+  localBin: string; // a convenience symlink onto PATH for interactive use
+  wrapper: string; // wrapper content (execs $src/server/tdsp.ts)
+}
+
+/** Compute the canonical install paths + wrapper for a machine, given the clone
+ *  we're installing from. Pure — the fs work is applyInstall. */
+export function installPlan(home: string, _cloneDir: string): InstallPlan {
+  const root = path.join(home, ".task-dispatcher");
+  const src = path.join(root, "src");
+  const binDir = path.join(root, "bin");
+  return {
+    src,
+    binDir,
+    binPath: path.join(binDir, "tdsp"),
+    localBin: path.join(home, ".local", "bin", "tdsp"),
+    wrapper: renderWrapper({ appDir: src }), // always points at the src pointer
+  };
+}
+
+/** Force-create a symlink target→linkPath (replacing whatever's there). */
+function relink(target: string, linkPath: string) {
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  try { fs.rmSync(linkPath, { recursive: true, force: true }); } catch { /* nothing there */ }
+  fs.symlinkSync(target, linkPath);
+}
+
+/**
+ * Set up THIS machine's canonical install from a clone: point src at the clone
+ * (unless the clone already IS src), write the wrapper, and link it onto PATH at
+ * ~/.local/bin/tdsp (best-effort). Idempotent. Run by `tdsp install` and by the
+ * remote bootstrap once the code is in place.
+ */
+export function applyInstall(home: string, cloneDir: string): InstallPlan {
+  const p = installPlan(home, cloneDir);
+  fs.mkdirSync(p.binDir, { recursive: true });
+  // src → cloneDir (skip if the clone already lives at src — a fresh `git clone <src>`)
+  if (path.resolve(cloneDir) !== path.resolve(p.src)) relink(path.resolve(cloneDir), p.src);
+  fs.writeFileSync(p.binPath, p.wrapper, { mode: 0o755 });
+  try { relink(p.binPath, p.localBin); } catch { /* ~/.local/bin not writable — fixed path still works */ }
+  return p;
+}
+
+// ---------- one-click remote install (the A-side button) ----------
+// Set up tdsp on a remote machine over ssh in one shot — the convenient path for a
+// machine you DON'T want to walk over to. `run` executes a shell script on the
+// target (ssh ... sh -s, stdin-fed, so the remote shell can't eat `$(fnm env)`).
 export interface BootstrapDeps {
-  appSrcDir: string; // local dir holding the app source to install (server/, web/, package.json, ...)
   home: string; // the target's home dir (absolute)
+  originUrl: string; // the repo to clone if the target has no code yet
   run(script: string): Promise<{ ok: boolean; stdout: string }>;
-  pushDir(localSrc: string, remoteDest: string): Promise<void>;
   override?: string; // optional manual node setup, tried first everywhere
 }
 
 export interface BootstrapResult {
   ok: boolean;
-  appDir?: string;
+  srcDir?: string;
   binPath?: string;
   strategy?: string;
   nodeVersion?: string;
+  cloned?: boolean; // true: cloned fresh; false: reused the target's existing src
   error?: string;
 }
 
 /**
- * Install tdsp onto a machine and return the verified wrapper path (which the
- * caller records as the host's tdsp_bin). Sequence, fail-fast at each gate:
- *   1. discover a working node — abort BEFORE touching the machine if none.
- *   2. push the app source to ~/.task-dispatcher/app.
- *   3. npm install there (same node ladder the wrapper will use).
- *   4. write the self-discovering wrapper to ~/.task-dispatcher/bin/tdsp, chmod +x.
- *   5. verify it actually runs (`tdsp list`) — a wrapper that doesn't run is a
- *      failed install, not a success.
+ * Install tdsp on a machine over ssh and return the verified wrapper path (recorded
+ * as the host's tdsp_bin). One canonical pointer — ~/.task-dispatcher/src — + a
+ * wrapper pointing at it. Fail-fast:
+ *   1. discover a working node — abort before touching the machine if none.
+ *   2. ensure code at src: REUSE an existing src untouched (never pull — a symlink
+ *      may point at a clone whose live instance would reload); clone fresh only when
+ *      src is absent.
+ *   3. npm install in src only when node_modules is missing.
+ *   4. write the self-discovering wrapper at ~/.task-dispatcher/bin/tdsp → src.
+ *   5. verify it runs (`tdsp list`).
+ *   6. remove the legacy ~/.task-dispatcher/app copy (pre-src model), best-effort.
  * Node is NEVER reinstalled — only the app's own node_modules.
  */
 export async function bootstrapMachine(deps: BootstrapDeps): Promise<BootstrapResult> {
   const root = `${deps.home}/.task-dispatcher`;
-  const appDir = `${root}/app`;
+  const src = `${root}/src`;
   const binPath = `${root}/bin/tdsp`;
   const ladder = nodeLadderScript(deps.override);
 
-  // 1. discover node first — don't push anything to a machine we can't run on
   const found = await discoverNode(deps.run, deps.override);
   if (!found.ok) return { ok: false, error: "no usable node found on the target machine" };
 
-  // 2. push source
-  await deps.pushDir(deps.appSrcDir, appDir);
+  // reuse an existing src as-is; clone only when absent (REUSED / CLONED in output)
+  const ensure = await deps.run(
+    `if [ -e ${shq(src)} ]; then echo REUSED; else mkdir -p ${shq(root)} && git clone ${shq(deps.originUrl)} ${shq(src)} && echo CLONED; fi; ` +
+      `[ -e ${shq(src)}/server/tdsp.ts ] && echo HAVECODE`,
+  );
+  if (!ensure.ok || !/HAVECODE/.test(ensure.stdout)) {
+    return { ok: false, error: "couldn't get the code onto the target — check its git access, or run `tdsp install` there" };
+  }
+  const cloned = /CLONED/.test(ensure.stdout);
 
-  // 3. install the app's own deps (native modules included), node via the ladder
-  const inst = await deps.run(`${ladder}\ncd ${shq(appDir)} && npm install --no-audit --no-fund`);
+  const inst = await deps.run(`${ladder}\ncd ${shq(src)} && [ -d node_modules ] || npm install --no-audit --no-fund`);
   if (!inst.ok) return { ok: false, error: "npm install failed on the target" };
 
-  // 4. write the self-discovering wrapper at a fixed path (base64 so its quotes/
-  //    newlines survive the transport intact), make it executable
-  const wrapper = renderWrapper({ appDir, override: deps.override });
+  const wrapper = renderWrapper({ appDir: src, override: deps.override });
   const b64 = Buffer.from(wrapper).toString("base64");
   const write = await deps.run(`mkdir -p ${shq(`${root}/bin`)} && printf %s ${shq(b64)} | base64 --decode > ${shq(binPath)} && chmod +x ${shq(binPath)} && echo OK`);
   if (!write.ok) return { ok: false, error: "could not install the wrapper" };
 
-  // 5. verify the wrapper actually runs end to end (node → tsx → app → db)
   const verify = await deps.run(`${shq(binPath)} list >/dev/null 2>&1 && echo OK`);
   if (!verify.ok) return { ok: false, error: "the installed wrapper failed to run" };
 
-  return { ok: true, appDir, binPath, strategy: found.strategy, nodeVersion: found.version };
+  await deps.run(`rm -rf ${shq(`${root}/app`)}`); // drop the legacy separate copy
+
+  return { ok: true, srcDir: src, binPath, strategy: found.strategy, nodeVersion: found.version, cloned };
 }

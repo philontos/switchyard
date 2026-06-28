@@ -27,6 +27,21 @@ test("taskListPayload wraps the local tasks in a versioned envelope", () => {
   assert.equal(payload.tasks[0].session, "tdsp-1-r-old");
 });
 
+// the list payload also carries the node's OWN repos, so a controller can group
+// the node's tasks by repo (by name) and offer those repos when dispatching here —
+// without the node's repos being registered on the controller.
+test("taskListPayload also includes the node's repos", () => {
+  const db = seed();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,default_branch,mirror_path,status) VALUES (5,1,'ug-fe','git@x:ug','main','/d/mirrors/5-ug.git','ready')").run();
+  const payload = taskListPayload(db);
+  assert.ok(Array.isArray(payload.repos));
+  assert.equal(payload.repos.length, 1);
+  assert.equal(payload.repos[0].id, 5);
+  assert.equal(payload.repos[0].name, "ug-fe");
+  assert.equal(payload.repos[0].mirror_path, "/d/mirrors/5-ug.git");
+  assert.equal(payload.repos[0].default_branch, "main");
+});
+
 // Newest-first, matching today's GET /api/tasks (ORDER BY id DESC) so the list
 // reads the same whether assembled locally or fetched from a node over ssh.
 test("taskListPayload returns tasks newest-first", () => {
@@ -74,6 +89,7 @@ function fakeDeps(db: Database.Database) {
         stopCalls.push(id);
         return { ok: true as const };
       },
+      install: () => ({ src: "/h/.task-dispatcher/src", binPath: "/h/.task-dispatcher/bin/tdsp", localBin: "/h/.local/bin/tdsp", clone: "/h/clone" }),
     },
     createCalls,
     repoCalls,
@@ -178,6 +194,14 @@ test("runCli stop rejects a non-numeric id with exit 1", async () => {
   assert.equal(code, 1);
   assert.match(f.out, /invalid id/);
   assert.deepEqual(f.stopCalls, []);
+});
+
+test("runCli install sets up the machine and reports the paths", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["install"], f.deps);
+  assert.equal(code, 0);
+  assert.match(f.out, /\.task-dispatcher\/src/);
+  assert.match(f.out, /\.task-dispatcher\/bin\/tdsp/);
 });
 
 test("runCli create-local exits 1 and prints the error when creation fails", async () => {

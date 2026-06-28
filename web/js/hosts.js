@@ -238,7 +238,9 @@ function renderList() {
     // `.open` (expanded) is what shows the state now — a left accent bar + faint
     // wash on the whole group, in place of the old ▸/▾ caret glyph.
     return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, online, collapsed, mine)}${body}</div>`;
-  }).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`;
+    // "no repos" only for the local machine — a remote node's own repos render in
+    // the node section below, so the message would be misleading there.
+  }).join("") || (isLocal ? `<div class="muted mempty">${t("host.noRepos")}</div>` : "");
 
   // every machine (local + remote) gets a Shells group: bare tmux shells you can
   // open many of, persistent like tasks. ＋ is disabled while the machine is offline.
@@ -255,13 +257,29 @@ function renderList() {
   // model). Legacy tasks recorded in THIS controller's db stay in the repo groups
   // above; these are a separate, clearly-labelled source. Local machine: skipped
   // (its tasks already render above).
+  // Remote node: the node's OWN repos + tasks (live, over ssh). Each node repo is a
+  // group (like the local repo groups) with a ＋ to dispatch a task to it — using
+  // the node's existing mirror, no re-registration here. The node's shells + any
+  // repo task whose repo isn't listed fall into a "🛰 节点任务" catch-all.
   let nodeBlock = "";
   if (!isLocal) {
     const fl = state.fleet[h.id];
     if (fl?.ok) {
       const live = (fl.tasks || []).filter(tk => tk.status !== "cleaned");
-      const cards = live.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("node.none")}</div>`;
-      nodeBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div>${cards}</div>`;
+      const repos = fl.repos || [];
+      const known = new Set(repos.map(r => r.id));
+      const repoGroups = repos.map(r => {
+        const mine = live.filter(tk => tk.kind === "repo" && tk.repo_id === r.id);
+        const cards = mine.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("repo.noTasks")}</div>`;
+        const add = `<button class="grp-act" title="${t("node.newTask")}" onclick="event.stopPropagation();openNodeTaskModal(${h.id},${r.id})">＋</button>`;
+        return `<div class="grp open"><div class="grp-head static"><span class="grp-name">📦 ${r.name}</span>${add}</div>${cards}</div>`;
+      }).join("");
+      const loose = live.filter(tk => tk.kind === "local" || (tk.kind === "repo" && !known.has(tk.repo_id)));
+      const looseGroup = loose.length
+        ? `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div>${loose.map(tk => fleetCard(h.id, tk)).join("")}</div>`
+        : "";
+      nodeBlock = repoGroups + looseGroup
+        || `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">${t("node.none")}</div></div>`;
     } else if (fl && fl.reason && fl.reason !== "notBootstrapped") {
       nodeBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">⚠ ${t("host." + fl.reason)}</div></div>`;
     }

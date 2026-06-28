@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { discoverNode, renderWrapper, NODE_RUNGS, nodeLadderScript, bootstrapMachine } from "./bootstrap.ts";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { discoverNode, renderWrapper, NODE_RUNGS, nodeLadderScript, installPlan, applyInstall, bootstrapMachine } from "./bootstrap.ts";
 
 // A fake probe simulates a machine: `works(script)` decides whether that rung's
 // shell snippet would resolve a node. The discovery ladder must pick the FIRST
@@ -84,64 +87,99 @@ test("nodeLadderScript is shared by the wrapper and bootstrap (same rungs)", () 
   assert.ok(renderWrapper({ appDir: "/app" }).includes(s));
 });
 
-// ---------- bootstrapMachine ----------
-// One-time install orchestration: discover node, push source, npm install, write
-// the wrapper to a fixed path, verify it runs. Ops are injected so the sequence is
-// testable without a real ssh. Order matters: discover gates everything; a verified
-// wrapper path is what the caller stores as the host's tdsp_bin.
+// ---------- installPlan ----------
+test("installPlan puts code at ~/.task-dispatcher/src and the wrapper execs it", () => {
+  const p = installPlan("/home/me", "/home/me/Develop/switchyard");
+  assert.equal(p.src, "/home/me/.task-dispatcher/src");
+  assert.equal(p.binPath, "/home/me/.task-dispatcher/bin/tdsp");
+  assert.equal(p.localBin, "/home/me/.local/bin/tdsp");
+  // the wrapper points at the canonical src pointer, NOT at the clone path directly,
+  // so updating where src points needs no wrapper change
+  assert.match(p.wrapper, /\/home\/me\/\.task-dispatcher\/src/);
+  assert.match(p.wrapper, /exec node .*server\/tdsp\.ts/);
+});
+
+test("applyInstall symlinks src→clone and writes an executable wrapper (real fs)", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tdsp-home-"));
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), "tdsp-clone-"));
+  try {
+    const p = applyInstall(home, clone);
+    // src is a symlink pointing at the clone
+    const src = path.join(home, ".task-dispatcher", "src");
+    assert.equal(fs.lstatSync(src).isSymbolicLink(), true);
+    assert.equal(fs.readlinkSync(src), path.resolve(clone));
+    // the wrapper exists, is executable, and execs the src pointer
+    const st = fs.statSync(p.binPath);
+    assert.ok(st.mode & 0o100, "wrapper is executable");
+    const w = fs.readFileSync(p.binPath, "utf8");
+    assert.match(w, /\.task-dispatcher\/src/, "APP points at the src pointer");
+    assert.match(w, /exec node .*server\/tdsp\.ts/, "execs the app");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(clone, { recursive: true, force: true });
+  }
+});
+
+// ---------- bootstrapMachine (A-side one-click remote install) ----------
 function fakeBoot(over: Record<string, unknown> = {}) {
   const scripts: string[] = [];
-  const pushes: { src: string; dest: string }[] = [];
   const env = {
-    appSrcDir: "/local/app",
     home: "/home/me",
+    originUrl: "git@github.com:me/switchyard.git",
     run: async (script: string) => {
       scripts.push(script);
-      // simulate: node ladder resolves, npm install ok, wrapper write ok, verify ok
-      const ok = /node -v/.test(script) ? true : true;
-      return { ok, stdout: /node -v/.test(script) ? "v22.0.0" : "OK" };
-    },
-    pushDir: async (src: string, dest: string) => {
-      pushes.push({ src, dest });
+      if (/node -v/.test(script)) return { ok: true, stdout: "v22.0.0" };
+      if (/HAVECODE/.test(script)) return { ok: true, stdout: "REUSED\nHAVECODE" }; // src already present
+      return { ok: true, stdout: "OK" };
     },
     ...over,
   };
-  return { env, scripts, pushes };
+  return { env, scripts };
 }
 
-test("bootstrapMachine installs to ~/.task-dispatcher and returns the verified bin path", async () => {
-  const { env, pushes } = fakeBoot();
+test("bootstrapMachine returns the canonical src + verified wrapper path", async () => {
+  const { env } = fakeBoot();
   const r = await bootstrapMachine(env);
   assert.equal(r.ok, true);
   assert.equal(r.binPath, "/home/me/.task-dispatcher/bin/tdsp");
-  assert.equal(r.appDir, "/home/me/.task-dispatcher/app");
-  assert.equal(r.nodeVersion, "v22.0.0");
-  // the source was pushed to the app dir
-  assert.deepEqual(pushes, [{ src: "/local/app", dest: "/home/me/.task-dispatcher/app" }]);
+  assert.equal(r.srcDir, "/home/me/.task-dispatcher/src");
+  assert.equal(r.cloned, false, "reused the existing src");
 });
 
-test("bootstrapMachine runs npm install in the app dir after pushing source", async () => {
+test("bootstrapMachine reuses an existing src untouched — never pulls it", async () => {
   const { env, scripts } = fakeBoot();
-  await bootstrapMachine(env);
-  assert.ok(scripts.some((s) => /npm (ci|install)/.test(s) && s.includes("/home/me/.task-dispatcher/app")));
+  const r = await bootstrapMachine(env);
+  assert.equal(r.cloned, false);
+  assert.ok(!scripts.some((s) => /git pull/.test(s)), "must never pull a clone we don't own");
 });
 
-test("bootstrapMachine aborts (and never pushes) when no node can be found", async () => {
-  const { env, pushes } = fakeBoot({
-    run: async () => ({ ok: false, stdout: "" }), // nothing resolves node
+test("bootstrapMachine clones to src when the target has no code yet", async () => {
+  const { env } = fakeBoot({
+    run: async (script: string) => {
+      if (/node -v/.test(script)) return { ok: true, stdout: "v22.0.0" };
+      if (/HAVECODE/.test(script)) return { ok: true, stdout: "CLONED\nHAVECODE" };
+      return { ok: true, stdout: "OK" };
+    },
   });
+  const r = await bootstrapMachine(env);
+  assert.equal(r.ok, true);
+  assert.equal(r.cloned, true, "src was absent → cloned fresh");
+});
+
+test("bootstrapMachine aborts (touching nothing) when no node can be found", async () => {
+  const { env, scripts } = fakeBoot({ run: async () => ({ ok: false, stdout: "" }) });
   const r = await bootstrapMachine(env);
   assert.equal(r.ok, false);
   assert.match(r.error || "", /node/i);
-  assert.equal(pushes.length, 0, "don't push source to a machine we can't run on");
+  assert.ok(!scripts.some((s) => /git clone|npm install/.test(s)), "don't touch a machine we can't run on");
 });
 
 test("bootstrapMachine reports failure if the installed wrapper doesn't verify", async () => {
-  // node discovery ok, but the final `tdsp list` verify fails
   let sawVerify = false;
   const { env } = fakeBoot({
     run: async (script: string) => {
       if (/node -v/.test(script)) return { ok: true, stdout: "v22.0.0" };
+      if (/HAVECODE/.test(script)) return { ok: true, stdout: "REUSED\nHAVECODE" };
       if (/\/bin\/tdsp('| )?.*(list|version)/.test(script)) { sawVerify = true; return { ok: false, stdout: "" }; }
       return { ok: true, stdout: "OK" };
     },
