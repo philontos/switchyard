@@ -26,15 +26,32 @@ type DB = Database.Database;
 // Bump ONLY for additive, backward-compatible shape changes.
 export const TASK_LIST_VERSION = 1;
 
+// A repo as a node exposes it to controllers — enough to group the node's tasks
+// by repo (name) and to dispatch a new task here using the node's OWN mirror (no
+// re-registration on the controller). The token is deliberately never included.
+export interface NodeRepo {
+  id: number;
+  name: string;
+  git_url: string;
+  default_branch: string;
+  mirror_path: string;
+}
+
 export interface TaskListPayload {
   schema_version: number;
   tasks: Task[];
+  repos: NodeRepo[];
 }
 
-/** The versioned envelope emitted by `tdsp list --json`: this node's own tasks. */
+/** The node's own repos, for the cross-node view (group-by-repo + dispatch here). */
+export function reposForList(db: DB): NodeRepo[] {
+  return db.prepare("SELECT id, name, git_url, default_branch, mirror_path FROM repos ORDER BY id").all() as NodeRepo[];
+}
+
+/** The versioned envelope emitted by `tdsp list --json`: this node's own tasks + repos. */
 export function taskListPayload(db: DB): TaskListPayload {
   const tasks = db.prepare("SELECT * FROM tasks ORDER BY id DESC").all() as Task[];
-  return { schema_version: TASK_LIST_VERSION, tasks };
+  return { schema_version: TASK_LIST_VERSION, tasks, repos: reposForList(db) };
 }
 
 // ---- cross-node aggregation: the "see other nodes' tasks" half of 打通 ----
@@ -53,6 +70,7 @@ export interface NodeTasks<T extends NodeRef = NodeRef> {
   reason?: "unreachable" | "version" | "error"; // why ok=false
   schema_version?: number;
   tasks?: Task[];
+  repos?: NodeRepo[];
 }
 
 /**
@@ -87,7 +105,7 @@ export async function aggregateNodes<T extends NodeRef>(
       if (typeof payload?.schema_version !== "number" || payload.schema_version > TASK_LIST_VERSION) {
         return { node, ok: false, reason: "version", schema_version: payload?.schema_version };
       }
-      return { node, ok: true, schema_version: payload.schema_version, tasks: payload.tasks ?? [] };
+      return { node, ok: true, schema_version: payload.schema_version, tasks: payload.tasks ?? [], repos: payload.repos ?? [] };
     }),
   );
 }

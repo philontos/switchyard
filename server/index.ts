@@ -597,10 +597,33 @@ app.get("/api/fleet", async (_req, res) => {
     const base = { node: { id: h.id, name: h.name }, kind: h.kind };
     if (h.kind === "local") return { ...base, ok: true, tasks: tasksForHost(db, h.id) };
     const agg = byId.get(h.id);
-    if (agg) return { ...base, ok: agg.ok, reason: agg.reason, tasks: agg.tasks ?? [] };
+    if (agg) return { ...base, ok: agg.ok, reason: agg.reason, tasks: agg.tasks ?? [], repos: agg.repos ?? [] };
     return { ...base, ok: false, reason: "notBootstrapped" as const };
   });
   res.json({ schema_version: 1, nodes });
+});
+
+// Dispatch a repo task to a remote node using the NODE'S OWN repo (surfaced via
+// the fleet) — no re-registration on this controller, no duplicate mirror. The
+// node registers the repo by mirror path (find-or-create), builds the worktree
+// from its own mirror, and owns the task. This controller only relays the spec.
+app.post("/api/nodes/:hostId/tasks", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const { mirror, name, git_url, base, title, prompt } = req.body ?? {};
+  if (!mirror || !base || !title) return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
+  const skills = Array.isArray(req.body?.skills) ? req.body.skills.map(String) : [];
+  const spec = { mirror, name: name || "", git_url: git_url || "", base, title, prompt: prompt || null, skills };
+  const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
+  const out = await runTdsp(host, ["create", b64]);
+  const result = parseNodeResult(out.stdout);
+  if (!result) return res.status(502).json({ error: `node dispatch failed: ${(out.stderr || "no result").slice(0, 300)}` });
+  if (result.ok) return res.json({ id: result.id, session: result.session, work_branch: result.workBranch, node: host.id });
+  if (result.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: (result.missing || []).join(", ") }) });
+  return res.status(500).json({ error: result.message || result.error });
 });
 
 // Stop a task that lives ON a remote node (a fleet task this controller doesn't
