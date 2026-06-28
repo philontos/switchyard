@@ -216,6 +216,25 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .skopt { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: 12.5px; cursor: pointer; }
 .skopt input[type=checkbox] { width: auto; margin: 0; }
 .sksrc { margin-left: auto; font-size: 10.5px; color: var(--faint); background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
+
+/* dispatch modal: model-backend picker + inline add/remove panel */
+.tm-prov { display: flex; gap: 8px; align-items: center; margin-bottom: 7px; }
+.tm-prov .cs { flex: 1; margin-bottom: 0; }
+.prov-add-btn { flex: none; width: 34px; padding: 7px 0; line-height: 1; }
+.prov-panel { border: 1px solid var(--border); border-radius: 6px; padding: 9px; margin-bottom: 7px; background: var(--bg); }
+.prov-panel input { margin-bottom: 6px; }
+.pv-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.pv-actions button { width: auto; padding: 5px 13px; margin: 0; }
+.pv-status { font-size: 12px; }
+.pv-status.ok { color: var(--green); }
+.pv-status.bad { color: var(--red); }
+.pv-status.testing { color: var(--muted); }
+.pv-list { margin-top: 9px; display: flex; flex-direction: column; gap: 5px; }
+.pv-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.pv-nm { font-weight: 600; }
+.pv-mdl { color: var(--muted); font-size: 12px; }
+.pv-del { flex: none; width: auto; margin: 0 0 0 auto; padding: 2px 8px; background: none; border: none; cursor: pointer; opacity: .7; }
+.pv-del:hover { opacity: 1; }
 /* skills modal: available-plugin rows */
 .pg-box { height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; margin-bottom: 7px; }
 .pg-state { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--faint); font-size: 12.5px; }

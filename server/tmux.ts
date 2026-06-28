@@ -5,21 +5,42 @@ async function tmux(runner: Runner, args: string[]): Promise<string> {
 }
 
 /**
+ * Build an `env K=V ...` prefix that sets per-session vars directly on the
+ * launched process. `tmux new-session` does NOT propagate arbitrary env vars
+ * into a new session (only its `update-environment` allowlist), so we can't
+ * count on the spawn's own environment reaching claude — we prepend an `env`
+ * command that sets them on the claude process itself. Used to point claude at
+ * an alternate model backend (ANTHROPIC_BASE_URL / _AUTH_TOKEN / _MODEL …).
+ * Empty/blank values are dropped; each `K=V` is one argv element, so values
+ * with spaces need no quoting here (the Runner re-quotes every arg for a remote
+ * shell). Returns [] when there's nothing to inject, so the default launch is
+ * byte-for-byte unchanged.
+ */
+function envPrefix(env?: Record<string, string>): string[] {
+  const pairs = Object.entries(env ?? {})
+    .filter(([, v]) => v != null && v !== "")
+    .map(([k, v]) => `${k}=${v}`);
+  return pairs.length ? ["env", ...pairs] : [];
+}
+
+/**
  * Start a detached tmux session running claude in the worktree.
  * If a prompt is given it is passed as claude's initial message; the
  * session stays interactive (TUI), so permission prompts work normally.
+ * opts.env injects environment for the claude process (alternate provider).
  */
 export async function startSession(
   runner: Runner,
   session: string,
   cwd: string,
   prompt?: string | null,
-  opts?: { continue?: boolean },
+  opts?: { continue?: boolean; env?: Record<string, string> },
 ) {
   // resume reattaches to the prior conversation: claude keys its transcript by
   // cwd, so launching `claude --continue` from the same worktree reopens it. The
   // original opening prompt is NOT re-sent — the conversation already has it.
-  const launch = opts?.continue ? ["claude", "--continue"] : ["claude"];
+  const pre = envPrefix(opts?.env);
+  const launch = opts?.continue ? [...pre, "claude", "--continue"] : [...pre, "claude"];
   const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...launch];
   if (prompt && prompt.trim() && !opts?.continue) cmd.push(prompt);
   await tmux(runner, cmd);

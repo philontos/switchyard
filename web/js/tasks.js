@@ -10,6 +10,7 @@ import { state } from "./state.js";
 import { openPty, disposePty, prunePanes, setClaudeSession,
          openPending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
 import { rerender, expandRepo } from "./hosts.js";
+import { refreshProviders, selectedProviderId } from "./providers.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 // id of the task whose title is being edited inline. While set, renderList()
@@ -58,9 +59,11 @@ export function openTaskModal(repoId) {
   taskRepoId = repoId;
   $("tm-repo").textContent = repo.name;
   $("t-title").value = ""; $("t-prompt").value = "";   // fresh form each open
+  $("prov-panel").style.display = "none";              // collapse the manage panel
   $("task-modal").style.display = "flex";
   loadBranches();
   loadDispatchOptions();
+  refreshProviders();                                  // fill the backend picker (keeps the last pick)
   setTimeout(() => $("t-title").focus(), 30);
 }
 export function closeTaskModal() { $("task-modal").style.display = "none"; }
@@ -125,6 +128,7 @@ export async function addTask() {
     repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
     extra_skills: selectedExtraSkills(),
+    provider_id: selectedProviderId(),   // null == default claude login
   };
   if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
   // Spin up BOTH placeholders before clearing the form (so the title can label them):
