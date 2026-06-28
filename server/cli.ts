@@ -4,6 +4,7 @@
 // sole authority for its own tasks; these read/return that local truth.
 import type Database from "better-sqlite3";
 import type { Task } from "./db.js";
+import type { CreateLocalOpts, CreateLocalResult } from "./createtask.js";
 
 type DB = Database.Database;
 
@@ -85,6 +86,21 @@ export interface CliDeps {
   out: (s: string) => void;
   err: (s: string) => void;
   serve: () => void | Promise<void>;
+  createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
+}
+
+// Minimal flag parser: supports `--key value` and `--key=value`. Bare flags
+// (no following value) map to "". Enough for the node-control verbs.
+function parseFlags(args: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith("--")) continue;
+    const eq = a.indexOf("=");
+    if (eq >= 0) out[a.slice(2, eq)] = a.slice(eq + 1);
+    else out[a.slice(2)] = args[i + 1] && !args[i + 1].startsWith("--") ? args[++i] : "";
+  }
+  return out;
 }
 
 /** Parse argv (after `tdsp`) and run the verb. Returns a process exit code. */
@@ -97,8 +113,14 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     case "list":
       deps.out(JSON.stringify(taskListPayload(deps.db)));
       return 0;
+    case "create-local": {
+      const f = parseFlags(argv.slice(1));
+      const r = await deps.createLocal({ cwd: f.cwd ?? null, title: f.title ?? null });
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
     default:
-      deps.err(`Usage: tdsp <serve|list>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|create-local>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

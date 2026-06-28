@@ -46,6 +46,7 @@ function fakeDeps(db: Database.Database) {
   let out = "";
   let err = "";
   let served = false;
+  const createCalls: { cwd?: string | null; title?: string | null }[] = [];
   return {
     deps: {
       db,
@@ -58,7 +59,12 @@ function fakeDeps(db: Database.Database) {
       serve: () => {
         served = true;
       },
+      createLocal: async (opts: { cwd?: string | null; title?: string | null }) => {
+        createCalls.push(opts);
+        return { ok: true as const, id: 99, session: "tdsp-x-99-local-y" };
+      },
     },
+    createCalls,
     get out() {
       return out;
     },
@@ -94,6 +100,35 @@ test("runCli rejects an unknown command with a usage hint on stderr and exits 1"
   assert.equal(code, 1);
   assert.match(f.err, /Usage|unknown/i);
   assert.equal(f.served, false);
+});
+
+// create-local is the control-sink verb: A drives B by `ssh B tdsp create-local`,
+// and B's tdsp orchestrates locally. runCli only parses flags + prints the JSON
+// result; the orchestration (createLocalTask) is injected.
+test("runCli create-local parses --cwd/--title, invokes createLocal, prints JSON, exits 0", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["create-local", "--cwd", "/tmp/x", "--title", "debug B"], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.createCalls[0], { cwd: "/tmp/x", title: "debug B" });
+  const parsed = JSON.parse(f.out);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.id, 99);
+});
+
+test("runCli create-local supports --flag=value form too", async () => {
+  const f = fakeDeps(seed());
+  await runCli(["create-local", "--cwd=/tmp/y", "--title=hi there"], f.deps);
+  assert.deepEqual(f.createCalls[0], { cwd: "/tmp/y", title: "hi there" });
+});
+
+test("runCli create-local exits 1 and prints the error when creation fails", async () => {
+  const f = fakeDeps(seed());
+  f.deps.createLocal = async () => ({ ok: false as const, error: "cwdMissing" });
+  const code = await runCli(["create-local", "--cwd", "/nope"], f.deps);
+  assert.equal(code, 1);
+  const parsed = JSON.parse(f.out);
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.error, "cwdMissing");
 });
 
 // --- cross-node aggregation (the "see other nodes' tasks" half of 打通) ---
