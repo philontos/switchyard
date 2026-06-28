@@ -120,6 +120,8 @@ export interface CliDeps {
   createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
   createRepo: (spec: CreateRepoSpec) => Promise<CreateRepoResult>;
   stop: (id: number) => Promise<StopResult>;
+  // set up THIS machine's global tdsp from its clone (symlink src + wrapper)
+  install: () => { src: string; binPath: string; localBin: string; clone: string };
 }
 
 // Minimal flag parser: supports `--key value` and `--key=value`. Bare flags
@@ -176,8 +178,19 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(r));
       return r.ok ? 0 : 1;
     }
+    case "install": {
+      const r = deps.install();
+      deps.out(
+        `tdsp installed:\n` +
+          `  code   ${r.src} -> ${r.clone}\n` +
+          `  command ${r.binPath}\n` +
+          `  on PATH ${r.localBin}  (ensure ~/.local/bin is on your PATH)\n` +
+          `now: type \`tdsp list\` here, or reach this machine from another with \`ssh <host> ${r.binPath} list\``,
+      );
+      return 0;
+    }
     default:
-      deps.err(`Usage: tdsp <serve|list|create-local|create|stop>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|install>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

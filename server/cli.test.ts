@@ -89,6 +89,7 @@ function fakeDeps(db: Database.Database) {
         stopCalls.push(id);
         return { ok: true as const };
       },
+      install: () => ({ src: "/h/.task-dispatcher/src", binPath: "/h/.task-dispatcher/bin/tdsp", localBin: "/h/.local/bin/tdsp", clone: "/h/clone" }),
     },
     createCalls,
     repoCalls,
@@ -193,6 +194,14 @@ test("runCli stop rejects a non-numeric id with exit 1", async () => {
   assert.equal(code, 1);
   assert.match(f.out, /invalid id/);
   assert.deepEqual(f.stopCalls, []);
+});
+
+test("runCli install sets up the machine and reports the paths", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["install"], f.deps);
+  assert.equal(code, 0);
+  assert.match(f.out, /\.task-dispatcher\/src/);
+  assert.match(f.out, /\.task-dispatcher\/bin\/tdsp/);
 });
 
 test("runCli create-local exits 1 and prints the error when creation fails", async () => {

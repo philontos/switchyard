@@ -736,19 +736,16 @@ app.post("/api/hosts/:id/bootstrap", async (req, res) => {
   const home = (await runner.exec("sh", ["-c", 'echo "$HOME"']).catch(() => "")).trim();
   if (!home) return res.status(502).json({ error: "could not resolve the machine's home dir" });
 
-  // stage just the app source (server/, web/, manifests) — never node_modules
-  const stage = fs.mkdtempSync(path.join(os.tmpdir(), "tdsp-stage-"));
+  // the repo the target clones from if it has no code yet = THIS controller's own
+  // git origin. So a fresh machine gets the same switchyard A is running.
+  const originUrl = (await localRunner.exec("git", ["-C", ROOT, "remote", "get-url", "origin"]).catch(() => "")).trim();
+  if (!originUrl) return res.status(500).json({ error: "couldn't read this controller's git origin to clone from" });
+
   try {
-    for (const d of ["server", "web"]) fs.cpSync(path.join(ROOT, d), path.join(stage, d), { recursive: true });
-    for (const f of ["package.json", "package-lock.json", "tsconfig.json"]) {
-      const src = path.join(ROOT, f);
-      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(stage, f));
-    }
     const result = await bootstrapMachine({
-      appSrcDir: stage,
       home,
+      originUrl,
       run: sshRun(host.target),
-      pushDir: (src, dest) => runner.putDir(src, dest),
       override: typeof req.body?.nodeOverride === "string" && req.body.nodeOverride.trim() ? req.body.nodeOverride.trim() : undefined,
     });
     if (!result.ok) return res.status(500).json({ error: result.error });
@@ -756,8 +753,6 @@ app.post("/api/hosts/:id/bootstrap", async (req, res) => {
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ error: String(e?.message || e) });
-  } finally {
-    fs.rmSync(stage, { recursive: true, force: true });
   }
 });
 
