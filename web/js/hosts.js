@@ -84,13 +84,19 @@ function fleetCard(hostId, tk) {
     </div>`;
 }
 
+// machines whose bootstrap is in flight — drives the "⏳ installing…" state in the
+// ⚙ menu so the (30–60s) install shows clear progress instead of dead silence.
+const bootstrappingHosts = new Set();
+
 // Install tdsp onto a remote machine (Phase 5 bootstrap), then refresh so its
 // fleet status flips to reachable. Long-running (npm install on the target), so
-// the button shows a busy label and we surface success/failure as a toast.
+// the menu shows an in-progress label + the button is replaced while it runs, and
+// success/failure both surface as a toast.
 export async function bootstrapHost(id) {
   const h = state.hostsById[id];
-  if (!h) return;
-  menuHostId = null;
+  if (!h || bootstrappingHosts.has(id)) return;   // ignore a double-click while running
+  bootstrappingHosts.add(id);
+  renderList();                       // show "⏳ installing…" immediately, keep the menu open
   toast(t("host.bootstrapping", { name: h.name }), "info");
   try {
     await api(`/api/hosts/${id}/bootstrap`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
@@ -98,6 +104,9 @@ export async function bootstrapHost(id) {
     await loadFleet();
   } catch (e) {
     toast(String(e?.message || e), "error");
+  } finally {
+    bootstrappingHosts.delete(id);
+    renderList();
   }
 }
 
@@ -196,12 +205,17 @@ function renderList() {
   const fl = state.fleet[h.id];
   let fleetRow = "";
   if (!isLocal) {
-    if (fl?.ok) {
+    if (bootstrappingHosts.has(h.id)) {
+      fleetRow = `<div class="mh-fleet">⏳ ${t("host.installing")}</div>`;
+    } else if (fl?.ok) {
       fleetRow = `<div class="mh-fleet">🛰 ${t("host.liveTasks", { n: fl.tasks?.length ?? 0 })}</div>`;
     } else if (fl?.reason === "notBootstrapped") {
       fleetRow = `<button class="mh-boot" onclick="bootstrapHost(${h.id})">⬇ ${t("host.bootstrap")}</button>`;
     } else if (fl) {
       fleetRow = `<div class="mh-fleet off">⚠ ${t("host." + (fl.reason || "error"))}</div>`;
+    } else {
+      // no fleet snapshot yet for this remote → still let the user kick off install
+      fleetRow = `<button class="mh-boot" onclick="bootstrapHost(${h.id})">⬇ ${t("host.bootstrap")}</button>`;
     }
   }
   const menu = (menuHostId === h.id) ? `<div class="mh-menu">
