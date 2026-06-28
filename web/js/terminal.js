@@ -422,6 +422,18 @@ export function disposePty(id) {
 // Returns the disposed ids so the caller can clear a stale selection.
 export function prunePanes(keepIds) {
   const dropped = [];
-  for (const id of [...panes.keys()]) if (!keepIds.has(id)) { disposePty(id); dropped.push(id); }
+  // only numeric-id panes are this controller's own tasks (loadTasks drives this).
+  // String-id panes belong to remote NODES (fleet tasks) and are pruned separately
+  // by pruneNodePanes — the 4s task poll must not tear them down.
+  for (const id of [...panes.keys()]) if (typeof id === "number" && !keepIds.has(id)) { disposePty(id); dropped.push(id); }
+  return dropped;
+}
+
+// Prune fleet (remote-node) panes — those keyed by a string id — whose session is
+// no longer live on its node. Driven by loadFleet (the slower cross-node poll), so
+// it stays disjoint from prunePanes' own-task lifecycle. Returns the dropped ids.
+export function pruneNodePanes(keepKeys) {
+  const dropped = [];
+  for (const id of [...panes.keys()]) if (typeof id === "string" && !keepKeys.has(id)) { disposePty(id); dropped.push(id); }
   return dropped;
 }

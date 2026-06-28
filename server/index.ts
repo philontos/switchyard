@@ -13,19 +13,26 @@ import {
   initMirror, fetchMirror, listBranches, addWorktreeFromBranch, removeWorktree,
   mirrorPath,
 } from "./git.js";
-import { scanSkills, resolveSkills, defaultSources, skillsLine } from "./skills.js";
+import { scanSkills, resolveSkills, defaultSources } from "./skills.js";
 import { extForMime, pasteTargetBase, pastedDest, pasteFilename } from "./paste.js";
 import { listAvailable, installPlugin } from "./plugins.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions, cancelCopyMode, pasteText } from "./tmux.js";
 import { syncReposManifest } from "./manifest.js";
+import { writeTaskManifest, removeTaskManifest, readTaskManifests, adoptTaskManifests } from "./taskmanifest.js";
 import { repairWorktrees } from "./migrate.js";
-import { localRunner, runnerFor, sshForwardArgs, type Runner } from "./runner.js";
+import { localRunner, runnerFor, sshForwardArgs, SSH_BASE_ARGS, type Runner } from "./runner.js";
+import { aggregateNodes } from "./cli.js";
+import { fleetTargets, tasksForHost, type FleetTarget } from "./fleet.js";
+import { bootstrapMachine } from "./bootstrap.js";
 import net from "node:net";
-import { spawn as spawnChild } from "node:child_process";
+import { spawn as spawnChild, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { resolveCwd } from "./local.js";
+import { createRepoTask, type RepoTaskEnv } from "./createtask.js";
+import { buildRepoTaskEnv } from "./repoenv.js";
 import { hookSettingsJson } from "./hooks.js";
 import { startLivenessLoop, probeHost } from "./liveness.js";
-import { WEB_DIR, DID_MIGRATE, NS } from "./paths.js";
+import { WEB_DIR, DID_MIGRATE, NS, DATA_DIR, ROOT } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
 import { createPreviewMiddleware, handlePreviewUpgrade, parsePreviewHost, tcpProbe, createForwardRegistry, type PreviewResolution, type ForwardHandle } from "./preview.js";
 
@@ -144,6 +151,18 @@ function taskHost(task: Task): Host | undefined {
 // (the local machine is always reachable). Reads stay allowed.
 function offline(host: Host | undefined): boolean {
   return !!host && host.kind !== "local" && host.status !== "online";
+}
+
+// Write-convergence: every task mutation funnels through here so the on-disk
+// manifest (the durable, edge-resident truth) mirrors the row. We only write the
+// manifest for tasks THIS machine owns — a task running on a remote is owned and
+// manifested by that machine's own tdsp (once control sinks to the edge), never
+// stamped into this controller's data dir.
+function syncTaskManifest(id: number) {
+  const t = getTask.get(id) as Task | undefined;
+  if (!t) return;
+  const host = taskHost(t);
+  if (!host || host.kind === "local") writeTaskManifest(DATA_DIR, t);
 }
 
 // ---------- web preview ----------
@@ -356,6 +375,7 @@ app.get("/api/tasks", async (_req, res) => {
         if (sid && sid !== claudeSession) {
           db.prepare("UPDATE tasks SET claude_session=? WHERE id=?").run(sid, t.id);
           claudeSession = sid;
+          syncTaskManifest(t.id);
         }
       }
       return {
@@ -374,6 +394,13 @@ app.get("/api/tasks", async (_req, res) => {
   res.json(withLive);
 });
 
+// Bind createRepoTask's seams to a machine's Runner (shared builder in repoenv.ts).
+// The HTTP route writes the manifest through the ownership-gated syncTaskManifest,
+// unchanged; the `tdsp create` verb passes a local writer instead.
+function repoTaskEnvFor(runner: Runner): RepoTaskEnv {
+  return buildRepoTaskEnv({ db, ns: NS, runner, writeManifest: (tid) => syncTaskManifest(tid) });
+}
+
 app.post("/api/tasks", async (req, res) => {
   const { repo_id, base_branch, title, prompt, provider_id } = req.body ?? {};
   const lang = langFromReq(req);
@@ -388,67 +415,37 @@ app.post("/api/tasks", async (req, res) => {
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
   const host = getHost.get(repo.host_id) as Host | undefined;
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
-  const runner = runnerFor(host as Host); // dispatch ON the repo's machine
-
-  // Resolve the skills to inject and PREFLIGHT them: if any selected skill is
-  // missing, fail now — before any worktree/task is created — so we never leave
-  // a half-built task pointing at a nonexistent skill.
   const extraSkills: string[] = Array.isArray(req.body?.extra_skills) ? req.body.extra_skills.map(String) : [];
-  const wantKeys = [...new Set(extraSkills)];
-  const { found, missing } = resolveSkills(wantKeys, defaultSources());
-  if (missing.length) return res.status(400).json({ error: tr(lang, "skill.missing", { keys: missing.join(", ") }) });
 
-  const info = db.prepare(
-    "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, skills, provider_id) VALUES (?,?,?,?,?,?,?,?,?,?)"
-  ).run(repo_id, base_branch, "", title, prompt || null, "", "", "creating", JSON.stringify(found.map((f) => f.key)), provider ? provider.id : null);
-  const id = Number(info.lastInsertRowid);
-  const s = slug(title);
-  const workBranch = `feat/${id}-${s}`;
-  const worktree = path.join(path.dirname(repo.mirror_path), "..", "worktrees", `${repo.id}-${id}`);
-  const wtAbs = path.resolve(worktree);
-  // distinctive name so it never collides with unrelated tmux sessions
-  const session = `tdsp-${NS}-${id}-${slug(repo.name)}-${s}`;
-
-  try {
-    // create the worktree from the base branch's latest origin tip (falls back to
-    // a local head for unpushed bases). The base is only a start point, so this
-    // works even when a live task currently has that branch checked out.
-    await addWorktreeFromBranch(runner, repo.mirror_path, wtAbs, workBranch, base_branch);
-    // deliver each selected skill's whole dir into the worktree's .claude/skills/
-    for (const sk of found) await runner.putDir(sk.dir, path.join(wtAbs, ".claude", "skills", sk.name));
-    // keep delivered skills out of the repo's git status (worktree-local exclude)
-    if (found.length) {
-      await runner.exec("sh", ["-c",
-        `cd ${JSON.stringify(wtAbs)} && p=$(git rev-parse --git-path info/exclude) && grep -qxF '.claude/skills/' "$p" || printf '.claude/skills/\\n' >> "$p"`,
-      ]).catch(() => {});
-    }
-    // inject per-task hooks so the session reports when it's blocked on a
-    // permission prompt (yellow light): the hook touches/removes <wt>/.claude/waiting,
-    // which the dispatcher reads back via runner.exists — same on the local box and
-    // on remotes. Deliver settings.local.json through putDir (overlays the .claude
-    // skills/ already there); keep both injected paths out of the repo's git status.
-    const hooksTmp = path.join(os.tmpdir(), `tdsp-hooks-${NS}-${id}`, ".claude");
-    fs.mkdirSync(hooksTmp, { recursive: true });
-    fs.writeFileSync(path.join(hooksTmp, "settings.local.json"), hookSettingsJson(wtAbs));
-    await runner.putDir(hooksTmp, path.join(wtAbs, ".claude"));
-    fs.rmSync(path.dirname(hooksTmp), { recursive: true, force: true });
-    await runner.exec("sh", ["-c",
-      `cd ${JSON.stringify(wtAbs)} && p=$(git rev-parse --git-path info/exclude) && ` +
-      `for f in '.claude/settings.local.json' '.claude/waiting' '.claude/session-id'; do grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
-    ]).catch(() => {});
-    // opening message: the freeform prompt + the "skills delivered" line
-    const opening = (prompt || "") + skillsLine(found.map((f) => f.name));
-    await startSession(runner, session, wtAbs, opening.trim() ? opening : null, { env: providerEnv(provider) });
-    db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
-      .run(workBranch, wtAbs, session, id);
-    res.json({ id, session, work_branch: workBranch });
-  } catch (e: any) {
-    // a partial dispatch (e.g. session start failed after the worktree was made)
-    // would orphan the worktree — remove it so nothing is left behind
-    await removeWorktree(runner, repo.mirror_path, wtAbs, workBranch).catch(() => {});
-    db.prepare("UPDATE tasks SET status='error', error=? WHERE id=?").run(String(e.message || e), id);
-    res.status(500).json({ error: String(e.message || e) });
+  // SINK: a bootstrapped remote owns its own tasks — hand the spec to its tdsp and
+  // let IT create the task (worktree + session + manifest) on itself. This
+  // controller does NOT record the task; it surfaces via /api/fleet. A remote that
+  // isn't bootstrapped yet falls through to the legacy in-process path below.
+  // NOTE: the model-backend override (provider) is controller-local — provider_id
+  // is a FK into THIS controller's providers table — so it is NOT threaded to the
+  // fleet path. A bootstrapped node runs the task on its own default claude login.
+  if (host && host.kind !== "local" && host.tdsp_bin) {
+    const spec = { mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url, base: base_branch, title, prompt: prompt || null, skills: extraSkills };
+    const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
+    const out = await runTdsp(host, ["create", b64]);
+    const result = parseNodeResult(out.stdout);
+    if (!result) return res.status(502).json({ error: `node dispatch failed: ${(out.stderr || "no result").slice(0, 300)}` });
+    if (result.ok) return res.json({ id: result.id, session: result.session, work_branch: result.workBranch, node: host.id });
+    if (result.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: (result.missing || []).join(", ") }) });
+    return res.status(500).json({ error: result.message || result.error });
   }
+
+  // local host, or a remote not yet bootstrapped: dispatch in-process on its Runner.
+  // The provider (if any) is recorded on the task and injected as ANTHROPIC_* env
+  // when claude launches; resume re-injects it from the recorded provider_id.
+  const r = await createRepoTask(
+    repoTaskEnvFor(runnerFor(host as Host)),
+    { id: repo.id, name: repo.name, mirror_path: repo.mirror_path },
+    { baseBranch: base_branch, title, prompt, extraSkills, providerId: provider ? provider.id : null, env: providerEnv(provider) },
+  );
+  if (r.ok) return res.json({ id: r.id, session: r.session, work_branch: r.workBranch });
+  if (r.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: r.missing.join(", ") }) });
+  return res.status(500).json({ error: r.message });
 });
 
 // repo-less shell task: skip the mirror/worktree/skills machinery and just open a
@@ -464,6 +461,17 @@ app.post("/api/tasks/local", async (req, res) => {
     : (db.prepare("SELECT * FROM hosts WHERE kind='local'").get() as Host | undefined);
   if (!host) return res.status(404).json({ error: tr(lang, "notFound") });
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+
+  // SINK: a bootstrapped remote opens the shell on itself (it resolves the cwd
+  // against its OWN home and owns the record). This controller doesn't record it.
+  if (host.kind !== "local" && host.tdsp_bin) {
+    const out = await runTdsp(host, ["create-local", "--cwd", String(req.body?.cwd ?? ""), "--title", String(req.body?.title ?? "")]);
+    const result = parseNodeResult(out.stdout);
+    if (!result) return res.status(502).json({ error: `node dispatch failed: ${(out.stderr || "no result").slice(0, 300)}` });
+    if (result.ok) return res.json({ id: result.id, session: result.session, node: host.id });
+    if (result.error === "cwdMissing") return res.status(400).json({ error: tr(lang, "task.cwdMissing", { cwd: String(req.body?.cwd ?? "") }) });
+    return res.status(500).json({ error: result.message || result.error });
+  }
 
   const runner = runnerFor(host);
   const home = host.kind === "local" ? os.homedir() : (await runner.exec("sh", ["-c", 'echo "$HOME"']).catch(() => "")).trim();
@@ -483,9 +491,11 @@ app.post("/api/tasks/local", async (req, res) => {
   try {
     await startShellSession(runner, session, cwd);
     db.prepare("UPDATE tasks SET title=?, session=?, status='running' WHERE id=?").run(title, session, id);
+    syncTaskManifest(id);
     res.json({ id, session });
   } catch (e: any) {
     db.prepare("UPDATE tasks SET title=?, status='error', error=? WHERE id=?").run(title, String(e.message || e), id);
+    syncTaskManifest(id);
     res.status(500).json({ error: String(e.message || e) });
   }
 });
@@ -536,6 +546,7 @@ app.post("/api/tasks/:id/archive", async (req, res) => {
   try {
     await killSession(taskRunner(task), task.session);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+    syncTaskManifest(task.id);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -554,6 +565,7 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
     await killSession(runner, task.session);
     if (repo?.mirror_path) await removeWorktree(runner, repo.mirror_path, task.worktree_path, task.work_branch);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+    syncTaskManifest(task.id);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -581,6 +593,7 @@ app.post("/api/tasks/:id/resume", async (req, res) => {
     const provider = task.provider_id ? (getProvider.get(task.provider_id) as Provider | undefined) : undefined;
     if (!alreadyAlive) await startSession(runner, task.session, task.worktree_path, null, { continue: true, env: providerEnv(provider) });
     db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(task.id);
+    syncTaskManifest(task.id);
     res.json({ ok: true, alreadyAlive });
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
@@ -595,6 +608,7 @@ app.patch("/api/tasks/:id", (req, res) => {
     if (r.error === "empty") return res.status(400).json({ error: tr(lang, "task.titleRequired") });
     return res.status(404).json({ error: tr(lang, "notFound") });
   }
+  syncTaskManifest(Number(req.params.id));
   res.json(r);
 });
 
@@ -605,7 +619,103 @@ app.delete("/api/tasks/:id", async (req, res) => {
     return res.status(409).json({ error: tr(langFromReq(req), "task.worktreeExists") });
   }
   db.prepare("DELETE FROM tasks WHERE id=?").run(req.params.id);
+  removeTaskManifest(DATA_DIR, Number(req.params.id));
   res.json({ ok: true });
+});
+
+// ---------- fleet (cross-node task view) ----------
+const pexecFile = promisify(execFile);
+
+// Fetch one node's OWN task list live: `ssh <node> <wrapper> list --json`. A
+// wall-clock timeout bounds a half-dead node so it degrades to "unreachable"
+// (aggregateNodes catches the throw) instead of stalling the whole fleet view.
+function nodeListFetch(t: FleetTarget): Promise<string> {
+  return pexecFile(SSH_BIN, [...SSH_BASE_ARGS, t.target, t.bin, "list", "--json"], {
+    timeout: 8000,
+    maxBuffer: 64 * 1024 * 1024,
+  }).then(({ stdout }) => stdout);
+}
+
+/** POSIX single-quote for the remote shell (ssh joins argv into one command). */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// Invoke a verb on a bootstrapped node's tdsp: `ssh <target> <bin> <args…>`.
+// Args are shell-quoted for the remote shell. The one-shot create verbs exit 1
+// on a failed dispatch but still print their JSON result to stdout, so we capture
+// stdout in BOTH the success and error cases and let the caller parse it.
+function runTdsp(host: Host, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  const remote = [host.tdsp_bin as string, ...args].map(shq).join(" ");
+  return pexecFile(SSH_BIN, [...SSH_BASE_ARGS, host.target, remote], { timeout: 120000, maxBuffer: 64 * 1024 * 1024 })
+    .then(({ stdout, stderr }) => ({ ok: true, stdout: stdout || "", stderr: stderr || "" }))
+    .catch((e) => ({ ok: false, stdout: e?.stdout || "", stderr: e?.stderr || String(e?.message || e) }));
+}
+
+// Parse the trailing JSON line a tdsp verb prints (it may log before it). Returns
+// null if there's no parseable result (e.g. ssh failed before tdsp ran).
+function parseNodeResult(stdout: string): any | null {
+  const line = stdout.trim().split("\n").pop() || "";
+  try { return JSON.parse(line); } catch { return null; }
+}
+
+// One glass: every node's tasks read from its OWN truth. The local node comes
+// from this controller's DB; each bootstrapped remote is fetched live and merged
+// (offline → unreachable, older schema → version, no wrapper yet → notBootstrapped).
+// Honest per-node status, never a silent drop.
+app.get("/api/fleet", async (_req, res) => {
+  const hosts = db.prepare("SELECT * FROM hosts ORDER BY (kind='local') DESC, id DESC").all() as Host[];
+  const aggregated = await aggregateNodes(fleetTargets(hosts), nodeListFetch);
+  const byId = new Map(aggregated.map((a) => [a.node.id, a]));
+  const nodes = hosts.map((h) => {
+    const base = { node: { id: h.id, name: h.name }, kind: h.kind };
+    if (h.kind === "local") return { ...base, ok: true, tasks: tasksForHost(db, h.id) };
+    const agg = byId.get(h.id);
+    if (agg) return { ...base, ok: agg.ok, reason: agg.reason, tasks: agg.tasks ?? [], repos: agg.repos ?? [] };
+    return { ...base, ok: false, reason: "notBootstrapped" as const };
+  });
+  res.json({ schema_version: 1, nodes });
+});
+
+// Dispatch a repo task to a remote node using the NODE'S OWN repo (surfaced via
+// the fleet) — no re-registration on this controller, no duplicate mirror. The
+// node registers the repo by mirror path (find-or-create), builds the worktree
+// from its own mirror, and owns the task. This controller only relays the spec.
+app.post("/api/nodes/:hostId/tasks", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const { mirror, name, git_url, base, title, prompt } = req.body ?? {};
+  if (!mirror || !base || !title) return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
+  const skills = Array.isArray(req.body?.skills) ? req.body.skills.map(String) : [];
+  const spec = { mirror, name: name || "", git_url: git_url || "", base, title, prompt: prompt || null, skills };
+  const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
+  const out = await runTdsp(host, ["create", b64]);
+  const result = parseNodeResult(out.stdout);
+  if (!result) return res.status(502).json({ error: `node dispatch failed: ${(out.stderr || "no result").slice(0, 300)}` });
+  if (result.ok) return res.json({ id: result.id, session: result.session, work_branch: result.workBranch, node: host.id });
+  if (result.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: (result.missing || []).join(", ") }) });
+  return res.status(500).json({ error: result.message || result.error });
+});
+
+// Stop a task that lives ON a remote node (a fleet task this controller doesn't
+// own): drive the node's own tdsp to stop it. The node kills the session, marks
+// the task cleaned, and re-manifests — the controller just relays the request.
+app.post("/api/nodes/:hostId/tasks/:taskId/stop", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const taskId = Number(req.params.taskId);
+  if (!Number.isInteger(taskId)) return res.status(400).json({ error: "invalid task id" });
+  const out = await runTdsp(host, ["stop", String(taskId)]);
+  const result = parseNodeResult(out.stdout);
+  if (!result) return res.status(502).json({ error: `node stop failed: ${(out.stderr || "no result").slice(0, 300)}` });
+  if (result.ok) return res.json({ ok: true });
+  return res.status(500).json({ error: result.error || "stop failed" });
 });
 
 // ---------- sessions (raw tmux, incl. orphans) ----------
@@ -640,9 +750,11 @@ app.post("/api/sessions/:name/kill", async (req, res) => {
       const repo = getRepo.get(task.repo_id) as Repo | undefined;
       if (repo?.mirror_path) await removeWorktree(runner, repo.mirror_path, task.worktree_path, task.work_branch);
       db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
+      syncTaskManifest(task.id);
       removedWorktree = true;
     } else {
       db.prepare("UPDATE tasks SET status='done' WHERE id=?").run(task.id);
+      syncTaskManifest(task.id);
     }
   }
   res.json({ ok: true, removedWorktree });
@@ -663,6 +775,59 @@ app.post("/api/hosts", (req, res) => {
   const id = Number(info.lastInsertRowid);
   probeHost(getHost.get(id) as Host); // probe right away so it goes online fast (fire-and-forget)
   res.json({ id });
+});
+
+// Run a shell script ON a machine via `ssh target sh -s`, fed over STDIN. This is
+// the bootstrap probe transport: stdin-fed avoids the nested-quote trap where the
+// remote shell would expand `$(fnm env)` before our script ever runs. No timeout —
+// npm install is deliberately long; bootstrap is a foreground, user-initiated op.
+function sshRun(target: string): (script: string) => Promise<{ ok: boolean; stdout: string }> {
+  return (script) =>
+    new Promise((resolve) => {
+      const c = spawnChild(SSH_BIN, [...SSH_BASE_ARGS, target, "sh -s"]);
+      let out = "";
+      c.stdout.on("data", (d) => (out += d));
+      c.on("close", (code) => resolve({ ok: code === 0, stdout: out }));
+      c.on("error", () => resolve({ ok: false, stdout: "" }));
+      c.stdin.on("error", () => {});
+      c.stdin.write(script);
+      c.stdin.end();
+    });
+}
+
+// Install tdsp onto a remote machine and record its wrapper path (tdsp_bin) so the
+// fleet view can reach it and control can sink to it. Stages the app source (no
+// node_modules — npm install rebuilds native modules for the target's arch), then
+// runs the bootstrap sequence. Foreground: the response returns when it's done.
+app.post("/api/hosts/:id/bootstrap", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.id) as Host | undefined;
+  if (!host) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (host.kind === "local") return res.status(400).json({ error: "the local machine needs no bootstrap" });
+  if (host.status !== "online") return res.status(409).json({ error: tr(lang, "host.offline") });
+
+  const runner = runnerFor(host);
+  const home = (await runner.exec("sh", ["-c", 'echo "$HOME"']).catch(() => "")).trim();
+  if (!home) return res.status(502).json({ error: "could not resolve the machine's home dir" });
+
+  // the repo the target clones from if it has no code yet = THIS controller's own
+  // git origin. So a fresh machine gets the same switchyard A is running.
+  const originUrl = (await localRunner.exec("git", ["-C", ROOT, "remote", "get-url", "origin"]).catch(() => "")).trim();
+  if (!originUrl) return res.status(500).json({ error: "couldn't read this controller's git origin to clone from" });
+
+  try {
+    const result = await bootstrapMachine({
+      home,
+      originUrl,
+      run: sshRun(host.target),
+      override: typeof req.body?.nodeOverride === "string" && req.body.nodeOverride.trim() ? req.body.nodeOverride.trim() : undefined,
+    });
+    if (!result.ok) return res.status(500).json({ error: result.error });
+    db.prepare("UPDATE hosts SET tdsp_bin=? WHERE id=?").run(result.binPath, host.id);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
 });
 
 app.delete("/api/hosts/:id", (req, res) => {
@@ -758,7 +923,15 @@ wss.on("connection", (ws, req) => {
   // spawns the client locally; the shell/tmux/files all live ON that machine.
   if (!session || !SESSION_RE.test(session)) { ws.close(1008, "invalid target"); return; }
   const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(session) as Task | undefined;
-  const host = task ? taskHost(task) : undefined;
+  // A fleet session lives on another node and isn't in THIS controller's db. The
+  // client (rendering it under that node) passes ?host=<id>, so we can still
+  // ssh-attach to it. The host must be a known remote — never trust the hint to
+  // reach an arbitrary box. Falls back to the task's own host for local sessions.
+  let host = task ? taskHost(task) : undefined;
+  if (!task) {
+    const hintId = Number(url.searchParams.get("host"));
+    if (Number.isInteger(hintId)) host = getHost.get(hintId) as Host | undefined;
+  }
   const { file, args, label } = attachCommand(host, session, { ssh: SSH_BIN, mosh: MOSH_BIN, tmux: TMUX_BIN });
   // the session whose copy/scroll mode we cancel on attach, so this client lands
   // on the live prompt no matter what mode a previous client left the pane in.
@@ -815,6 +988,11 @@ wss.on("connection", (ws, req) => {
 if (DID_MIGRATE) repairWorktrees(); // fix git worktree links after the ./data move
 startLivenessLoop();                // background ssh probe of remote machines
 syncReposManifest();                // bootstrap repos.json from the current catalog on boot
+// adopt any task manifests on disk this DB is missing (recover a wiped db / own
+// tasks present locally), then backfill manifests for every task we own so the
+// on-disk catalog mirrors the table.
+adoptTaskManifests(db, readTaskManifests(DATA_DIR));
+for (const { id } of db.prepare("SELECT id FROM tasks").all() as { id: number }[]) syncTaskManifest(id);
 
 const PORT = Number(process.env.PORT || 4500);
 // Bind loopback by default — the web terminal is a live shell, so don't expose

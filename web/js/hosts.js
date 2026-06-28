@@ -11,7 +11,7 @@ import { state } from "./state.js";
 import { repoGroupHead } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask, connect,
          pendingRepoCards, pendingShellCards, isShadowedByPending, pendingCard } from "./tasks.js";
-import { detachDock } from "./terminal.js";
+import { detachDock, openPty, pruneNodePanes } from "./terminal.js";
 import { orderTasks, isDraggingTask } from "./reorder.js";
 
 let hostsOrder = [];               // API order: local machine first. Active machine is state.activeHostId.
@@ -29,6 +29,101 @@ export async function loadHosts() {
   hostsOrder = hs.map(h => h.id);   // API order: local machine first
   rerender();
 }
+// Pull each node's OWN live task list (/api/fleet). Remote nodes are fetched over
+// ssh by the server, so this is the cross-node "see what's running there" view.
+// Best-effort: a failed load just leaves the last fleet snapshot in place.
+export async function loadFleet() {
+  const f = await api("/api/fleet").catch(() => null);
+  if (!f) return;
+  state.fleet = Object.fromEntries(f.nodes.map((n) => [n.node.id, n]));
+  // drop any open node-task terminal whose session is no longer live on its node
+  const keep = new Set();
+  for (const n of f.nodes) for (const tk of n.tasks || []) if (tk.status !== "cleaned") keep.add(`n${n.node.id}:${tk.id}`);
+  pruneNodePanes(keep);
+  renderList();
+}
+
+// Open a remote node's task terminal: attach to its tmux session over ssh (the
+// server resolves the node from ?host=). The session/title are read from the
+// fleet snapshot, so the card's onclick only carries safe numeric ids.
+export function connectNode(hostId, taskId) {
+  const tk = state.fleet[hostId]?.tasks?.find((t) => t.id === taskId);
+  if (!tk) return;
+  const paneId = `n${hostId}:${taskId}`;
+  state.selectedTaskId = paneId;
+  const host = state.hostsById[hostId];
+  const attach = host ? `ssh ${host.target} tmux attach -t ${tk.session}` : `tmux attach -t ${tk.session}`;
+  openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, "", attach, paneId, "");
+  renderList();
+}
+
+// Open a new bare shell ON a remote node (sinks via the node's own tdsp). The shell
+// lives on the node, so it surfaces through the fleet — refresh it, then attach.
+export async function addNodeShell(hostId) {
+  toast(t("toast.dispatchingToNode", { name: state.hostsById[hostId]?.name || hostId }), "info");
+  try {
+    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ host_id: hostId }) });
+    await loadFleet();
+    if (r.id) connectNode(hostId, r.id);
+    toast(t("toast.taskDispatched", { session: r.session }), "success");
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  }
+}
+
+// Stop a remote node's task — the server drives the node's own tdsp to kill it.
+export async function stopNodeTask(hostId, taskId) {
+  if (!(await confirmDialog(t("task.stopConfirm") || "Stop this task?", { title: t("task.stopTitle"), okText: t("common.stop") || "Stop", danger: true }))) return;
+  try {
+    await api(`/api/nodes/${hostId}/tasks/${taskId}/stop`, { method: "POST" });
+    await loadFleet();
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  }
+}
+
+// A card for a task running ON a remote node (from the fleet snapshot). Connect
+// attaches over ssh; the corner ⏹ stops it via the node. No live/waiting dot — the
+// raw node row carries status only (the node, sat at directly, shows the rest).
+function fleetCard(hostId, tk) {
+  const paneId = `n${hostId}:${tk.id}`;
+  const sel = paneId === state.selectedTaskId ? " selected" : "";
+  const meta = tk.kind === "local"
+    ? `<div class="muted">📂 <code>${tk.cwd || "~"}</code> <span class="tag-local">${t("local.tag")}</span></div>`
+    : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;
+  return `<div class="card task${sel} clickable" onclick="connectNode(${hostId},${tk.id})">
+      <button class="card-x" title="${t("task.stopTitle")}" onclick="event.stopPropagation();stopNodeTask(${hostId},${tk.id})">⏹</button>
+      <div class="t"><span class="sdot ${tk.status}"></span>#${tk.id} <span class="tname">${tk.title}</span></div>
+      ${meta}
+    </div>`;
+}
+
+// machines whose bootstrap is in flight — drives the "⏳ installing…" state in the
+// ⚙ menu so the (30–60s) install shows clear progress instead of dead silence.
+const bootstrappingHosts = new Set();
+
+// Install tdsp onto a remote machine (Phase 5 bootstrap), then refresh so its
+// fleet status flips to reachable. Long-running (npm install on the target), so
+// the menu shows an in-progress label + the button is replaced while it runs, and
+// success/failure both surface as a toast.
+export async function bootstrapHost(id) {
+  const h = state.hostsById[id];
+  if (!h || bootstrappingHosts.has(id)) return;   // ignore a double-click while running
+  bootstrappingHosts.add(id);
+  renderList();                       // show "⏳ installing…" immediately, keep the menu open
+  toast(t("host.bootstrapping", { name: h.name }), "info");
+  try {
+    await api(`/api/hosts/${id}/bootstrap`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    toast(t("host.bootstrapped", { name: h.name }), "success");
+    await loadFleet();
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  } finally {
+    bootstrappingHosts.delete(id);
+    renderList();
+  }
+}
+
 export function rerender() {
   if (!hostsOrder.length) return;   // hosts not loaded yet
   const hosts = hostsOrder.map(id => state.hostsById[id]).filter(Boolean);
@@ -118,8 +213,28 @@ function renderList() {
   const gear = isLocal ? ""
     : `<button class="mh-gear" title="${t("host.manage")}" onclick="event.stopPropagation();toggleHostMenu(${h.id})">⚙</button>`;
   const newRepo = `<button class="mh-act" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">＋${t("repo.repoWord")}</button>`;
+  // fleet/bootstrap status for this remote machine: bootstrapped+reachable shows a
+  // live task count; reachable-but-not-installed offers a one-click Bootstrap; an
+  // unreachable/erroring node says so. Read from the last /api/fleet snapshot.
+  const fl = state.fleet[h.id];
+  let fleetRow = "";
+  if (!isLocal) {
+    if (bootstrappingHosts.has(h.id)) {
+      fleetRow = `<div class="mh-fleet">⏳ ${t("host.installing")}</div>`;
+    } else if (fl?.ok) {
+      fleetRow = `<div class="mh-fleet">🛰 ${t("host.liveTasks", { n: fl.tasks?.length ?? 0 })}</div>`;
+    } else if (fl?.reason === "notBootstrapped") {
+      fleetRow = `<button class="mh-boot" onclick="bootstrapHost(${h.id})">⬇ ${t("host.bootstrap")}</button>`;
+    } else if (fl) {
+      fleetRow = `<div class="mh-fleet off">⚠ ${t("host." + (fl.reason || "error"))}</div>`;
+    } else {
+      // no fleet snapshot yet for this remote → still let the user kick off install
+      fleetRow = `<button class="mh-boot" onclick="bootstrapHost(${h.id})">⬇ ${t("host.bootstrap")}</button>`;
+    }
+  }
   const menu = (menuHostId === h.id) ? `<div class="mh-menu">
       <div class="mh-target">${h.target}</div>
+      ${fleetRow}
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
   const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${newRepo}${menu}</div>`;
@@ -137,7 +252,9 @@ function renderList() {
     // `.open` (expanded) is what shows the state now — a left accent bar + faint
     // wash on the whole group, in place of the old ▸/▾ caret glyph.
     return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, online, collapsed, mine)}${body}</div>`;
-  }).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`;
+    // "no repos" only for the local machine — a remote node's own repos render in
+    // the node section below, so the message would be misleading there.
+  }).join("") || (isLocal ? `<div class="muted mempty">${t("host.noRepos")}</div>` : "");
 
   // every machine (local + remote) gets a Shells group: bare tmux shells you can
   // open many of, persistent like tasks. ＋ is disabled while the machine is offline.
@@ -149,13 +266,64 @@ function renderList() {
       <span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>
       ${shellCards || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
 
+  // Remote nodes: a group showing the tasks the NODE itself reports (its own live
+  // truth, fetched over ssh — includes anything dispatched here under the sink
+  // model). Legacy tasks recorded in THIS controller's db stay in the repo groups
+  // above; these are a separate, clearly-labelled source. Local machine: skipped
+  // (its tasks already render above).
+  // Remote node: the node's OWN repos + tasks (live, over ssh). Each node repo is a
+  // group (like the local repo groups) with a ＋ to dispatch a task to it — using
+  // the node's existing mirror, no re-registration here. The node's shells + any
+  // repo task whose repo isn't listed fall into a "🛰 节点任务" catch-all.
+  let nodeBlock = "", nodeArchBlock = "";
+  if (!isLocal) {
+    const fl = state.fleet[h.id];
+    if (fl?.ok) {
+      const all = fl.tasks || [];
+      const live = all.filter(tk => tk.status !== "cleaned");
+      const repos = fl.repos || [];
+      const known = new Set(repos.map(r => r.id));
+      const repoGroups = repos.map(r => {
+        const mine = live.filter(tk => tk.kind === "repo" && tk.repo_id === r.id);
+        const cards = mine.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("repo.noTasks")}</div>`;
+        const add = `<button class="grp-act" title="${t("node.newTask")}" onclick="event.stopPropagation();openNodeTaskModal(${h.id},${r.id})">＋</button>`;
+        return `<div class="grp open"><div class="grp-head static"><span class="grp-name">📦 ${r.name}</span>${add}</div>${cards}</div>`;
+      }).join("");
+      // the node's own shells, with a ＋ that opens a new shell ON the node
+      const nodeShells = live.filter(tk => tk.kind === "local");
+      const addShell = `<button class="grp-act" title="${t("local.new")}" onclick="event.stopPropagation();addNodeShell(${h.id})">＋</button>`;
+      const shellGroup = `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>${nodeShells.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
+      // repo tasks whose repo the node didn't list — rare safety net
+      const orphans = live.filter(tk => tk.kind === "repo" && !known.has(tk.repo_id));
+      const orphanGroup = orphans.length
+        ? `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div>${orphans.map(tk => fleetCard(h.id, tk)).join("")}</div>`
+        : "";
+      nodeBlock = repoGroups + shellGroup + orphanGroup;
+      // the node's OWN archived (cleaned) tasks — its truth, not A's db
+      const arch = all.filter(tk => tk.status === "cleaned");
+      nodeArchBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
+          <span class="grp-name">${t("list.archived")}</span>
+          <span class="muted">${arch.length ? `(${arch.length})` : ""}</span></div>
+          ${archivedOpen ? (arch.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
+    } else if (fl && fl.reason && fl.reason !== "notBootstrapped") {
+      nodeBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">⚠ ${t("host." + fl.reason)}</div></div>`;
+    }
+  }
+
   const archived = tasks.filter(tk => tk.status === "cleaned" && (tk.host_id ?? hostOf[tk.repo_id]) === h.id);
   const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
       <span class="grp-name">${t("list.archived")}</span>
       <span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
       ${archivedOpen ? (archived.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
 
-  $("m-list").innerHTML = header + repoBlocks + shellBlock + archBlock;
+  // A bootstrapped, reachable remote shows ONE coherent view — the node's own live
+  // truth (nodeBlock). The legacy A's-db sections (repoBlocks/shellBlock/archBlock)
+  // belong to the old model and would double up with the fleet, so they're hidden.
+  // The local machine and not-yet-bootstrapped remotes keep the classic layout.
+  const isFleetView = !isLocal && state.fleet[h.id]?.ok;
+  $("m-list").innerHTML = isFleetView
+    ? header + nodeBlock + nodeArchBlock
+    : header + repoBlocks + shellBlock + nodeBlock + archBlock;
 }
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
 // Force a repo group open (no re-render — the caller renders). Used on dispatch so a

@@ -173,6 +173,11 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   display: flex; flex-direction: column; gap: 4px; min-width: 168px; }
 .mh-menu .mh-target { font-size: 11px; color: var(--faint); padding: 2px 4px; word-break: break-all; }
 .mh-menu button { width: 100%; margin: 0; text-align: left; }
+/* fleet/bootstrap status row in the machine ⚙ menu: live count, a Bootstrap
+   action when tdsp isn't installed yet, or an unreachable/error note. */
+.mh-menu .mh-fleet { font-size: 11px; color: var(--faint); padding: 2px 4px; }
+.mh-menu .mh-fleet.off { color: var(--warn, #c08a00); }
+.mh-menu .mh-boot { width: 100%; margin: 0; text-align: left; color: var(--accent, #2f7); }
 /* col2: collapsible repo / local / archived groups + nested task cards.
    Each group is its own rounded block with a gap below it (1) — replaces the old
    hairline divider that made consecutive groups read as one continuous slab. The

@@ -12,8 +12,8 @@ import { Selects, csMount } from "./select.js";
 import { initTerm, showTermEmpty, applyTermTheme } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
-import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss } from "./hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending } from "./tasks.js";
+import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, addNodeShell } from "./hosts.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal } from "./tasks.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 import { initReorder } from "./reorder.js";
 import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./providers.js";
@@ -26,12 +26,12 @@ import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPan
 Object.assign(window, {
   // tasks
   addTask, openTaskModal, closeTaskModal, connect, archive, removeWt, deleteTask, resume,
-  addLocalTask, renameTask, focusPending,
+  addLocalTask, renameTask, focusPending, openNodeTaskModal,
   // repos
   delRepo, openRepoModal, closeRepoModal, addRepo,
   // hosts
   selectHost, openHostModal, closeHostModal, addHost, delHost,
-  toggleRepo, toggleArchived, toggleHostMenu,
+  toggleRepo, toggleArchived, toggleHostMenu, bootstrapHost, connectNode, stopNodeTask, addNodeShell,
   // skills (official-plugin install)
   openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList,
   // providers (alternate model backends — picker + inline add/remove panel)
@@ -88,6 +88,8 @@ Promise.allSettled([loadRepos(), loadHosts(), loadTasks(), refreshProviders()]).
 setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
 setInterval(loadTasks, 4000);
 setInterval(loadHosts, 5000);   // refresh machine liveness dots
+loadFleet();                     // initial cross-node fleet snapshot
+setInterval(loadFleet, 15000);  // refresh each node's live task count (slower — it ssh's out)
 // close modals on backdrop click / Esc
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
 $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });

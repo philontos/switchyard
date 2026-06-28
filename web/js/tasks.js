@@ -9,10 +9,13 @@ import { Selects } from "./select.js";
 import { state } from "./state.js";
 import { openPty, disposePty, prunePanes, setClaudeSession,
          openPending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
-import { rerender, expandRepo } from "./hosts.js";
+import { rerender, expandRepo, loadFleet } from "./hosts.js";
 import { refreshProviders, selectedProviderId } from "./providers.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
+// when set, the dispatch modal is in "node mode": dispatch to a remote node's OWN
+// repo (surfaced via the fleet) instead of a controller-registered repo.
+let nodeTask = null;   // { hostId, repo } or null
 // id of the task whose title is being edited inline. While set, renderList()
 // (the single place that rebuilds #m-list) bails, so NONE of the re-render paths
 // — loadTasks (4s), loadHosts (5s), loadRepos, a language switch — can blow the
@@ -60,13 +63,34 @@ export function openTaskModal(repoId) {
   $("tm-repo").textContent = repo.name;
   $("t-title").value = ""; $("t-prompt").value = "";   // fresh form each open
   $("prov-panel").style.display = "none";              // collapse the manage panel
+  $("t-provider-sec").style.display = "";              // in-process dispatch → backend picker applies
   $("task-modal").style.display = "flex";
   loadBranches();
   loadDispatchOptions();
   refreshProviders();                                  // fill the backend picker (keeps the last pick)
   setTimeout(() => $("t-title").focus(), 30);
 }
-export function closeTaskModal() { $("task-modal").style.display = "none"; }
+export function closeTaskModal() { $("task-modal").style.display = "none"; nodeTask = null; }
+
+// Open the dispatch modal for a remote node's OWN repo (from the fleet). The task
+// is created ON the node, using the node's existing mirror — no re-registration
+// here. Branch choices for a node repo aren't loaded (the mirror is on the node),
+// so we offer its default branch; everything else (title/prompt/skills) is the same.
+export function openNodeTaskModal(hostId, repoId) {
+  const repo = state.fleet[hostId]?.repos?.find(r => r.id === repoId);
+  if (!repo) return toast(t("toast.repoNotReady"), "error");
+  nodeTask = { hostId, repo };
+  taskRepoId = null;
+  const hostName = state.hostsById[hostId]?.name || hostId;
+  $("tm-repo").textContent = `${repo.name} @ ${hostName}`;
+  $("t-title").value = ""; $("t-prompt").value = "";
+  $("prov-panel").style.display = "none";
+  $("t-provider-sec").style.display = "none";   // node owns its own claude login — picker N/A
+  $("task-modal").style.display = "flex";
+  Selects["t-base"].setOptions([{ value: repo.default_branch, label: repo.default_branch }], repo.default_branch);
+  loadDispatchOptions();
+  setTimeout(() => $("t-title").focus(), 30);
+}
 
 // Shell: one click, zero form. Opens a bare tmux shell in the machine's home —
 // the server auto-names it and defaults the cwd to home; the user then cd's and
@@ -123,7 +147,31 @@ async function loadBranches() {
   }
 }
 
+// Dispatch a repo task to a remote node's own repo. The node creates the worktree
+// from its existing mirror + owns the task, so it surfaces via the fleet (not this
+// controller's db) — we just toast and refresh the fleet. The POST blocks while the
+// node builds the worktree (git fetch can be slow), so flag it as in-progress.
+async function addNodeTask() {
+  const { hostId, repo } = nodeTask;
+  const body = {
+    mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url,
+    base: Selects["t-base"].value, title: $("t-title").value.trim(),
+    prompt: $("t-prompt").value, skills: selectedExtraSkills(),
+  };
+  if (!body.base || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
+  closeTaskModal();
+  toast(t("toast.dispatchingToNode", { name: state.hostsById[hostId]?.name || hostId }), "info");
+  try {
+    const r = await api(`/api/nodes/${hostId}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    await loadFleet();
+    toast(t("toast.taskDispatched", { session: r.session }), "success");
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  }
+}
+
 export async function addTask() {
+  if (nodeTask) return addNodeTask();
   const body = {
     repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
