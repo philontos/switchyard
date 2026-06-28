@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { initSchema } from "./schema.ts";
 import { taskListPayload, runCli, aggregateNodes } from "./cli.ts";
+import type { CreateLocalResult } from "./createtask.ts";
 
 const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 
@@ -59,9 +60,9 @@ function fakeDeps(db: Database.Database) {
       serve: () => {
         served = true;
       },
-      createLocal: async (opts: { cwd?: string | null; title?: string | null }) => {
+      createLocal: async (opts: { cwd?: string | null; title?: string | null }): Promise<CreateLocalResult> => {
         createCalls.push(opts);
-        return { ok: true as const, id: 99, session: "tdsp-x-99-local-y" };
+        return { ok: true, id: 99, session: "tdsp-x-99-local-y" };
       },
     },
     createCalls,

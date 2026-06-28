@@ -3,8 +3,10 @@
 // creates tasks ON ITSELF — so the orchestration is always local; the machine,
 // shell-starter and cwd-check are injected (real localRunner in prod, fakes in
 // tests). The durable record is the manifest, written here as the single writer.
+import path from "node:path";
 import { writeTaskManifest } from "./taskmanifest.js";
 import { resolveCwd } from "./local.js";
+import { skillsLine } from "./skills.js";
 import type Database from "better-sqlite3";
 import type { Task } from "./db.js";
 
@@ -72,4 +74,103 @@ export async function createLocalTask(env: LocalTaskEnv, opts: CreateLocalOpts):
   env.db.prepare("UPDATE tasks SET title=?, session=?, status='running' WHERE id=?").run(title, session, id);
   manifest();
   return { ok: true, id, session };
+}
+
+// ---------- repo task ----------
+// A skill delivered into a task's worktree: identity, display name, source dir.
+export interface SkillRef {
+  key: string;
+  name: string;
+  dir: string;
+}
+
+// The repo this task springs from. The owner already holds its mirror; the core
+// derives the worktree path from it. (Not the full Repo row — just what we need.)
+export interface RepoRef {
+  id: number;
+  name: string;
+  mirror_path: string;
+}
+
+export interface RepoTaskEnv {
+  db: DB;
+  ns: string;
+  // Persist the task's durable record. Injected (not a hardcoded local write) so
+  // the caller owns the policy: the CLI verb writes to its own data dir (it IS the
+  // owner); the HTTP route passes the ownership-gated syncTaskManifest so a task
+  // orchestrated on a remote machine isn't manifested on the controller.
+  writeManifest(id: number): void | Promise<void>;
+  // Preflight the requested skill keys against the owner's sources.
+  resolveSkills(keys: string[]): { found: SkillRef[]; missing: string[] };
+  // Prepare the worktree's CONTENTS: create it from the base branch, deliver each
+  // skill, inject the per-task hooks, and keep both out of git status. Grouped as
+  // one seam — the prod env fills it with the real git/putDir/exclude/hooks code.
+  setupWorktree(args: {
+    id: number;
+    mirror: string;
+    worktree: string;
+    workBranch: string;
+    baseBranch: string;
+    skills: SkillRef[];
+  }): Promise<void>;
+  // Launch claude in the worktree (opening = freeform prompt + skills line, or null).
+  startSession(session: string, worktree: string, opening: string | null): Promise<void>;
+  // Tear down a partially-built worktree after a failed dispatch.
+  removeWorktree(mirror: string, worktree: string, workBranch: string): Promise<void>;
+}
+
+export interface CreateRepoOpts {
+  baseBranch: string;
+  title: string;
+  prompt?: string | null;
+  extraSkills?: string[];
+}
+
+export type CreateRepoResult =
+  | { ok: true; id: number; session: string; workBranch: string }
+  | { ok: false; error: "skillsMissing"; missing: string[] }
+  | { ok: false; error: "dispatchFailed"; id: number; message: string };
+
+/**
+ * Create a repo task ON the owner: preflight skills, insert the row, prepare the
+ * worktree + session, then flip to running and write the manifest. A failure
+ * after the row exists removes the partial worktree and marks the task errored
+ * (still manifested). Mirrors index.ts's POST /api/tasks exactly — the HTTP route
+ * becomes a thin caller, and a future `tdsp create` verb reuses this verbatim.
+ */
+export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: CreateRepoOpts): Promise<CreateRepoResult> {
+  // Preflight skills BEFORE inserting, so a bad skill never leaves a half-built
+  // task pointing at a nonexistent skill.
+  const wantKeys = [...new Set((opts.extraSkills ?? []).map(String))];
+  const { found, missing } = env.resolveSkills(wantKeys);
+  if (missing.length) return { ok: false, error: "skillsMissing", missing };
+
+  const info = env.db
+    .prepare(
+      "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, skills) VALUES (?,?,?,?,?,?,?,?,?)",
+    )
+    .run(repo.id, opts.baseBranch, "", opts.title, opts.prompt || null, "", "", "creating", JSON.stringify(found.map((f) => f.key)));
+  const id = Number(info.lastInsertRowid);
+  const s = slug(opts.title);
+  const workBranch = `feat/${id}-${s}`;
+  const worktree = path.resolve(path.join(path.dirname(repo.mirror_path), "..", "worktrees", `${repo.id}-${id}`));
+  const session = `tdsp-${env.ns}-${id}-${slug(repo.name)}-${s}`;
+
+  try {
+    await env.setupWorktree({ id, mirror: repo.mirror_path, worktree, workBranch, baseBranch: opts.baseBranch, skills: found });
+    // opening = freeform prompt + the "skills delivered" line; pass it UNTRIMMED
+    // (only the null-decision uses trim) to match the prior HTTP behavior exactly.
+    const opening = (opts.prompt || "") + skillsLine(found.map((f) => f.name));
+    await env.startSession(session, worktree, opening.trim() ? opening : null);
+    env.db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?").run(workBranch, worktree, session, id);
+    await env.writeManifest(id);
+    return { ok: true, id, session, workBranch };
+  } catch (e: any) {
+    // a partial dispatch (e.g. session start failed after the worktree was made)
+    // would orphan the worktree — remove it so nothing is left behind
+    await env.removeWorktree(repo.mirror_path, worktree, workBranch).catch(() => {});
+    env.db.prepare("UPDATE tasks SET status='error', error=? WHERE id=?").run(String(e?.message || e), id);
+    await env.writeManifest(id);
+    return { ok: false, error: "dispatchFailed", id, message: String(e?.message || e) };
+  }
 }

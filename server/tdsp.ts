@@ -25,7 +25,9 @@ process.exitCode = await runCli(process.argv.slice(2), {
   db,
   out: (s) => process.stdout.write(s + "\n"),
   err: (s) => process.stderr.write(s + "\n"),
-  serve: () => import("./index.js"),
+  serve: async () => {
+    await import("./index.js");
+  },
   createLocal: (opts) =>
     createLocalTask(
       {
