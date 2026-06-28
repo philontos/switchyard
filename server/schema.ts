@@ -84,6 +84,7 @@ function reconcileColumns(db: DB) {
   addColumn(db, "hosts", "data_dir", "TEXT");                  // the machine's ~/.task-dispatcher
   addColumn(db, "hosts", "status", "TEXT DEFAULT 'unknown'");  // online | offline | unknown
   addColumn(db, "hosts", "last_checked", "TEXT");
+  addColumn(db, "hosts", "tdsp_bin", "TEXT");                  // absolute path to the node's tdsp wrapper (bootstrapped); null = not yet
   addColumn(db, "repos", "host_id", "INTEGER");                // which machine this repo lives on
   addColumn(db, "tasks", "skills", "TEXT DEFAULT '[]'");       // JSON: source:name actually delivered
   // repo-less local quick tasks (kind='local'): no mirror/worktree, repo_id=0,

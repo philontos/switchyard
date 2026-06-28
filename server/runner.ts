@@ -79,6 +79,10 @@ const SSH_MUX = [
 ];
 const SSH_BATCH = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"];
 
+/** ssh args (connection reuse + non-interactive) for one-off remote commands like
+ *  the fleet's `ssh <node> tdsp list` — same muxing/batching the Runner uses. */
+export const SSH_BASE_ARGS = [...SSH_MUX, ...SSH_BATCH];
+
 /** ssh args for a detached `-N -L` port-forward that rides the shared master —
  *  used to reach a remote task's dev server for the web preview. The local end
  *  is bound IPv4 (we own it); the remote target is `localhost` (NOT 127.0.0.1)

@@ -20,9 +20,12 @@ import { startSession, startShellSession, hasSession, killSession, listSessions,
 import { syncReposManifest } from "./manifest.js";
 import { writeTaskManifest, removeTaskManifest, readTaskManifests, adoptTaskManifests } from "./taskmanifest.js";
 import { repairWorktrees } from "./migrate.js";
-import { localRunner, runnerFor, sshForwardArgs, type Runner } from "./runner.js";
+import { localRunner, runnerFor, sshForwardArgs, SSH_BASE_ARGS, type Runner } from "./runner.js";
+import { aggregateNodes } from "./cli.js";
+import { fleetTargets, tasksForHost, type FleetTarget } from "./fleet.js";
 import net from "node:net";
-import { spawn as spawnChild } from "node:child_process";
+import { spawn as spawnChild, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { resolveCwd } from "./local.js";
 import { createRepoTask, type RepoTaskEnv } from "./createtask.js";
 import { hookSettingsJson } from "./hooks.js";
@@ -557,6 +560,37 @@ app.delete("/api/tasks/:id", async (req, res) => {
   db.prepare("DELETE FROM tasks WHERE id=?").run(req.params.id);
   removeTaskManifest(DATA_DIR, Number(req.params.id));
   res.json({ ok: true });
+});
+
+// ---------- fleet (cross-node task view) ----------
+const pexecFile = promisify(execFile);
+
+// Fetch one node's OWN task list live: `ssh <node> <wrapper> list --json`. A
+// wall-clock timeout bounds a half-dead node so it degrades to "unreachable"
+// (aggregateNodes catches the throw) instead of stalling the whole fleet view.
+function nodeListFetch(t: FleetTarget): Promise<string> {
+  return pexecFile(SSH_BIN, [...SSH_BASE_ARGS, t.target, t.bin, "list", "--json"], {
+    timeout: 8000,
+    maxBuffer: 64 * 1024 * 1024,
+  }).then(({ stdout }) => stdout);
+}
+
+// One glass: every node's tasks read from its OWN truth. The local node comes
+// from this controller's DB; each bootstrapped remote is fetched live and merged
+// (offline → unreachable, older schema → version, no wrapper yet → notBootstrapped).
+// Honest per-node status, never a silent drop.
+app.get("/api/fleet", async (_req, res) => {
+  const hosts = db.prepare("SELECT * FROM hosts ORDER BY (kind='local') DESC, id DESC").all() as Host[];
+  const aggregated = await aggregateNodes(fleetTargets(hosts), nodeListFetch);
+  const byId = new Map(aggregated.map((a) => [a.node.id, a]));
+  const nodes = hosts.map((h) => {
+    const base = { node: { id: h.id, name: h.name }, kind: h.kind };
+    if (h.kind === "local") return { ...base, ok: true, tasks: tasksForHost(db, h.id) };
+    const agg = byId.get(h.id);
+    if (agg) return { ...base, ok: agg.ok, reason: agg.reason, tasks: agg.tasks ?? [] };
+    return { ...base, ok: false, reason: "notBootstrapped" as const };
+  });
+  res.json({ schema_version: 1, nodes });
 });
 
 // ---------- sessions (raw tmux, incl. orphans) ----------

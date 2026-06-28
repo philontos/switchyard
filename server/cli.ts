@@ -34,8 +34,8 @@ export interface NodeRef {
   name: string;
 }
 
-export interface NodeTasks {
-  node: NodeRef;
+export interface NodeTasks<T extends NodeRef = NodeRef> {
+  node: T;
   ok: boolean;
   reason?: "unreachable" | "version" | "error"; // why ok=false
   schema_version?: number;
@@ -51,12 +51,12 @@ export interface NodeTasks {
  *   - payload version too new for us → version (prompt: upgrade this controller)
  * A slow/bad node is isolated to its own entry and never blocks the others.
  */
-export async function aggregateNodes(
-  nodes: NodeRef[],
-  fetch: (node: NodeRef) => Promise<string>,
-): Promise<NodeTasks[]> {
+export async function aggregateNodes<T extends NodeRef>(
+  nodes: T[],
+  fetch: (node: T) => Promise<string>,
+): Promise<NodeTasks<T>[]> {
   return Promise.all(
-    nodes.map(async (node): Promise<NodeTasks> => {
+    nodes.map(async (node): Promise<NodeTasks<T>> => {
       let raw: string;
       try {
         raw = await fetch(node);
