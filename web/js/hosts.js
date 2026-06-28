@@ -275,11 +275,12 @@ function renderList() {
   // group (like the local repo groups) with a ＋ to dispatch a task to it — using
   // the node's existing mirror, no re-registration here. The node's shells + any
   // repo task whose repo isn't listed fall into a "🛰 节点任务" catch-all.
-  let nodeBlock = "";
+  let nodeBlock = "", nodeArchBlock = "";
   if (!isLocal) {
     const fl = state.fleet[h.id];
     if (fl?.ok) {
-      const live = (fl.tasks || []).filter(tk => tk.status !== "cleaned");
+      const all = fl.tasks || [];
+      const live = all.filter(tk => tk.status !== "cleaned");
       const repos = fl.repos || [];
       const known = new Set(repos.map(r => r.id));
       const repoGroups = repos.map(r => {
@@ -298,6 +299,12 @@ function renderList() {
         ? `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div>${orphans.map(tk => fleetCard(h.id, tk)).join("")}</div>`
         : "";
       nodeBlock = repoGroups + shellGroup + orphanGroup;
+      // the node's OWN archived (cleaned) tasks — its truth, not A's db
+      const arch = all.filter(tk => tk.status === "cleaned");
+      nodeArchBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
+          <span class="grp-name">${t("list.archived")}</span>
+          <span class="muted">${arch.length ? `(${arch.length})` : ""}</span></div>
+          ${archivedOpen ? (arch.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
     } else if (fl && fl.reason && fl.reason !== "notBootstrapped") {
       nodeBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">⚠ ${t("host." + fl.reason)}</div></div>`;
     }
@@ -315,7 +322,7 @@ function renderList() {
   // The local machine and not-yet-bootstrapped remotes keep the classic layout.
   const isFleetView = !isLocal && state.fleet[h.id]?.ok;
   $("m-list").innerHTML = isFleetView
-    ? header + nodeBlock
+    ? header + nodeBlock + nodeArchBlock
     : header + repoBlocks + shellBlock + nodeBlock + archBlock;
 }
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
