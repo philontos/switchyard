@@ -69,5 +69,6 @@ export interface Host {
   data_dir: string | null;   // the machine's ~/.task-dispatcher
   status: string;            // online | offline | unknown
   last_checked: string | null;
+  tdsp_bin: string | null;   // absolute path to this node's tdsp wrapper once bootstrapped; null = not yet
   created_at: string;
 }

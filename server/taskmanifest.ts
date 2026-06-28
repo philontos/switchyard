@@ -83,7 +83,7 @@ export function adoptTaskManifests(db: DB, manifests: TaskManifest[]): number {
   const insert = db.prepare(`INSERT INTO tasks (${cols}) VALUES (${placeholders})`);
   let adopted = 0;
   for (const m of manifests) {
-    const t = m.task as Record<string, unknown>;
+    const t = m.task as unknown as Record<string, unknown>;
     if (typeof t?.id !== "number" || have.has(t.id)) continue;
     insert.run(...TASK_COLS.map((c) => (t[c] ?? null) as unknown));
     have.add(t.id);
