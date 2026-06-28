@@ -10,8 +10,8 @@ import { runCli } from "./cli.js";
 import { db, type Task } from "./db.js";
 import { NS, DATA_DIR } from "./paths.js";
 import { localRunner } from "./runner.js";
-import { startShellSession } from "./tmux.js";
-import { createLocalTask, createRepoTask } from "./createtask.js";
+import { startShellSession, killSession } from "./tmux.js";
+import { createLocalTask, createRepoTask, stopTask } from "./createtask.js";
 import { buildRepoTaskEnv, repoFindOrCreate } from "./repoenv.js";
 import { writeTaskManifest } from "./taskmanifest.js";
 
@@ -55,5 +55,15 @@ process.exitCode = await runCli(process.argv.slice(2), {
       }),
       repoFindOrCreate(db, { mirror: spec.mirror, name: spec.name, git_url: spec.git_url }),
       { baseBranch: spec.base, title: spec.title, prompt: spec.prompt, extraSkills: spec.skills },
+    ),
+  // stop one of THIS node's tasks: kill its session, mark cleaned, re-manifest.
+  stop: (id) =>
+    stopTask(
+      {
+        db,
+        killSession: (session) => killSession(localRunner, session),
+        writeManifest: (tid) => writeTaskManifest(DATA_DIR, db.prepare("SELECT * FROM tasks WHERE id=?").get(tid) as Task),
+      },
+      id,
     ),
 });

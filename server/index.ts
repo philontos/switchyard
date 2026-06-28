@@ -603,6 +603,24 @@ app.get("/api/fleet", async (_req, res) => {
   res.json({ schema_version: 1, nodes });
 });
 
+// Stop a task that lives ON a remote node (a fleet task this controller doesn't
+// own): drive the node's own tdsp to stop it. The node kills the session, marks
+// the task cleaned, and re-manifests — the controller just relays the request.
+app.post("/api/nodes/:hostId/tasks/:taskId/stop", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const taskId = Number(req.params.taskId);
+  if (!Number.isInteger(taskId)) return res.status(400).json({ error: "invalid task id" });
+  const out = await runTdsp(host, ["stop", String(taskId)]);
+  const result = parseNodeResult(out.stdout);
+  if (!result) return res.status(502).json({ error: `node stop failed: ${(out.stderr || "no result").slice(0, 300)}` });
+  if (result.ok) return res.json({ ok: true });
+  return res.status(500).json({ error: result.error || "stop failed" });
+});
+
 // ---------- sessions (raw tmux, incl. orphans) ----------
 app.get("/api/sessions", async (_req, res) => {
   const names = await listSessions(localRunner);
@@ -779,7 +797,15 @@ wss.on("connection", (ws, req) => {
   // spawns the client locally; the shell/tmux/files all live ON that machine.
   if (!session || !SESSION_RE.test(session)) { ws.close(1008, "invalid target"); return; }
   const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(session) as Task | undefined;
-  const host = task ? taskHost(task) : undefined;
+  // A fleet session lives on another node and isn't in THIS controller's db. The
+  // client (rendering it under that node) passes ?host=<id>, so we can still
+  // ssh-attach to it. The host must be a known remote — never trust the hint to
+  // reach an arbitrary box. Falls back to the task's own host for local sessions.
+  let host = task ? taskHost(task) : undefined;
+  if (!task) {
+    const hintId = Number(url.searchParams.get("host"));
+    if (Number.isInteger(hintId)) host = getHost.get(hintId) as Host | undefined;
+  }
   const { file, args, label } = attachCommand(host, session, { ssh: SSH_BIN, mosh: MOSH_BIN, tmux: TMUX_BIN });
   // the session whose copy/scroll mode we cancel on attach, so this client lands
   // on the live prompt no matter what mode a previous client left the pane in.

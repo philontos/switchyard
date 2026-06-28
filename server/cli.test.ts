@@ -49,6 +49,7 @@ function fakeDeps(db: Database.Database) {
   let served = false;
   const createCalls: { cwd?: string | null; title?: string | null }[] = [];
   const repoCalls: any[] = [];
+  const stopCalls: number[] = [];
   return {
     deps: {
       db,
@@ -69,9 +70,14 @@ function fakeDeps(db: Database.Database) {
         repoCalls.push(spec);
         return { ok: true as const, id: 77, session: "tdsp-x-77-sw-t", workBranch: "feat/77-t" };
       },
+      stop: async (id: number) => {
+        stopCalls.push(id);
+        return { ok: true as const };
+      },
     },
     createCalls,
     repoCalls,
+    stopCalls,
     get out() {
       return out;
     },
@@ -156,6 +162,22 @@ test("runCli create exits 1 and prints the error when dispatch fails", async () 
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 1);
   assert.match(f.out, /skillsMissing/);
+});
+
+test("runCli stop parses the id, invokes stop, prints JSON, exits 0", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["stop", "42"], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.stopCalls, [42]);
+  assert.equal(JSON.parse(f.out).ok, true);
+});
+
+test("runCli stop rejects a non-numeric id with exit 1", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["stop", "abc"], f.deps);
+  assert.equal(code, 1);
+  assert.match(f.out, /invalid id/);
+  assert.deepEqual(f.stopCalls, []);
 });
 
 test("runCli create-local exits 1 and prints the error when creation fails", async () => {

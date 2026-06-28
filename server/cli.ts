@@ -4,7 +4,7 @@
 // sole authority for its own tasks; these read/return that local truth.
 import type Database from "better-sqlite3";
 import type { Task } from "./db.js";
-import type { CreateLocalOpts, CreateLocalResult, CreateRepoResult } from "./createtask.js";
+import type { CreateLocalOpts, CreateLocalResult, CreateRepoResult, StopResult } from "./createtask.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
 // prompt and skill list survive intact). The node registers the repo by `mirror`
@@ -101,6 +101,7 @@ export interface CliDeps {
   serve: () => void | Promise<void>;
   createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
   createRepo: (spec: CreateRepoSpec) => Promise<CreateRepoResult>;
+  stop: (id: number) => Promise<StopResult>;
 }
 
 // Minimal flag parser: supports `--key value` and `--key=value`. Bare flags
@@ -147,8 +148,18 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(r));
       return r.ok ? 0 : 1;
     }
+    case "stop": {
+      const id = Number(argv[1]);
+      if (!Number.isInteger(id)) {
+        deps.out(JSON.stringify({ ok: false, error: "invalid id" }));
+        return 1;
+      }
+      const r = await deps.stop(id);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
     default:
-      deps.err(`Usage: tdsp <serve|list|create-local|create>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|create-local|create|stop>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

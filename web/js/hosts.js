@@ -11,7 +11,7 @@ import { state } from "./state.js";
 import { repoGroupHead } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask, connect,
          pendingRepoCards, pendingShellCards, isShadowedByPending, pendingCard } from "./tasks.js";
-import { detachDock } from "./terminal.js";
+import { detachDock, openPty, pruneNodePanes } from "./terminal.js";
 import { orderTasks, isDraggingTask } from "./reorder.js";
 
 let hostsOrder = [];               // API order: local machine first. Active machine is state.activeHostId.
@@ -36,7 +36,52 @@ export async function loadFleet() {
   const f = await api("/api/fleet").catch(() => null);
   if (!f) return;
   state.fleet = Object.fromEntries(f.nodes.map((n) => [n.node.id, n]));
+  // drop any open node-task terminal whose session is no longer live on its node
+  const keep = new Set();
+  for (const n of f.nodes) for (const tk of n.tasks || []) if (tk.status !== "cleaned") keep.add(`n${n.node.id}:${tk.id}`);
+  pruneNodePanes(keep);
   renderList();
+}
+
+// Open a remote node's task terminal: attach to its tmux session over ssh (the
+// server resolves the node from ?host=). The session/title are read from the
+// fleet snapshot, so the card's onclick only carries safe numeric ids.
+export function connectNode(hostId, taskId) {
+  const tk = state.fleet[hostId]?.tasks?.find((t) => t.id === taskId);
+  if (!tk) return;
+  const paneId = `n${hostId}:${taskId}`;
+  state.selectedTaskId = paneId;
+  const host = state.hostsById[hostId];
+  const attach = host ? `ssh ${host.target} tmux attach -t ${tk.session}` : `tmux attach -t ${tk.session}`;
+  openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, "", attach, paneId, "");
+  renderList();
+}
+
+// Stop a remote node's task — the server drives the node's own tdsp to kill it.
+export async function stopNodeTask(hostId, taskId) {
+  if (!(await confirmDialog(t("task.stopConfirm") || "Stop this task?", { title: t("task.stopTitle"), okText: t("common.stop") || "Stop", danger: true }))) return;
+  try {
+    await api(`/api/nodes/${hostId}/tasks/${taskId}/stop`, { method: "POST" });
+    await loadFleet();
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  }
+}
+
+// A card for a task running ON a remote node (from the fleet snapshot). Connect
+// attaches over ssh; the corner ⏹ stops it via the node. No live/waiting dot — the
+// raw node row carries status only (the node, sat at directly, shows the rest).
+function fleetCard(hostId, tk) {
+  const paneId = `n${hostId}:${tk.id}`;
+  const sel = paneId === state.selectedTaskId ? " selected" : "";
+  const meta = tk.kind === "local"
+    ? `<div class="muted">📂 <code>${tk.cwd || "~"}</code> <span class="tag-local">${t("local.tag")}</span></div>`
+    : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;
+  return `<div class="card task${sel} clickable" onclick="connectNode(${hostId},${tk.id})">
+      <button class="card-x" title="${t("task.stopTitle")}" onclick="event.stopPropagation();stopNodeTask(${hostId},${tk.id})">⏹</button>
+      <div class="t"><span class="sdot ${tk.status}"></span>#${tk.id} <span class="tname">${tk.title}</span></div>
+      ${meta}
+    </div>`;
 }
 
 // Install tdsp onto a remote machine (Phase 5 bootstrap), then refresh so its
@@ -191,13 +236,30 @@ function renderList() {
       <span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>
       ${shellCards || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
 
+  // Remote nodes: a group showing the tasks the NODE itself reports (its own live
+  // truth, fetched over ssh — includes anything dispatched here under the sink
+  // model). Legacy tasks recorded in THIS controller's db stay in the repo groups
+  // above; these are a separate, clearly-labelled source. Local machine: skipped
+  // (its tasks already render above).
+  let nodeBlock = "";
+  if (!isLocal) {
+    const fl = state.fleet[h.id];
+    if (fl?.ok) {
+      const live = (fl.tasks || []).filter(tk => tk.status !== "cleaned");
+      const cards = live.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("node.none")}</div>`;
+      nodeBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div>${cards}</div>`;
+    } else if (fl && fl.reason && fl.reason !== "notBootstrapped") {
+      nodeBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">⚠ ${t("host." + fl.reason)}</div></div>`;
+    }
+  }
+
   const archived = tasks.filter(tk => tk.status === "cleaned" && (tk.host_id ?? hostOf[tk.repo_id]) === h.id);
   const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
       <span class="grp-name">${t("list.archived")}</span>
       <span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
       ${archivedOpen ? (archived.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
 
-  $("m-list").innerHTML = header + repoBlocks + shellBlock + archBlock;
+  $("m-list").innerHTML = header + repoBlocks + shellBlock + nodeBlock + archBlock;
 }
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
 // Force a repo group open (no re-render — the caller renders). Used on dispatch so a
