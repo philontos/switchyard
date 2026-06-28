@@ -29,6 +29,33 @@ export async function loadHosts() {
   hostsOrder = hs.map(h => h.id);   // API order: local machine first
   rerender();
 }
+// Pull each node's OWN live task list (/api/fleet). Remote nodes are fetched over
+// ssh by the server, so this is the cross-node "see what's running there" view.
+// Best-effort: a failed load just leaves the last fleet snapshot in place.
+export async function loadFleet() {
+  const f = await api("/api/fleet").catch(() => null);
+  if (!f) return;
+  state.fleet = Object.fromEntries(f.nodes.map((n) => [n.node.id, n]));
+  renderList();
+}
+
+// Install tdsp onto a remote machine (Phase 5 bootstrap), then refresh so its
+// fleet status flips to reachable. Long-running (npm install on the target), so
+// the button shows a busy label and we surface success/failure as a toast.
+export async function bootstrapHost(id) {
+  const h = state.hostsById[id];
+  if (!h) return;
+  menuHostId = null;
+  toast(t("host.bootstrapping", { name: h.name }), "info");
+  try {
+    await api(`/api/hosts/${id}/bootstrap`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    toast(t("host.bootstrapped", { name: h.name }), "success");
+    await loadFleet();
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  }
+}
+
 export function rerender() {
   if (!hostsOrder.length) return;   // hosts not loaded yet
   const hosts = hostsOrder.map(id => state.hostsById[id]).filter(Boolean);
@@ -118,8 +145,23 @@ function renderList() {
   const gear = isLocal ? ""
     : `<button class="mh-gear" title="${t("host.manage")}" onclick="event.stopPropagation();toggleHostMenu(${h.id})">⚙</button>`;
   const newRepo = `<button class="mh-act" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">＋${t("repo.repoWord")}</button>`;
+  // fleet/bootstrap status for this remote machine: bootstrapped+reachable shows a
+  // live task count; reachable-but-not-installed offers a one-click Bootstrap; an
+  // unreachable/erroring node says so. Read from the last /api/fleet snapshot.
+  const fl = state.fleet[h.id];
+  let fleetRow = "";
+  if (!isLocal) {
+    if (fl?.ok) {
+      fleetRow = `<div class="mh-fleet">🛰 ${t("host.liveTasks", { n: fl.tasks?.length ?? 0 })}</div>`;
+    } else if (fl?.reason === "notBootstrapped") {
+      fleetRow = `<button class="mh-boot" onclick="bootstrapHost(${h.id})">⬇ ${t("host.bootstrap")}</button>`;
+    } else if (fl) {
+      fleetRow = `<div class="mh-fleet off">⚠ ${t("host." + (fl.reason || "error"))}</div>`;
+    }
+  }
   const menu = (menuHostId === h.id) ? `<div class="mh-menu">
       <div class="mh-target">${h.target}</div>
+      ${fleetRow}
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
   const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${newRepo}${menu}</div>`;

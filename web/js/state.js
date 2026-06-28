@@ -18,4 +18,8 @@ export const state = {
   selectedTaskId: null,
   activeHostId: null,
   lastTaskByHost: {},
+  // fleet: node id -> { ok, reason?, tasks? } from /api/fleet — each node's OWN
+  // live truth (remote nodes fetched over ssh). Drives the per-machine bootstrap
+  // state + live task count in the machine ⚙ menu. Read by hosts.js.
+  fleet: {},
 };
