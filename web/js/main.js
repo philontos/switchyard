@@ -12,7 +12,7 @@ import { Selects, csMount } from "./select.js";
 import { initTerm, showTermEmpty, applyTermTheme } from "./terminal.js";
 import { state } from "./state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
-import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask } from "./hosts.js";
+import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, addNodeShell } from "./hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal } from "./tasks.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 import { initReorder } from "./reorder.js";
@@ -30,7 +30,7 @@ Object.assign(window, {
   delRepo, openRepoModal, closeRepoModal, addRepo,
   // hosts
   selectHost, openHostModal, closeHostModal, addHost, delHost,
-  toggleRepo, toggleArchived, toggleHostMenu, bootstrapHost, connectNode, stopNodeTask,
+  toggleRepo, toggleArchived, toggleHostMenu, bootstrapHost, connectNode, stopNodeTask, addNodeShell,
   // skills (official-plugin install)
   openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList,
 });

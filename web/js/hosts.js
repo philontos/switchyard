@@ -57,6 +57,20 @@ export function connectNode(hostId, taskId) {
   renderList();
 }
 
+// Open a new bare shell ON a remote node (sinks via the node's own tdsp). The shell
+// lives on the node, so it surfaces through the fleet — refresh it, then attach.
+export async function addNodeShell(hostId) {
+  toast(t("toast.dispatchingToNode", { name: state.hostsById[hostId]?.name || hostId }), "info");
+  try {
+    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ host_id: hostId }) });
+    await loadFleet();
+    if (r.id) connectNode(hostId, r.id);
+    toast(t("toast.taskDispatched", { session: r.session }), "success");
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  }
+}
+
 // Stop a remote node's task — the server drives the node's own tdsp to kill it.
 export async function stopNodeTask(hostId, taskId) {
   if (!(await confirmDialog(t("task.stopConfirm") || "Stop this task?", { title: t("task.stopTitle"), okText: t("common.stop") || "Stop", danger: true }))) return;
@@ -274,12 +288,16 @@ function renderList() {
         const add = `<button class="grp-act" title="${t("node.newTask")}" onclick="event.stopPropagation();openNodeTaskModal(${h.id},${r.id})">＋</button>`;
         return `<div class="grp open"><div class="grp-head static"><span class="grp-name">📦 ${r.name}</span>${add}</div>${cards}</div>`;
       }).join("");
-      const loose = live.filter(tk => tk.kind === "local" || (tk.kind === "repo" && !known.has(tk.repo_id)));
-      const looseGroup = loose.length
-        ? `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div>${loose.map(tk => fleetCard(h.id, tk)).join("")}</div>`
+      // the node's own shells, with a ＋ that opens a new shell ON the node
+      const nodeShells = live.filter(tk => tk.kind === "local");
+      const addShell = `<button class="grp-act" title="${t("local.new")}" onclick="event.stopPropagation();addNodeShell(${h.id})">＋</button>`;
+      const shellGroup = `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>${nodeShells.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
+      // repo tasks whose repo the node didn't list — rare safety net
+      const orphans = live.filter(tk => tk.kind === "repo" && !known.has(tk.repo_id));
+      const orphanGroup = orphans.length
+        ? `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div>${orphans.map(tk => fleetCard(h.id, tk)).join("")}</div>`
         : "";
-      nodeBlock = repoGroups + looseGroup
-        || `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">${t("node.none")}</div></div>`;
+      nodeBlock = repoGroups + shellGroup + orphanGroup;
     } else if (fl && fl.reason && fl.reason !== "notBootstrapped") {
       nodeBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">⚠ ${t("host." + fl.reason)}</div></div>`;
     }
@@ -291,7 +309,14 @@ function renderList() {
       <span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
       ${archivedOpen ? (archived.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
 
-  $("m-list").innerHTML = header + repoBlocks + shellBlock + nodeBlock + archBlock;
+  // A bootstrapped, reachable remote shows ONE coherent view — the node's own live
+  // truth (nodeBlock). The legacy A's-db sections (repoBlocks/shellBlock/archBlock)
+  // belong to the old model and would double up with the fleet, so they're hidden.
+  // The local machine and not-yet-bootstrapped remotes keep the classic layout.
+  const isFleetView = !isLocal && state.fleet[h.id]?.ok;
+  $("m-list").innerHTML = isFleetView
+    ? header + nodeBlock
+    : header + repoBlocks + shellBlock + nodeBlock + archBlock;
 }
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
 // Force a repo group open (no re-render — the caller renders). Used on dispatch so a
