@@ -23,6 +23,7 @@ import { repairWorktrees } from "./migrate.js";
 import { localRunner, runnerFor, sshForwardArgs, SSH_BASE_ARGS, type Runner } from "./runner.js";
 import { aggregateNodes } from "./cli.js";
 import { fleetTargets, tasksForHost, type FleetTarget } from "./fleet.js";
+import { bootstrapMachine } from "./bootstrap.js";
 import net from "node:net";
 import { spawn as spawnChild, execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -30,7 +31,7 @@ import { resolveCwd } from "./local.js";
 import { createRepoTask, type RepoTaskEnv } from "./createtask.js";
 import { hookSettingsJson } from "./hooks.js";
 import { startLivenessLoop, probeHost } from "./liveness.js";
-import { WEB_DIR, DID_MIGRATE, NS, DATA_DIR } from "./paths.js";
+import { WEB_DIR, DID_MIGRATE, NS, DATA_DIR, ROOT } from "./paths.js";
 import { tr, langFromReq, langFromQuery } from "./i18n.js";
 import { createPreviewMiddleware, handlePreviewUpgrade, parsePreviewHost, tcpProbe, createForwardRegistry, type PreviewResolution, type ForwardHandle } from "./preview.js";
 
@@ -650,6 +651,64 @@ app.post("/api/hosts", (req, res) => {
   const id = Number(info.lastInsertRowid);
   probeHost(getHost.get(id) as Host); // probe right away so it goes online fast (fire-and-forget)
   res.json({ id });
+});
+
+// Run a shell script ON a machine via `ssh target sh -s`, fed over STDIN. This is
+// the bootstrap probe transport: stdin-fed avoids the nested-quote trap where the
+// remote shell would expand `$(fnm env)` before our script ever runs. No timeout —
+// npm install is deliberately long; bootstrap is a foreground, user-initiated op.
+function sshRun(target: string): (script: string) => Promise<{ ok: boolean; stdout: string }> {
+  return (script) =>
+    new Promise((resolve) => {
+      const c = spawnChild(SSH_BIN, [...SSH_BASE_ARGS, target, "sh -s"]);
+      let out = "";
+      c.stdout.on("data", (d) => (out += d));
+      c.on("close", (code) => resolve({ ok: code === 0, stdout: out }));
+      c.on("error", () => resolve({ ok: false, stdout: "" }));
+      c.stdin.on("error", () => {});
+      c.stdin.write(script);
+      c.stdin.end();
+    });
+}
+
+// Install tdsp onto a remote machine and record its wrapper path (tdsp_bin) so the
+// fleet view can reach it and control can sink to it. Stages the app source (no
+// node_modules — npm install rebuilds native modules for the target's arch), then
+// runs the bootstrap sequence. Foreground: the response returns when it's done.
+app.post("/api/hosts/:id/bootstrap", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.id) as Host | undefined;
+  if (!host) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (host.kind === "local") return res.status(400).json({ error: "the local machine needs no bootstrap" });
+  if (host.status !== "online") return res.status(409).json({ error: tr(lang, "host.offline") });
+
+  const runner = runnerFor(host);
+  const home = (await runner.exec("sh", ["-c", 'echo "$HOME"']).catch(() => "")).trim();
+  if (!home) return res.status(502).json({ error: "could not resolve the machine's home dir" });
+
+  // stage just the app source (server/, web/, manifests) — never node_modules
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), "tdsp-stage-"));
+  try {
+    for (const d of ["server", "web"]) fs.cpSync(path.join(ROOT, d), path.join(stage, d), { recursive: true });
+    for (const f of ["package.json", "package-lock.json", "tsconfig.json"]) {
+      const src = path.join(ROOT, f);
+      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(stage, f));
+    }
+    const result = await bootstrapMachine({
+      appSrcDir: stage,
+      home,
+      run: sshRun(host.target),
+      pushDir: (src, dest) => runner.putDir(src, dest),
+      override: typeof req.body?.nodeOverride === "string" && req.body.nodeOverride.trim() ? req.body.nodeOverride.trim() : undefined,
+    });
+    if (!result.ok) return res.status(500).json({ error: result.error });
+    db.prepare("UPDATE hosts SET tdsp_bin=? WHERE id=?").run(result.binPath, host.id);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message || e) });
+  } finally {
+    fs.rmSync(stage, { recursive: true, force: true });
+  }
 });
 
 app.delete("/api/hosts/:id", (req, res) => {

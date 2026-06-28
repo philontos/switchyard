@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { discoverNode, renderWrapper, NODE_RUNGS } from "./bootstrap.ts";
+import { discoverNode, renderWrapper, NODE_RUNGS, nodeLadderScript, bootstrapMachine } from "./bootstrap.ts";
 
 // A fake probe simulates a machine: `works(script)` decides whether that rung's
 // shell snippet would resolve a node. The discovery ladder must pick the FIRST
@@ -74,4 +74,79 @@ test("renderWrapper embeds the app dir, the node ladder, an honest failure, and 
 test("renderWrapper places a manual override ahead of the auto rungs", () => {
   const w = renderWrapper({ appDir: "/app", override: 'export PATH=/opt/custom/node/bin:$PATH' });
   assert.ok(w.indexOf("/opt/custom/node/bin") < w.indexOf("fnm env"), "override is tried before fnm");
+});
+
+test("nodeLadderScript is shared by the wrapper and bootstrap (same rungs)", () => {
+  const s = nodeLadderScript();
+  assert.match(s, /fnm env/);
+  assert.match(s, /nvm\.sh/);
+  // the generated wrapper embeds exactly this ladder
+  assert.ok(renderWrapper({ appDir: "/app" }).includes(s));
+});
+
+// ---------- bootstrapMachine ----------
+// One-time install orchestration: discover node, push source, npm install, write
+// the wrapper to a fixed path, verify it runs. Ops are injected so the sequence is
+// testable without a real ssh. Order matters: discover gates everything; a verified
+// wrapper path is what the caller stores as the host's tdsp_bin.
+function fakeBoot(over: Record<string, unknown> = {}) {
+  const scripts: string[] = [];
+  const pushes: { src: string; dest: string }[] = [];
+  const env = {
+    appSrcDir: "/local/app",
+    home: "/home/me",
+    run: async (script: string) => {
+      scripts.push(script);
+      // simulate: node ladder resolves, npm install ok, wrapper write ok, verify ok
+      const ok = /node -v/.test(script) ? true : true;
+      return { ok, stdout: /node -v/.test(script) ? "v22.0.0" : "OK" };
+    },
+    pushDir: async (src: string, dest: string) => {
+      pushes.push({ src, dest });
+    },
+    ...over,
+  };
+  return { env, scripts, pushes };
+}
+
+test("bootstrapMachine installs to ~/.task-dispatcher and returns the verified bin path", async () => {
+  const { env, pushes } = fakeBoot();
+  const r = await bootstrapMachine(env);
+  assert.equal(r.ok, true);
+  assert.equal(r.binPath, "/home/me/.task-dispatcher/bin/tdsp");
+  assert.equal(r.appDir, "/home/me/.task-dispatcher/app");
+  assert.equal(r.nodeVersion, "v22.0.0");
+  // the source was pushed to the app dir
+  assert.deepEqual(pushes, [{ src: "/local/app", dest: "/home/me/.task-dispatcher/app" }]);
+});
+
+test("bootstrapMachine runs npm install in the app dir after pushing source", async () => {
+  const { env, scripts } = fakeBoot();
+  await bootstrapMachine(env);
+  assert.ok(scripts.some((s) => /npm (ci|install)/.test(s) && s.includes("/home/me/.task-dispatcher/app")));
+});
+
+test("bootstrapMachine aborts (and never pushes) when no node can be found", async () => {
+  const { env, pushes } = fakeBoot({
+    run: async () => ({ ok: false, stdout: "" }), // nothing resolves node
+  });
+  const r = await bootstrapMachine(env);
+  assert.equal(r.ok, false);
+  assert.match(r.error || "", /node/i);
+  assert.equal(pushes.length, 0, "don't push source to a machine we can't run on");
+});
+
+test("bootstrapMachine reports failure if the installed wrapper doesn't verify", async () => {
+  // node discovery ok, but the final `tdsp list` verify fails
+  let sawVerify = false;
+  const { env } = fakeBoot({
+    run: async (script: string) => {
+      if (/node -v/.test(script)) return { ok: true, stdout: "v22.0.0" };
+      if (/\/bin\/tdsp('| )?.*(list|version)/.test(script)) { sawVerify = true; return { ok: false, stdout: "" }; }
+      return { ok: true, stdout: "OK" };
+    },
+  });
+  const r = await bootstrapMachine(env);
+  assert.equal(sawVerify, true, "it attempted to verify the wrapper");
+  assert.equal(r.ok, false);
 });
