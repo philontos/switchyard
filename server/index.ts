@@ -29,6 +29,7 @@ import { spawn as spawnChild, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolveCwd } from "./local.js";
 import { createRepoTask, type RepoTaskEnv } from "./createtask.js";
+import { buildRepoTaskEnv } from "./repoenv.js";
 import { hookSettingsJson } from "./hooks.js";
 import { startLivenessLoop, probeHost } from "./liveness.js";
 import { WEB_DIR, DID_MIGRATE, NS, DATA_DIR, ROOT } from "./paths.js";
@@ -329,52 +330,11 @@ app.get("/api/tasks", async (_req, res) => {
   res.json(withLive);
 });
 
-// The worktree-setup step (create worktree + deliver skills + inject hooks + keep
-// both out of git status) bound to a machine's Runner — the former inline
-// orchestration, moved verbatim behind createRepoTask's setupWorktree seam.
-function setupWorktreeOn(runner: Runner): RepoTaskEnv["setupWorktree"] {
-  return async ({ id, mirror, worktree, workBranch, baseBranch, skills }) => {
-    // create the worktree from the base branch's latest origin tip (falls back to
-    // a local head for unpushed bases). The base is only a start point, so this
-    // works even when a live task currently has that branch checked out.
-    await addWorktreeFromBranch(runner, mirror, worktree, workBranch, baseBranch);
-    // deliver each selected skill's whole dir into the worktree's .claude/skills/
-    for (const sk of skills) await runner.putDir(sk.dir, path.join(worktree, ".claude", "skills", sk.name));
-    // keep delivered skills out of the repo's git status (worktree-local exclude)
-    if (skills.length) {
-      await runner.exec("sh", ["-c",
-        `cd ${JSON.stringify(worktree)} && p=$(git rev-parse --git-path info/exclude) && grep -qxF '.claude/skills/' "$p" || printf '.claude/skills/\\n' >> "$p"`,
-      ]).catch(() => {});
-    }
-    // inject per-task hooks so the session reports when it's blocked on a
-    // permission prompt (yellow light): the hook touches/removes <wt>/.claude/waiting,
-    // which the dispatcher reads back via runner.exists — same on the local box and
-    // on remotes. Deliver settings.local.json through putDir (overlays the .claude
-    // skills/ already there); keep both injected paths out of the repo's git status.
-    const hooksTmp = path.join(os.tmpdir(), `tdsp-hooks-${NS}-${id}`, ".claude");
-    fs.mkdirSync(hooksTmp, { recursive: true });
-    fs.writeFileSync(path.join(hooksTmp, "settings.local.json"), hookSettingsJson(worktree));
-    await runner.putDir(hooksTmp, path.join(worktree, ".claude"));
-    fs.rmSync(path.dirname(hooksTmp), { recursive: true, force: true });
-    await runner.exec("sh", ["-c",
-      `cd ${JSON.stringify(worktree)} && p=$(git rev-parse --git-path info/exclude) && ` +
-      `for f in '.claude/settings.local.json' '.claude/waiting' '.claude/session-id'; do grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
-    ]).catch(() => {});
-  };
-}
-
-// Bind createRepoTask's seams to a machine's Runner. Shared by the HTTP route and
-// (later) the `tdsp create` verb — same orchestration, different front door.
+// Bind createRepoTask's seams to a machine's Runner (shared builder in repoenv.ts).
+// The HTTP route writes the manifest through the ownership-gated syncTaskManifest,
+// unchanged; the `tdsp create` verb passes a local writer instead.
 function repoTaskEnvFor(runner: Runner): RepoTaskEnv {
-  return {
-    db,
-    ns: NS,
-    writeManifest: (tid) => syncTaskManifest(tid), // ownership-gated, unchanged
-    resolveSkills: (keys) => resolveSkills(keys, defaultSources()),
-    setupWorktree: setupWorktreeOn(runner),
-    startSession: (session, worktree, opening) => startSession(runner, session, worktree, opening),
-    removeWorktree: (mirror, worktree, workBranch) => removeWorktree(runner, mirror, worktree, workBranch).then(() => {}),
-  };
+  return buildRepoTaskEnv({ db, ns: NS, runner, writeManifest: (tid) => syncTaskManifest(tid) });
 }
 
 app.post("/api/tasks", async (req, res) => {
@@ -388,11 +348,26 @@ app.post("/api/tasks", async (req, res) => {
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
   const host = getHost.get(repo.host_id) as Host | undefined;
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
-  const runner = runnerFor(host as Host); // dispatch ON the repo's machine
   const extraSkills: string[] = Array.isArray(req.body?.extra_skills) ? req.body.extra_skills.map(String) : [];
 
+  // SINK: a bootstrapped remote owns its own tasks — hand the spec to its tdsp and
+  // let IT create the task (worktree + session + manifest) on itself. This
+  // controller does NOT record the task; it surfaces via /api/fleet. A remote that
+  // isn't bootstrapped yet falls through to the legacy in-process path below.
+  if (host && host.kind !== "local" && host.tdsp_bin) {
+    const spec = { mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url, base: base_branch, title, prompt: prompt || null, skills: extraSkills };
+    const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
+    const out = await runTdsp(host, ["create", b64]);
+    const result = parseNodeResult(out.stdout);
+    if (!result) return res.status(502).json({ error: `node dispatch failed: ${(out.stderr || "no result").slice(0, 300)}` });
+    if (result.ok) return res.json({ id: result.id, session: result.session, work_branch: result.workBranch, node: host.id });
+    if (result.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: (result.missing || []).join(", ") }) });
+    return res.status(500).json({ error: result.message || result.error });
+  }
+
+  // local host, or a remote not yet bootstrapped: dispatch in-process on its Runner
   const r = await createRepoTask(
-    repoTaskEnvFor(runner),
+    repoTaskEnvFor(runnerFor(host as Host)),
     { id: repo.id, name: repo.name, mirror_path: repo.mirror_path },
     { baseBranch: base_branch, title, prompt, extraSkills },
   );
@@ -414,6 +389,17 @@ app.post("/api/tasks/local", async (req, res) => {
     : (db.prepare("SELECT * FROM hosts WHERE kind='local'").get() as Host | undefined);
   if (!host) return res.status(404).json({ error: tr(lang, "notFound") });
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+
+  // SINK: a bootstrapped remote opens the shell on itself (it resolves the cwd
+  // against its OWN home and owns the record). This controller doesn't record it.
+  if (host.kind !== "local" && host.tdsp_bin) {
+    const out = await runTdsp(host, ["create-local", "--cwd", String(req.body?.cwd ?? ""), "--title", String(req.body?.title ?? "")]);
+    const result = parseNodeResult(out.stdout);
+    if (!result) return res.status(502).json({ error: `node dispatch failed: ${(out.stderr || "no result").slice(0, 300)}` });
+    if (result.ok) return res.json({ id: result.id, session: result.session, node: host.id });
+    if (result.error === "cwdMissing") return res.status(400).json({ error: tr(lang, "task.cwdMissing", { cwd: String(req.body?.cwd ?? "") }) });
+    return res.status(500).json({ error: result.message || result.error });
+  }
 
   const runner = runnerFor(host);
   const home = host.kind === "local" ? os.homedir() : (await runner.exec("sh", ["-c", 'echo "$HOME"']).catch(() => "")).trim();
@@ -574,6 +560,29 @@ function nodeListFetch(t: FleetTarget): Promise<string> {
     timeout: 8000,
     maxBuffer: 64 * 1024 * 1024,
   }).then(({ stdout }) => stdout);
+}
+
+/** POSIX single-quote for the remote shell (ssh joins argv into one command). */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// Invoke a verb on a bootstrapped node's tdsp: `ssh <target> <bin> <args…>`.
+// Args are shell-quoted for the remote shell. The one-shot create verbs exit 1
+// on a failed dispatch but still print their JSON result to stdout, so we capture
+// stdout in BOTH the success and error cases and let the caller parse it.
+function runTdsp(host: Host, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  const remote = [host.tdsp_bin as string, ...args].map(shq).join(" ");
+  return pexecFile(SSH_BIN, [...SSH_BASE_ARGS, host.target, remote], { timeout: 120000, maxBuffer: 64 * 1024 * 1024 })
+    .then(({ stdout, stderr }) => ({ ok: true, stdout: stdout || "", stderr: stderr || "" }))
+    .catch((e) => ({ ok: false, stdout: e?.stdout || "", stderr: e?.stderr || String(e?.message || e) }));
+}
+
+// Parse the trailing JSON line a tdsp verb prints (it may log before it). Returns
+// null if there's no parseable result (e.g. ssh failed before tdsp ran).
+function parseNodeResult(stdout: string): any | null {
+  const line = stdout.trim().split("\n").pop() || "";
+  try { return JSON.parse(line); } catch { return null; }
 }
 
 // One glass: every node's tasks read from its OWN truth. The local node comes
