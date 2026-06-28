@@ -64,6 +64,8 @@
       "dialog.cancel": "取消",
       "dialog.ok": "确定",
       "common.delete": "删除",
+      "common.stop": "停止",
+      "task.stopConfirm": "停止该节点上的这个任务？",
 
       // repo modal
       "repo.modalTitle": "新建仓库",
@@ -163,6 +165,8 @@
       "host.unreachable": "不可达",
       "host.version": "版本不匹配，请升级该节点",
       "host.error": "读取失败",
+      "node.group": "节点任务",
+      "node.none": "该节点暂无任务",
       "host.emptyTitle": "还没有机器",
       "host.emptyHintPre": "添加一台可 SSH 的远程机",
       "host.emptyHintPost": "在网页里操作它",
@@ -221,6 +225,8 @@
       "dialog.cancel": "Cancel",
       "dialog.ok": "OK",
       "common.delete": "Delete",
+      "common.stop": "Stop",
+      "task.stopConfirm": "Stop this task on the node?",
 
       "repo.modalTitle": "New repository",
       "repo.namePh": "Name (e.g. ug)",
@@ -311,6 +317,8 @@
       "host.unreachable": "unreachable",
       "host.version": "version mismatch — upgrade this node",
       "host.error": "read failed",
+      "node.group": "Node tasks",
+      "node.none": "no tasks on this node",
       "host.emptyTitle": "No machines yet",
       "host.emptyHintPre": "Add a remote machine you can SSH into",
       "host.emptyHintPost": "to operate it from the browser",

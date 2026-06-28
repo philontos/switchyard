@@ -48,6 +48,8 @@ function fakeDeps(db: Database.Database) {
   let err = "";
   let served = false;
   const createCalls: { cwd?: string | null; title?: string | null }[] = [];
+  const repoCalls: any[] = [];
+  const stopCalls: number[] = [];
   return {
     deps: {
       db,
@@ -64,8 +66,18 @@ function fakeDeps(db: Database.Database) {
         createCalls.push(opts);
         return { ok: true, id: 99, session: "tdsp-x-99-local-y" };
       },
+      createRepo: async (spec: any) => {
+        repoCalls.push(spec);
+        return { ok: true as const, id: 77, session: "tdsp-x-77-sw-t", workBranch: "feat/77-t" };
+      },
+      stop: async (id: number) => {
+        stopCalls.push(id);
+        return { ok: true as const };
+      },
     },
     createCalls,
+    repoCalls,
+    stopCalls,
     get out() {
       return out;
     },
@@ -120,6 +132,52 @@ test("runCli create-local supports --flag=value form too", async () => {
   const f = fakeDeps(seed());
   await runCli(["create-local", "--cwd=/tmp/y", "--title=hi there"], f.deps);
   assert.deepEqual(f.createCalls[0], { cwd: "/tmp/y", title: "hi there" });
+});
+
+// `tdsp create` is the repo-dispatch sink: A base64-encodes the task spec (so a
+// prompt with newlines/quotes survives ssh argv) and the node decodes + runs it.
+test("runCli create decodes the base64 spec, invokes createRepo, prints JSON, exits 0", async () => {
+  const f = fakeDeps(seed());
+  const spec = { mirror: "/d/mirrors/5-sw.git", name: "sw", git_url: "g", base: "main", title: "fix", prompt: "line1\nline2", skills: ["dispatcher:tdd"] };
+  const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
+  const code = await runCli(["create", b64], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.repoCalls[0], spec, "the full spec (incl. multiline prompt) round-trips");
+  const parsed = JSON.parse(f.out);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.id, 77);
+});
+
+test("runCli create exits 1 and reports an error when the spec is not valid base64 JSON", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["create", "@@not-base64-json@@"], f.deps);
+  assert.equal(code, 1);
+  assert.match(f.out + f.err, /spec|invalid|JSON/i);
+});
+
+test("runCli create exits 1 and prints the error when dispatch fails", async () => {
+  const f = fakeDeps(seed());
+  f.deps.createRepo = async () => ({ ok: false as const, error: "skillsMissing", missing: ["dispatcher:x"] });
+  const b64 = Buffer.from(JSON.stringify({ mirror: "/m", name: "n", git_url: "g", base: "main", title: "t" })).toString("base64");
+  const code = await runCli(["create", b64], f.deps);
+  assert.equal(code, 1);
+  assert.match(f.out, /skillsMissing/);
+});
+
+test("runCli stop parses the id, invokes stop, prints JSON, exits 0", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["stop", "42"], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.stopCalls, [42]);
+  assert.equal(JSON.parse(f.out).ok, true);
+});
+
+test("runCli stop rejects a non-numeric id with exit 1", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["stop", "abc"], f.deps);
+  assert.equal(code, 1);
+  assert.match(f.out, /invalid id/);
+  assert.deepEqual(f.stopCalls, []);
 });
 
 test("runCli create-local exits 1 and prints the error when creation fails", async () => {

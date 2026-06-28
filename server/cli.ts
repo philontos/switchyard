@@ -4,7 +4,20 @@
 // sole authority for its own tasks; these read/return that local truth.
 import type Database from "better-sqlite3";
 import type { Task } from "./db.js";
-import type { CreateLocalOpts, CreateLocalResult } from "./createtask.js";
+import type { CreateLocalOpts, CreateLocalResult, CreateRepoResult, StopResult } from "./createtask.js";
+
+// The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
+// prompt and skill list survive intact). The node registers the repo by `mirror`
+// and dispatches the task on itself.
+export interface CreateRepoSpec {
+  mirror: string;
+  name: string;
+  git_url: string;
+  base: string;
+  title: string;
+  prompt?: string | null;
+  skills?: string[];
+}
 
 type DB = Database.Database;
 
@@ -87,6 +100,8 @@ export interface CliDeps {
   err: (s: string) => void;
   serve: () => void | Promise<void>;
   createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
+  createRepo: (spec: CreateRepoSpec) => Promise<CreateRepoResult>;
+  stop: (id: number) => Promise<StopResult>;
 }
 
 // Minimal flag parser: supports `--key value` and `--key=value`. Bare flags
@@ -119,8 +134,32 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(r));
       return r.ok ? 0 : 1;
     }
+    case "create": {
+      let spec: CreateRepoSpec;
+      try {
+        spec = JSON.parse(Buffer.from(argv[1] ?? "", "base64").toString("utf8")) as CreateRepoSpec;
+        if (!spec || typeof spec.mirror !== "string") throw new Error("missing fields");
+      } catch {
+        deps.err("create: expected a base64-encoded JSON spec");
+        deps.out(JSON.stringify({ ok: false, error: "invalid spec" }));
+        return 1;
+      }
+      const r = await deps.createRepo(spec);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
+    case "stop": {
+      const id = Number(argv[1]);
+      if (!Number.isInteger(id)) {
+        deps.out(JSON.stringify({ ok: false, error: "invalid id" }));
+        return 1;
+      }
+      const r = await deps.stop(id);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
     default:
-      deps.err(`Usage: tdsp <serve|list|create-local>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|create-local|create|stop>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

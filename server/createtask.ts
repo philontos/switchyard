@@ -76,6 +76,30 @@ export async function createLocalTask(env: LocalTaskEnv, opts: CreateLocalOpts):
   return { ok: true, id, session };
 }
 
+// ---------- stop ----------
+export interface StopTaskEnv {
+  db: DB;
+  killSession(session: string): Promise<void>;
+  writeManifest(id: number): void | Promise<void>;
+}
+
+export type StopResult = { ok: true } | { ok: false; error: "notFound" };
+
+/**
+ * Stop one of THIS node's tasks: kill its tmux session, mark it cleaned, and
+ * re-write the manifest so the durable record reflects the stop. The owning node
+ * runs this (directly, or driven by `ssh <node> tdsp stop <id>`). The worktree is
+ * kept — same as the existing archive action.
+ */
+export async function stopTask(env: StopTaskEnv, id: number): Promise<StopResult> {
+  const task = env.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task | undefined;
+  if (!task) return { ok: false, error: "notFound" };
+  await env.killSession(task.session);
+  env.db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(id);
+  await env.writeManifest(id);
+  return { ok: true };
+}
+
 // ---------- repo task ----------
 // A skill delivered into a task's worktree: identity, display name, source dir.
 export interface SkillRef {

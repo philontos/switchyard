@@ -10,12 +10,26 @@ import type { Task } from "./db.ts";
 import {
   createLocalTask,
   createRepoTask,
+  stopTask,
   type LocalTaskEnv,
   type RepoTaskEnv,
   type RepoRef,
 } from "./createtask.ts";
 
 const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
+
+// bare in-memory db + a seeded running task, for the stopTask tests
+function seedDb() {
+  const db = new Database(":memory:");
+  initSchema(db, opts);
+  return db;
+}
+function insertTask(db: Database.Database, title: string) {
+  const info = db
+    .prepare("INSERT INTO tasks (repo_id, base_branch, work_branch, title, worktree_path, session, status) VALUES (1,'m',?,?, '/wt/x', ?, 'running')")
+    .run(`feat/x-${title}`, title, `tdsp-1-r-${title}`);
+  return db.prepare("SELECT * FROM tasks WHERE id=?").get(Number(info.lastInsertRowid)) as { id: number; session: string };
+}
 
 function makeEnv(overrides: Partial<LocalTaskEnv> = {}) {
   const db = new Database(":memory:");
@@ -112,6 +126,34 @@ test("createLocalTask marks the task errored (and manifests it) when the shell f
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------- stopTask ----------
+// A node stops one of its own tasks: kill the tmux session, mark it cleaned, and
+// re-write the manifest so the durable record reflects the new state.
+test("stopTask kills the session, marks the task cleaned, and re-manifests it", async () => {
+  const db = seedDb();
+  const task = insertTask(db, "running-one");
+  const killed: string[] = [];
+  const manifested: number[] = [];
+  const r = await stopTask(
+    { db, killSession: async (s) => { killed.push(s); }, writeManifest: (id) => { manifested.push(id); } },
+    task.id,
+  );
+  assert.equal(r.ok, true);
+  assert.deepEqual(killed, [task.session], "the task's own session is killed");
+  assert.deepEqual(manifested, [task.id]);
+  assert.equal((db.prepare("SELECT status FROM tasks WHERE id=?").get(task.id) as { status: string }).status, "cleaned");
+});
+
+test("stopTask reports notFound for an unknown id and does nothing", async () => {
+  const db = seedDb();
+  let killed = 0;
+  const r = await stopTask({ db, killSession: async () => { killed++; }, writeManifest: () => {} }, 999);
+  assert.equal(r.ok, false);
+  if (r.ok) return;
+  assert.equal(r.error, "notFound");
+  assert.equal(killed, 0);
 });
 
 // ---------- createRepoTask ----------
