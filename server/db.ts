@@ -59,6 +59,17 @@ export interface Task {
   host_id: number | null;    // local tasks: the machine they run on
   cwd: string | null;        // local tasks: working dir
   claude_session: string | null;  // Claude session id (UUID), captured by the SessionStart hook
+  provider_id: number | null;      // alternate model backend; NULL == default claude login
+}
+
+export interface Provider {
+  id: number;
+  name: string;
+  base_url: string | null;        // ANTHROPIC_BASE_URL
+  auth_token: string | null;      // ANTHROPIC_AUTH_TOKEN
+  model: string | null;           // ANTHROPIC_MODEL
+  small_fast_model: string | null; // ANTHROPIC_SMALL_FAST_MODEL
+  created_at: string;
 }
 
 export interface Host {

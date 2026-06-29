@@ -10,6 +10,7 @@ import { state } from "./state.js";
 import { openPty, disposePty, prunePanes, setClaudeSession,
          openPending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
 import { rerender, expandRepo, loadFleet } from "./hosts.js";
+import { refreshProviders, selectedProviderId } from "./providers.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 // when set, the dispatch modal is in "node mode": dispatch to a remote node's OWN
@@ -61,9 +62,17 @@ export function openTaskModal(repoId) {
   taskRepoId = repoId;
   $("tm-repo").textContent = repo.name;
   $("t-title").value = ""; $("t-prompt").value = "";   // fresh form each open
+  $("prov-panel").style.display = "none";              // collapse the manage panel
+  // The model-backend picker is node-local: it only applies when THIS node runs
+  // the task on itself (a repo on the local machine). A repo that lives on a
+  // remote node is configured on that node — hide the picker here, matching the
+  // backend, which ignores provider for any non-local dispatch.
+  const onLocalNode = state.hostsById[repo.host_id]?.kind === "local";
+  $("t-provider-sec").style.display = onLocalNode ? "" : "none";
   $("task-modal").style.display = "flex";
   loadBranches();
   loadDispatchOptions();
+  if (onLocalNode) refreshProviders();                 // fill the backend picker (keeps the last pick)
   setTimeout(() => $("t-title").focus(), 30);
 }
 export function closeTaskModal() { $("task-modal").style.display = "none"; nodeTask = null; }
@@ -80,6 +89,8 @@ export function openNodeTaskModal(hostId, repoId) {
   const hostName = state.hostsById[hostId]?.name || hostId;
   $("tm-repo").textContent = `${repo.name} @ ${hostName}`;
   $("t-title").value = ""; $("t-prompt").value = "";
+  $("prov-panel").style.display = "none";
+  $("t-provider-sec").style.display = "none";   // node owns its own claude login — picker N/A
   $("task-modal").style.display = "flex";
   Selects["t-base"].setOptions([{ value: repo.default_branch, label: repo.default_branch }], repo.default_branch);
   loadDispatchOptions();
@@ -166,10 +177,14 @@ async function addNodeTask() {
 
 export async function addTask() {
   if (nodeTask) return addNodeTask();
+  // provider only travels when the picker is shown (local-node dispatch); a hidden
+  // picker (remote repo) sends null, matching the backend's local-only gate.
+  const providerShown = $("t-provider-sec").style.display !== "none";
   const body = {
     repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
     extra_skills: selectedExtraSkills(),
+    provider_id: providerShown ? selectedProviderId() : null,   // null == default claude login
   };
   if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
   // Spin up BOTH placeholders before clearing the form (so the title can label them):

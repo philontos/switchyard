@@ -16,6 +16,7 @@ import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost,
 import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal } from "./tasks.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
 import { initReorder } from "./reorder.js";
+import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./providers.js";
 
 // ---- inline-onclick bridge ----
 // Every function referenced by an onclick="…" attribute (static markup in
@@ -33,6 +34,8 @@ Object.assign(window, {
   toggleRepo, toggleArchived, toggleHostMenu, bootstrapHost, connectNode, stopNodeTask, addNodeShell,
   // skills (official-plugin install)
   openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList,
+  // providers (alternate model backends — picker + inline add/remove panel)
+  toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider,
 });
 
 // global safety net: surface uncaught API errors as toasts
@@ -54,6 +57,9 @@ I18N.onChange = () => {
   renderThemeToggle();   // its title is localized
   const sel = Selects["t-base"];
   if (sel) { sel.ph = t("task.branchPh"); sel.repaint && sel.repaint(); }
+  const pv = Selects["t-provider"];
+  if (pv) { pv.ph = t("provider.default"); }
+  repaintProviders();   // re-localize the "Anthropic 默认" option + manage list
   loadRepos();
   loadHosts();
   loadTasks();
@@ -75,8 +81,10 @@ initReorder();           // long-press drag-to-reorder of repo task cards (sessi
 $("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
 csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", label: "mosh" }]);
+$("t-provider").dataset.ph = t("provider.default");   // model-backend picker
+csMount("t-provider", onProviderChange);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
-Promise.allSettled([loadRepos(), loadHosts(), loadTasks()]).then(dismissBoot);
+Promise.allSettled([loadRepos(), loadHosts(), loadTasks(), refreshProviders()]).then(dismissBoot);
 setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
 setInterval(loadTasks, 4000);
 setInterval(loadHosts, 5000);   // refresh machine liveness dots

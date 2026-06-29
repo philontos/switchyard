@@ -47,6 +47,20 @@ CREATE TABLE IF NOT EXISTS hosts (
   session TEXT DEFAULT 'main',    -- legacy/unused: shells are now per-machine task rows (kind='local'), not one named session per host
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- alternate model backends for claude. A task with provider_id set launches
+-- claude with these as ANTHROPIC_* env vars (base_url/auth_token/model/…), so
+-- the same Claude Code TUI drives e.g. GLM via its Anthropic-compatible
+-- endpoint. provider_id NULL on a task == the machine's default claude login.
+CREATE TABLE IF NOT EXISTS providers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,             -- display name, e.g. "GLM-4.6"
+  base_url TEXT,                  -- ANTHROPIC_BASE_URL (the compatible endpoint)
+  auth_token TEXT,                -- ANTHROPIC_AUTH_TOKEN (the provider's key)
+  model TEXT,                     -- ANTHROPIC_MODEL
+  small_fast_model TEXT,          -- ANTHROPIC_SMALL_FAST_MODEL (background/title model)
+  created_at TEXT DEFAULT (datetime('now'))
+);
 `;
 
 /** Add a column if it's missing — backfills schema drift on pre-existing DBs. */
@@ -93,6 +107,7 @@ function reconcileColumns(db: DB) {
   addColumn(db, "tasks", "host_id", "INTEGER");                // local tasks: which machine
   addColumn(db, "tasks", "cwd", "TEXT");                       // local tasks: working dir
   addColumn(db, "tasks", "claude_session", "TEXT");           // Claude session id, captured by the SessionStart hook
+  addColumn(db, "tasks", "provider_id", "INTEGER");           // alternate model backend; NULL == default claude login
 }
 
 /**

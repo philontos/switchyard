@@ -138,7 +138,9 @@ export interface RepoTaskEnv {
     skills: SkillRef[];
   }): Promise<void>;
   // Launch claude in the worktree (opening = freeform prompt + skills line, or null).
-  startSession(session: string, worktree: string, opening: string | null): Promise<void>;
+  // env (optional) injects ANTHROPIC_* vars to point claude at an alternate model
+  // backend; omitted/undefined → the machine's default claude login.
+  startSession(session: string, worktree: string, opening: string | null, env?: Record<string, string>): Promise<void>;
   // Tear down a partially-built worktree after a failed dispatch.
   removeWorktree(mirror: string, worktree: string, workBranch: string): Promise<void>;
 }
@@ -148,6 +150,12 @@ export interface CreateRepoOpts {
   title: string;
   prompt?: string | null;
   extraSkills?: string[];
+  // Alternate model backend (optional). providerId is recorded on the task (so
+  // resume can re-inject the same backend); env is the resolved ANTHROPIC_* vars
+  // injected when claude launches. Both omitted → default claude login. Only the
+  // in-process caller sets these; the CLI/fleet caller leaves them undefined.
+  providerId?: number | null;
+  env?: Record<string, string>;
 }
 
 export type CreateRepoResult =
@@ -171,9 +179,9 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
 
   const info = env.db
     .prepare(
-      "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, skills) VALUES (?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, skills, provider_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
     )
-    .run(repo.id, opts.baseBranch, "", opts.title, opts.prompt || null, "", "", "creating", JSON.stringify(found.map((f) => f.key)));
+    .run(repo.id, opts.baseBranch, "", opts.title, opts.prompt || null, "", "", "creating", JSON.stringify(found.map((f) => f.key)), opts.providerId ?? null);
   const id = Number(info.lastInsertRowid);
   const s = slug(opts.title);
   const workBranch = `feat/${id}-${s}`;
@@ -185,7 +193,7 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
     // opening = freeform prompt + the "skills delivered" line; pass it UNTRIMMED
     // (only the null-decision uses trim) to match the prior HTTP behavior exactly.
     const opening = (opts.prompt || "") + skillsLine(found.map((f) => f.name));
-    await env.startSession(session, worktree, opening.trim() ? opening : null);
+    await env.startSession(session, worktree, opening.trim() ? opening : null, opts.env);
     env.db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?").run(workBranch, worktree, session, id);
     await env.writeManifest(id);
     return { ok: true, id, session, workBranch };

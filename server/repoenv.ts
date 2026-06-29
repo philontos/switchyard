@@ -88,7 +88,7 @@ export function buildRepoTaskEnv(opts: RepoEnvOpts): RepoTaskEnv {
     writeManifest: opts.writeManifest,
     resolveSkills: (keys) => resolveSkills(keys, defaultSources()),
     setupWorktree: setupWorktreeOn(opts.runner, opts.ns),
-    startSession: (session, worktree, opening) => startSession(opts.runner, session, worktree, opening),
+    startSession: (session, worktree, opening, env) => startSession(opts.runner, session, worktree, opening, { env }),
     removeWorktree: (mirror, worktree, workBranch) => removeWorktree(opts.runner, mirror, worktree, workBranch).then(() => {}),
   };
 }

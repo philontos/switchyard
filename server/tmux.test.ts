@@ -87,3 +87,36 @@ test("startSession({ continue: true }) runs claude --continue and ignores any pr
   await startSession(runner, "tdsp-1-x", "/wt", "the original opening prompt", { continue: true });
   assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "claude", "--continue"] });
 });
+
+test("startSession injects opts.env as an `env K=V ... claude` prefix (alternate provider)", async () => {
+  const { runner, calls } = fakeRunner();
+  // tmux new-session won't carry arbitrary env into the session, so the vars are
+  // set ON the claude process via a prepended `env` command, BEFORE the prompt.
+  await startSession(runner, "tdsp-1-x", "/wt", "do it", {
+    env: { ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic", ANTHROPIC_MODEL: "glm-4.6" },
+  });
+  assert.deepEqual(calls[0], { file: "tmux", args: [
+    "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
+    "env", "ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic", "ANTHROPIC_MODEL=glm-4.6",
+    "claude", "do it",
+  ] });
+});
+
+test("startSession({ continue, env }) injects env before claude --continue (resume keeps the backend)", async () => {
+  const { runner, calls } = fakeRunner();
+  await startSession(runner, "tdsp-1-x", "/wt", null, {
+    continue: true, env: { ANTHROPIC_AUTH_TOKEN: "tok" },
+  });
+  assert.deepEqual(calls[0], { file: "tmux", args: [
+    "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
+    "env", "ANTHROPIC_AUTH_TOKEN=tok", "claude", "--continue",
+  ] });
+});
+
+test("startSession drops empty/blank env values (no `env` prefix when nothing to inject)", async () => {
+  const { runner, calls } = fakeRunner();
+  // a provider that only fills some fields must not emit empty K= pairs, and an
+  // all-empty env must launch claude exactly as the no-env path does.
+  await startSession(runner, "tdsp-1-x", "/wt", "go", { env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_MODEL: "" } });
+  assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "claude", "go"] });
+});

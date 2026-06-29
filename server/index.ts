@@ -7,7 +7,7 @@ import { attachCommand } from "./attach.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { db, Repo, Task, Host } from "./db.js";
+import { db, Repo, Task, Host, Provider } from "./db.js";
 import { renameTask } from "./tasks.js";
 import {
   initMirror, fetchMirror, listBranches, addWorktreeFromBranch, removeWorktree,
@@ -68,6 +68,70 @@ app.use(express.json());
 const getRepo = db.prepare("SELECT * FROM repos WHERE id = ?");
 const getTask = db.prepare("SELECT * FROM tasks WHERE id = ?");
 const getHost = db.prepare("SELECT * FROM hosts WHERE id = ?");
+const getProvider = db.prepare("SELECT * FROM providers WHERE id = ?");
+
+// trim a body field to a non-empty string, or null — providers store the
+// optional ANTHROPIC_* values, and "" must round-trip to NULL (== "unset").
+const str = (v: unknown): string | null => {
+  const s = (v ?? "").toString().trim();
+  return s || null;
+};
+
+// Map a provider row to the env claude is launched with. Only set the vars that
+// are present, so a provider can override just the model, just the endpoint, etc.
+// Returns undefined when there's nothing to inject (→ default claude login).
+function providerEnv(p?: Provider): Record<string, string> | undefined {
+  if (!p) return undefined;
+  const env: Record<string, string> = {};
+  if (p.base_url) env.ANTHROPIC_BASE_URL = p.base_url;
+  if (p.auth_token) env.ANTHROPIC_AUTH_TOKEN = p.auth_token;
+  if (p.model) env.ANTHROPIC_MODEL = p.model;
+  if (p.small_fast_model) env.ANTHROPIC_SMALL_FAST_MODEL = p.small_fast_model;
+  return Object.keys(env).length ? env : undefined;
+}
+
+// Format + reachability gate for a provider, shared by the test endpoint (green
+// light) and the create endpoint (enforced on save). The reachability probe
+// mirrors EXACTLY how claude will call the backend at runtime — same
+// `Authorization: Bearer <token>` and same `<base_url>/v1/messages` path we
+// inject as ANTHROPIC_AUTH_TOKEN/ANTHROPIC_BASE_URL — so a green here means
+// claude can actually reach the model. A one-token ping keeps it cheap.
+async function checkProvider(body: any): Promise<{ ok: true } | { ok: false; error: string }> {
+  const baseUrl = str(body?.base_url);
+  const token = str(body?.auth_token);
+  const model = str(body?.model);
+  if (!baseUrl) return { ok: false, error: "base_url required" };
+  let u: URL;
+  try { u = new URL(baseUrl); } catch { return { ok: false, error: "invalid base_url" }; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return { ok: false, error: "base_url must be http(s)" };
+  if (!token) return { ok: false, error: "auth_token required" };
+  if (!model) return { ok: false, error: "model required" };
+
+  const endpoint = baseUrl.replace(/\/+$/, "") + "/v1/messages";
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const r = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
+      signal: ctl.signal,
+    });
+    if (r.ok) return { ok: true };
+    // surface the backend's own error message so the user can act on it
+    let detail = "";
+    try { const j: any = await r.json(); detail = j?.error?.message || j?.message || ""; } catch { /* non-JSON body */ }
+    return { ok: false, error: `HTTP ${r.status}${detail ? ": " + detail : ""}` };
+  } catch (e: any) {
+    return { ok: false, error: e?.name === "AbortError" ? "timeout" : String(e?.message || e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // the Runner for a task's machine — local or remote(ssh/mosh)
 function taskRunner(task: Task) {
@@ -338,7 +402,7 @@ function repoTaskEnvFor(runner: Runner): RepoTaskEnv {
 }
 
 app.post("/api/tasks", async (req, res) => {
-  const { repo_id, base_branch, title, prompt } = req.body ?? {};
+  const { repo_id, base_branch, title, prompt, provider_id } = req.body ?? {};
   const lang = langFromReq(req);
   if (!repo_id || !base_branch || !title) {
     return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
@@ -348,12 +412,24 @@ app.post("/api/tasks", async (req, res) => {
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
   const host = getHost.get(repo.host_id) as Host | undefined;
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  // Alternate model backend (optional, node-local). A provider is THIS node's own
+  // config and only ever applies to tasks THIS node runs on itself — never pushed
+  // across the wire. So we resolve it only for a local-node dispatch; any remote
+  // (bootstrapped or not) owns its own claude login and is configured on its own
+  // node. An unknown id falls back to the default login rather than failing.
+  const provider = host?.kind === "local" && provider_id
+    ? (getProvider.get(provider_id) as Provider | undefined)
+    : undefined;
   const extraSkills: string[] = Array.isArray(req.body?.extra_skills) ? req.body.extra_skills.map(String) : [];
 
   // SINK: a bootstrapped remote owns its own tasks — hand the spec to its tdsp and
-  // let IT create the task (worktree + session + manifest) on itself. This
-  // controller does NOT record the task; it surfaces via /api/fleet. A remote that
-  // isn't bootstrapped yet falls through to the legacy in-process path below.
+  // let IT create the task (worktree + session + manifest) on itself. This node
+  // does NOT record the task; it surfaces via /api/fleet. A remote that isn't
+  // bootstrapped yet falls through to the legacy in-process path below.
+  // The model backend (provider) is node-local and stays out of the spec: a node
+  // never configures another node's model — the target runs on its own claude
+  // login, and is given a provider on its own node (where `provider` above is
+  // already undefined for any non-local dispatch).
   if (host && host.kind !== "local" && host.tdsp_bin) {
     const spec = { mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url, base: base_branch, title, prompt: prompt || null, skills: extraSkills };
     const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
@@ -365,11 +441,13 @@ app.post("/api/tasks", async (req, res) => {
     return res.status(500).json({ error: result.message || result.error });
   }
 
-  // local host, or a remote not yet bootstrapped: dispatch in-process on its Runner
+  // local host, or a remote not yet bootstrapped: dispatch in-process on its Runner.
+  // The provider (if any) is recorded on the task and injected as ANTHROPIC_* env
+  // when claude launches; resume re-injects it from the recorded provider_id.
   const r = await createRepoTask(
     repoTaskEnvFor(runnerFor(host as Host)),
     { id: repo.id, name: repo.name, mirror_path: repo.mirror_path },
-    { baseBranch: base_branch, title, prompt, extraSkills },
+    { baseBranch: base_branch, title, prompt, extraSkills, providerId: provider ? provider.id : null, env: providerEnv(provider) },
   );
   if (r.ok) return res.json({ id: r.id, session: r.session, work_branch: r.workBranch });
   if (r.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: r.missing.join(", ") }) });
@@ -517,7 +595,9 @@ app.post("/api/tasks/:id/resume", async (req, res) => {
   }
   try {
     const alreadyAlive = await hasSession(runner, task.session).catch(() => false);
-    if (!alreadyAlive) await startSession(runner, task.session, task.worktree_path, null, { continue: true });
+    // resume on the same model backend the task was created with
+    const provider = task.provider_id ? (getProvider.get(task.provider_id) as Provider | undefined) : undefined;
+    if (!alreadyAlive) await startSession(runner, task.session, task.worktree_path, null, { continue: true, env: providerEnv(provider) });
     db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(task.id);
     syncTaskManifest(task.id);
     res.json({ ok: true, alreadyAlive });
@@ -762,6 +842,40 @@ app.delete("/api/hosts/:id", (req, res) => {
   const n = (db.prepare("SELECT count(*) AS c FROM repos WHERE host_id=?").get(req.params.id) as { c: number }).c;
   if (n > 0) return res.status(409).json({ error: "remove this machine's repos first" });
   db.prepare("DELETE FROM hosts WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- providers (alternate model backends for claude) ----------
+app.get("/api/providers", (_req, res) => {
+  res.json(db.prepare("SELECT * FROM providers ORDER BY id DESC").all());
+});
+
+// format + reachability check WITHOUT saving — drives the web's green/red light.
+// 200 == reachable; 400 carries the reason so the UI can show it.
+app.post("/api/providers/test", async (req, res) => {
+  const r = await checkProvider(req.body ?? {});
+  if (r.ok) return res.json({ ok: true });
+  res.status(400).json({ error: r.error });
+});
+
+app.post("/api/providers", async (req, res) => {
+  const { name } = req.body ?? {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: "name required" });
+  // re-run the same gate on save, so only a reachable provider can ever land in
+  // the DB even if a client skips the test button.
+  const chk = await checkProvider(req.body ?? {});
+  if (!chk.ok) return res.status(400).json({ error: chk.error });
+  const info = db.prepare(
+    "INSERT INTO providers (name, base_url, auth_token, model, small_fast_model) VALUES (?,?,?,?,?)"
+  ).run(String(name).trim(), str(req.body?.base_url), str(req.body?.auth_token), str(req.body?.model), str(req.body?.small_fast_model));
+  res.json({ id: Number(info.lastInsertRowid) });
+});
+
+app.delete("/api/providers/:id", (req, res) => {
+  // tasks that used this provider fall back to the default claude login on their
+  // next resume (provider_id -> NULL), rather than dangling at a gone row.
+  db.prepare("UPDATE tasks SET provider_id=NULL WHERE provider_id=?").run(req.params.id);
+  db.prepare("DELETE FROM providers WHERE id=?").run(req.params.id);
   res.json({ ok: true });
 });
 

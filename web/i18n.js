@@ -95,6 +95,23 @@
       "cs.empty": "无可选项",
       "cs.loading": "加载中…",
 
+      // model backends (alternate providers for claude, e.g. GLM)
+      "provider.label": "模型后端",
+      "provider.default": "Anthropic 默认",
+      "provider.manage": "管理模型后端",
+      "provider.namePh": "名称，如 GLM-4.6",
+      "provider.urlPh": "Base URL（Anthropic 兼容端点）",
+      "provider.tokenPh": "API Key / Token",
+      "provider.modelPh": "模型名，如 glm-4.6",
+      "provider.fastPh": "小/快模型（可选），如 glm-4.5-air",
+      "provider.test": "测试连接",
+      "provider.add": "保存",
+      "provider.testing": "测试中…",
+      "provider.reachable": "✓ 可达",
+      "provider.added": "已添加模型后端",
+      "provider.none": "暂无模型后端",
+      "provider.hint": "先测试连接，绿灯通过后才能保存。探测方式与 claude 运行时一致。",
+
       // repo card / empty state
       "repo.delTitle": "删除仓库",
       "repo.menu": "仓库操作",
@@ -255,6 +272,23 @@
       "cs.placeholder": "Select…",
       "cs.empty": "No options",
       "cs.loading": "Loading…",
+
+      // model backends (alternate providers for claude, e.g. GLM)
+      "provider.label": "Model backend",
+      "provider.default": "Anthropic (default)",
+      "provider.manage": "Manage model backends",
+      "provider.namePh": "Name, e.g. GLM-4.6",
+      "provider.urlPh": "Base URL (Anthropic-compatible endpoint)",
+      "provider.tokenPh": "API Key / Token",
+      "provider.modelPh": "Model, e.g. glm-4.6",
+      "provider.fastPh": "Small/fast model (optional), e.g. glm-4.5-air",
+      "provider.test": "Test",
+      "provider.add": "Save",
+      "provider.testing": "Testing…",
+      "provider.reachable": "✓ Reachable",
+      "provider.added": "Model backend added",
+      "provider.none": "No model backends yet",
+      "provider.hint": "Test first — Save unlocks only on a green check. The probe matches how claude calls the backend at runtime.",
 
       "repo.delTitle": "Delete repository",
       "repo.menu": "Repo actions",

@@ -58,6 +58,31 @@
     <textarea id="t-prompt" rows="3" data-i18n-ph="task.promptPh"></textarea>
     <label class="tm-lbl" data-i18n="task.extraSkills"></label>
     <div id="t-skills" class="skills-box"></div>
+    <!-- model backend: only meaningful for in-process dispatch (this controller
+         launches claude). Hidden in node mode — a bootstrapped remote owns its
+         own claude login, so the picker doesn't apply there. -->
+    <div id="t-provider-sec">
+      <label class="tm-lbl" data-i18n="provider.label"></label>
+      <div class="tm-prov">
+        <div id="t-provider" class="cs"></div>
+        <button type="button" class="prov-add-btn" data-i18n-title="provider.manage" onclick="toggleProviderPanel()">＋</button>
+      </div>
+      <div id="prov-panel" class="prov-panel" style="display:none">
+        <input id="pv-name" data-i18n-ph="provider.namePh" oninput="onPanelInput('name')" />
+        <input id="pv-url" data-i18n-ph="provider.urlPh" oninput="onPanelInput('url')" />
+        <input id="pv-token" data-i18n-ph="provider.tokenPh" oninput="onPanelInput('token')" />
+        <input id="pv-model" data-i18n-ph="provider.modelPh" oninput="onPanelInput('model')" />
+        <input id="pv-fast" data-i18n-ph="provider.fastPh" oninput="onPanelInput('fast')" />
+        <div class="pv-actions">
+          <span id="pv-status" class="pv-status"></span>
+          <span style="flex:1"></span>
+          <button id="pv-test" class="sec" data-i18n="provider.test" onclick="testProvider()"></button>
+          <button id="pv-add" class="primary" data-i18n="provider.add" onclick="addProvider()" disabled></button>
+        </div>
+        <div id="pv-list" class="pv-list"></div>
+        <div class="hint" style="margin-top:8px" data-i18n="provider.hint"></div>
+      </div>
+    </div>
     <div class="dlg-actions">
       <button class="sec" data-i18n="dialog.cancel" onclick="closeTaskModal()"></button>
       <button class="primary" data-i18n="task.submit" onclick="addTask()"></button>
