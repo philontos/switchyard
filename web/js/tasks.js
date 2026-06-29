@@ -63,11 +63,16 @@ export function openTaskModal(repoId) {
   $("tm-repo").textContent = repo.name;
   $("t-title").value = ""; $("t-prompt").value = "";   // fresh form each open
   $("prov-panel").style.display = "none";              // collapse the manage panel
-  $("t-provider-sec").style.display = "";              // in-process dispatch → backend picker applies
+  // The model-backend picker is node-local: it only applies when THIS node runs
+  // the task on itself (a repo on the local machine). A repo that lives on a
+  // remote node is configured on that node — hide the picker here, matching the
+  // backend, which ignores provider for any non-local dispatch.
+  const onLocalNode = state.hostsById[repo.host_id]?.kind === "local";
+  $("t-provider-sec").style.display = onLocalNode ? "" : "none";
   $("task-modal").style.display = "flex";
   loadBranches();
   loadDispatchOptions();
-  refreshProviders();                                  // fill the backend picker (keeps the last pick)
+  if (onLocalNode) refreshProviders();                 // fill the backend picker (keeps the last pick)
   setTimeout(() => $("t-title").focus(), 30);
 }
 export function closeTaskModal() { $("task-modal").style.display = "none"; nodeTask = null; }
@@ -172,11 +177,14 @@ async function addNodeTask() {
 
 export async function addTask() {
   if (nodeTask) return addNodeTask();
+  // provider only travels when the picker is shown (local-node dispatch); a hidden
+  // picker (remote repo) sends null, matching the backend's local-only gate.
+  const providerShown = $("t-provider-sec").style.display !== "none";
   const body = {
     repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
     extra_skills: selectedExtraSkills(),
-    provider_id: selectedProviderId(),   // null == default claude login
+    provider_id: providerShown ? selectedProviderId() : null,   // null == default claude login
   };
   if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
   // Spin up BOTH placeholders before clearing the form (so the title can label them):

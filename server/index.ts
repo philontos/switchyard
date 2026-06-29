@@ -407,23 +407,29 @@ app.post("/api/tasks", async (req, res) => {
   if (!repo_id || !base_branch || !title) {
     return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
   }
-  // alternate model backend (optional). An unknown id falls back to the default
-  // claude login rather than failing the dispatch.
-  const provider = provider_id ? (getProvider.get(provider_id) as Provider | undefined) : undefined;
   const repo = getRepo.get(repo_id) as Repo | undefined;
   if (!repo || !repo.mirror_path) return res.status(404).json({ error: tr(lang, "repo.notFound") });
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
   const host = getHost.get(repo.host_id) as Host | undefined;
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  // Alternate model backend (optional, node-local). A provider is THIS node's own
+  // config and only ever applies to tasks THIS node runs on itself — never pushed
+  // across the wire. So we resolve it only for a local-node dispatch; any remote
+  // (bootstrapped or not) owns its own claude login and is configured on its own
+  // node. An unknown id falls back to the default login rather than failing.
+  const provider = host?.kind === "local" && provider_id
+    ? (getProvider.get(provider_id) as Provider | undefined)
+    : undefined;
   const extraSkills: string[] = Array.isArray(req.body?.extra_skills) ? req.body.extra_skills.map(String) : [];
 
   // SINK: a bootstrapped remote owns its own tasks — hand the spec to its tdsp and
-  // let IT create the task (worktree + session + manifest) on itself. This
-  // controller does NOT record the task; it surfaces via /api/fleet. A remote that
-  // isn't bootstrapped yet falls through to the legacy in-process path below.
-  // NOTE: the model-backend override (provider) is controller-local — provider_id
-  // is a FK into THIS controller's providers table — so it is NOT threaded to the
-  // fleet path. A bootstrapped node runs the task on its own default claude login.
+  // let IT create the task (worktree + session + manifest) on itself. This node
+  // does NOT record the task; it surfaces via /api/fleet. A remote that isn't
+  // bootstrapped yet falls through to the legacy in-process path below.
+  // The model backend (provider) is node-local and stays out of the spec: a node
+  // never configures another node's model — the target runs on its own claude
+  // login, and is given a provider on its own node (where `provider` above is
+  // already undefined for any non-local dispatch).
   if (host && host.kind !== "local" && host.tdsp_bin) {
     const spec = { mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url, base: base_branch, title, prompt: prompt || null, skills: extraSkills };
     const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
