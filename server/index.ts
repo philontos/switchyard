@@ -23,7 +23,7 @@ import { repairWorktrees } from "./migrate.js";
 import { localRunner, runnerFor, sshForwardArgs, SSH_BASE_ARGS, type Runner } from "./runner.js";
 import { aggregateNodes } from "./cli.js";
 import { fleetTargets, tasksForHost, type FleetTarget } from "./fleet.js";
-import { bootstrapMachine } from "./bootstrap.js";
+import { bootstrapMachine, nodeLadderScript } from "./bootstrap.js";
 import net from "node:net";
 import { spawn as spawnChild, execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -771,6 +771,30 @@ app.post("/api/hosts/:id/bootstrap", async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: String(e?.message || e) });
   }
+});
+
+// Update a bootstrapped node's code to the latest, idempotently: `git pull` in its
+// canonical src pointer (which transparently follows a symlink to the machine's
+// own clone), then npm install. The node's tdsp picks up the new code on its very
+// next invocation — no restart needed for controller-driven commands.
+app.post("/api/hosts/:id/update", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.id) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const home = (await runnerFor(host).exec("sh", ["-c", 'echo "$HOME"']).catch(() => "")).trim();
+  if (!home) return res.status(502).json({ error: "could not resolve the machine's home dir" });
+  const src = `${home}/.task-dispatcher/src`;
+  // git on the bare ssh PATH (homebrew); node via the discovery ladder for npm
+  const script =
+    `export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH\n${nodeLadderScript()}\n` +
+    `cd ${JSON.stringify(src)} || { echo "no src at ${src}"; exit 1; }\n` +
+    `git pull --ff-only 2>&1 && npm install --no-audit --no-fund >/dev/null 2>&1; echo "---DONE---"`;
+  const out = await sshRun(host.target)(script);
+  const log = out.stdout.split("---DONE---")[0].trim();
+  if (!out.ok || /no src at/.test(out.stdout)) return res.status(500).json({ error: log || "update failed" });
+  res.json({ ok: true, log });
 });
 
 app.delete("/api/hosts/:id", (req, res) => {
