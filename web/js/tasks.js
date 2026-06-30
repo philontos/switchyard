@@ -79,8 +79,8 @@ export function closeTaskModal() { $("task-modal").style.display = "none"; nodeT
 
 // Open the dispatch modal for a remote node's OWN repo (from the fleet). The task
 // is created ON the node, using the node's existing mirror — no re-registration
-// here. Branch choices for a node repo aren't loaded (the mirror is on the node),
-// so we offer its default branch; everything else (title/prompt/skills) is the same.
+// here. Branches are listed live by the node itself (its mirror is over there);
+// everything else (title/prompt/skills) is the same as a local dispatch.
 export function openNodeTaskModal(hostId, repoId) {
   const repo = state.fleet[hostId]?.repos?.find(r => r.id === repoId);
   if (!repo) return toast(t("toast.repoNotReady"), "error");
@@ -92,9 +92,24 @@ export function openNodeTaskModal(hostId, repoId) {
   $("prov-panel").style.display = "none";
   $("t-provider-sec").style.display = "none";   // node owns its own claude login — picker N/A
   $("task-modal").style.display = "flex";
-  Selects["t-base"].setOptions([{ value: repo.default_branch, label: repo.default_branch }], repo.default_branch);
+  loadNodeBranches(hostId, repo);
   loadDispatchOptions();
   setTimeout(() => $("t-title").focus(), 30);
+}
+
+// Ask the node to list its mirror's branches (git ls-remote runs over there). On
+// failure, fall back to the repo's default branch so dispatch still works.
+async function loadNodeBranches(hostId, repo) {
+  branchReq?.abort();
+  const ctl = branchReq = new AbortController();
+  Selects["t-base"].setLoading(t("task.loadingBranches"));
+  try {
+    const branches = await api(`/api/nodes/${hostId}/branches?mirror=${encodeURIComponent(repo.mirror_path)}`, { signal: ctl.signal });
+    Selects["t-base"].setOptions(branches.map(b => ({ value: b, label: b })), repo.default_branch);
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    Selects["t-base"].setOptions([{ value: repo.default_branch, label: repo.default_branch }], repo.default_branch);
+  }
 }
 
 // Shell: one click, zero form. Opens a bare tmux shell in the machine's home —

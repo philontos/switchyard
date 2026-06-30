@@ -65,6 +65,7 @@ function fakeDeps(db: Database.Database) {
   const createCalls: { cwd?: string | null; title?: string | null }[] = [];
   const repoCalls: any[] = [];
   const stopCalls: number[] = [];
+  const branchCalls: string[] = [];
   return {
     deps: {
       db,
@@ -90,10 +91,15 @@ function fakeDeps(db: Database.Database) {
         return { ok: true as const };
       },
       install: () => ({ src: "/h/.task-dispatcher/src", binPath: "/h/.task-dispatcher/bin/tdsp", localBin: "/h/.local/bin/tdsp", clone: "/h/clone" }),
+      branches: async (mirror: string) => {
+        branchCalls.push(mirror);
+        return { ok: true as const, branches: ["main", "develop", "release/1.0"] };
+      },
     },
     createCalls,
     repoCalls,
     stopCalls,
+    branchCalls,
     get out() {
       return out;
     },
@@ -194,6 +200,23 @@ test("runCli stop rejects a non-numeric id with exit 1", async () => {
   assert.equal(code, 1);
   assert.match(f.out, /invalid id/);
   assert.deepEqual(f.stopCalls, []);
+});
+
+test("runCli branches lists a mirror's branches as JSON, exits 0", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["branches", "/d/mirrors/2-ug.git"], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.branchCalls, ["/d/mirrors/2-ug.git"]);
+  const parsed = JSON.parse(f.out);
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.branches, ["main", "develop", "release/1.0"]);
+});
+
+test("runCli branches requires a mirror path, exits 1 otherwise", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["branches"], f.deps);
+  assert.equal(code, 1);
+  assert.deepEqual(f.branchCalls, []);
 });
 
 test("runCli install sets up the machine and reports the paths", async () => {

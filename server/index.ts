@@ -683,6 +683,23 @@ app.get("/api/fleet", async (_req, res) => {
   res.json({ schema_version: 1, nodes });
 });
 
+// Live branches for one of a remote node's repos (its mirror lives on the node, so
+// only the node can list them). Lets the dispatch modal offer the node repo's real
+// branches instead of just its default. `mirror` is the node repo's mirror path.
+app.get("/api/nodes/:hostId/branches", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const mirror = String(req.query.mirror ?? "");
+  if (!mirror) return res.status(400).json({ error: "mirror required" });
+  const out = await runTdsp(host, ["branches", mirror]);
+  const result = parseNodeResult(out.stdout);
+  if (!result || !result.ok) return res.status(502).json({ error: result?.error || `node branches failed: ${(out.stderr || "no result").slice(0, 200)}` });
+  res.json(result.branches ?? []);
+});
+
 // Dispatch a repo task to a remote node using the NODE'S OWN repo (surfaced via
 // the fleet) — no re-registration on this controller, no duplicate mirror. The
 // node registers the repo by mirror path (find-or-create), builds the worktree

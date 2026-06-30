@@ -13,6 +13,7 @@ import { applyInstall } from "./bootstrap.js";
 import { localRunner } from "./runner.js";
 import { startShellSession, killSession } from "./tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./createtask.js";
+import { listBranches } from "./git.js";
 import { buildRepoTaskEnv, repoFindOrCreate } from "./repoenv.js";
 import { writeTaskManifest } from "./taskmanifest.js";
 
@@ -71,5 +72,13 @@ process.exitCode = await runCli(process.argv.slice(2), {
   install: () => {
     const p = applyInstall(os.homedir(), ROOT);
     return { src: p.src, binPath: p.binPath, localBin: p.localBin, clone: ROOT };
+  },
+  // live branches for one of this machine's mirrors (git ls-remote on the mirror)
+  branches: async (mirror) => {
+    try {
+      return { ok: true, branches: await listBranches(localRunner, mirror) };
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message || e) };
+    }
   },
 });
