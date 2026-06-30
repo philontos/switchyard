@@ -122,6 +122,9 @@ export interface CliDeps {
   stop: (id: number) => Promise<StopResult>;
   // set up THIS machine's global tdsp from its clone (symlink src + wrapper)
   install: () => { src: string; binPath: string; localBin: string; clone: string };
+  // live branch list for one of this machine's mirrors (so a controller can offer
+  // the node repo's real branches when dispatching here)
+  branches: (mirror: string) => Promise<{ ok: boolean; branches?: string[]; error?: string }>;
 }
 
 // Minimal flag parser: supports `--key value` and `--key=value`. Bare flags
@@ -178,6 +181,16 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(r));
       return r.ok ? 0 : 1;
     }
+    case "branches": {
+      const mirror = argv[1];
+      if (!mirror) {
+        deps.out(JSON.stringify({ ok: false, error: "branches: a mirror path is required" }));
+        return 1;
+      }
+      const r = await deps.branches(mirror);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
     case "install": {
       const r = deps.install();
       deps.out(
@@ -190,7 +203,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|install>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|branches|install>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }
