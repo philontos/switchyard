@@ -29,6 +29,27 @@ export async function loadHosts() {
   hostsOrder = hs.map(h => h.id);   // API order: local machine first
   rerender();
 }
+// Update a node's code in place — git pull its src (transparently follows the
+// symlink to the machine's own clone) + npm install. Idempotent; the node's tdsp
+// uses the new code on its next call. Long-ish, so flag in-progress + toast result.
+export async function updateHost(id) {
+  const h = state.hostsById[id];
+  if (!h || bootstrappingHosts.has(id)) return;
+  bootstrappingHosts.add(id);            // reuse the ⏳ in-progress flag
+  renderList();
+  toast(t("host.updating", { name: h.name }), "info");
+  try {
+    const r = await api(`/api/hosts/${id}/update`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    toast(/up to date/i.test(r.log || "") ? t("host.upToDate", { name: h.name }) : t("host.updated", { name: h.name }), "success");
+    await loadFleet();
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  } finally {
+    bootstrappingHosts.delete(id);
+    renderList();
+  }
+}
+
 // Pull each node's OWN live task list (/api/fleet). Remote nodes are fetched over
 // ssh by the server, so this is the cross-node "see what's running there" view.
 // Best-effort: a failed load just leaves the last fleet snapshot in place.
@@ -232,9 +253,13 @@ function renderList() {
       fleetRow = `<button class="mh-boot" onclick="bootstrapHost(${h.id})">⬇ ${t("host.bootstrap")}</button>`;
     }
   }
+  // an installed + reachable node can be updated in place (git pull its src)
+  const updateRow = (!isLocal && state.fleet[h.id]?.ok && !bootstrappingHosts.has(h.id))
+    ? `<button class="mh-update" onclick="updateHost(${h.id})">⟳ ${t("host.update")}</button>` : "";
   const menu = (menuHostId === h.id) ? `<div class="mh-menu">
       <div class="mh-target">${h.target}</div>
       ${fleetRow}
+      ${updateRow}
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
   const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${newRepo}${menu}</div>`;
