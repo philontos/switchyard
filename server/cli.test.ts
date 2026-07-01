@@ -2,8 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { initSchema } from "./schema.ts";
-import { taskListPayload, runCli, aggregateNodes } from "./cli.ts";
+import { taskListPayload, runCli, aggregateNodes, type TaskLiveness } from "./cli.ts";
 import type { CreateLocalResult } from "./createtask.ts";
+
+// a probe that reports every task fully dead — for the existing tests that only
+// care about the envelope shape, not the per-task liveness.
+const noLive: TaskLiveness = async () => new Map();
 
 const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 
@@ -18,22 +22,47 @@ function seed() {
 
 // The cross-node read contract: `tdsp list --json` emits a versioned envelope so
 // a newer controller can detect an older node's schema instead of misparsing it.
-test("taskListPayload wraps the local tasks in a versioned envelope", () => {
+test("taskListPayload wraps the local tasks in a versioned envelope", async () => {
   const db = seed();
-  const payload = taskListPayload(db);
-  assert.equal(payload.schema_version, 1);
+  const payload = await taskListPayload(db, noLive);
+  assert.equal(payload.schema_version, 2);
   assert.equal(payload.tasks.length, 1);
   assert.equal(payload.tasks[0].title, "old");
   assert.equal(payload.tasks[0].session, "tdsp-1-r-old");
 });
 
+// `tdsp list` ships each task's OWN liveness (the node computes it locally — it's
+// the sole authority for its tmux + worktree), so a controller can light the
+// remote breathing dot the same way it does for a local task: green when the
+// session is alive, yellow when it's blocked on a permission prompt. The probe is
+// injected so this stays testable without a real tmux/fs.
+test("taskListPayload enriches each task with alive/waiting/hasWorktree from the probe", async () => {
+  const db = seed();
+  const live: TaskLiveness = async (tasks) =>
+    new Map(tasks.map((t) => [t.id, { alive: true, waiting: true, hasWorktree: true }]));
+  const payload = await taskListPayload(db, live);
+  assert.equal(payload.tasks[0].alive, true);
+  assert.equal(payload.tasks[0].waiting, true);
+  assert.equal(payload.tasks[0].hasWorktree, true);
+});
+
+// A task the probe doesn't know about (or a node that can't probe) degrades to
+// "not alive" rather than throwing or leaving the field undefined.
+test("taskListPayload defaults missing liveness to not-alive", async () => {
+  const db = seed();
+  const payload = await taskListPayload(db, noLive);
+  assert.equal(payload.tasks[0].alive, false);
+  assert.equal(payload.tasks[0].waiting, false);
+  assert.equal(payload.tasks[0].hasWorktree, false);
+});
+
 // the list payload also carries the node's OWN repos, so a controller can group
 // the node's tasks by repo (by name) and offer those repos when dispatching here —
 // without the node's repos being registered on the controller.
-test("taskListPayload also includes the node's repos", () => {
+test("taskListPayload also includes the node's repos", async () => {
   const db = seed();
   db.prepare("INSERT INTO repos (id,host_id,name,git_url,default_branch,mirror_path,status) VALUES (5,1,'ug-fe','git@x:ug','main','/d/mirrors/5-ug.git','ready')").run();
-  const payload = taskListPayload(db);
+  const payload = await taskListPayload(db, noLive);
   assert.ok(Array.isArray(payload.repos));
   assert.equal(payload.repos.length, 1);
   assert.equal(payload.repos[0].id, 5);
@@ -44,12 +73,12 @@ test("taskListPayload also includes the node's repos", () => {
 
 // Newest-first, matching today's GET /api/tasks (ORDER BY id DESC) so the list
 // reads the same whether assembled locally or fetched from a node over ssh.
-test("taskListPayload returns tasks newest-first", () => {
+test("taskListPayload returns tasks newest-first", async () => {
   const db = seed();
   db.prepare(
     "INSERT INTO tasks (repo_id, base_branch, work_branch, title, worktree_path, session, status) VALUES (1,'m','feat/2-new','new','/wt/y','tdsp-2-r-new','running')",
   ).run();
-  const payload = taskListPayload(db);
+  const payload = await taskListPayload(db, noLive);
   assert.deepEqual(
     payload.tasks.map((t) => t.title),
     ["new", "old"],
@@ -78,6 +107,7 @@ function fakeDeps(db: Database.Database) {
       serve: () => {
         served = true;
       },
+      liveness: noLive,
       createLocal: async (opts: { cwd?: string | null; title?: string | null }): Promise<CreateLocalResult> => {
         createCalls.push(opts);
         return { ok: true, id: 99, session: "tdsp-x-99-local-y" };
@@ -118,7 +148,7 @@ test("runCli list --json prints the versioned task envelope and exits 0", async 
   const code = await runCli(["list", "--json"], f.deps);
   assert.equal(code, 0);
   const parsed = JSON.parse(f.out);
-  assert.equal(parsed.schema_version, 1);
+  assert.equal(parsed.schema_version, 2);
   assert.equal(parsed.tasks[0].title, "old");
 });
 
