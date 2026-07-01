@@ -24,13 +24,20 @@ let editingTaskId = null;
 export function isEditingTask() { return editingTaskId != null; }
 
 // reflect the current selection onto the cards already in the DOM (no refetch).
-// Placeholder cards (data-pending) light up while their loading window is the
-// active dock view; real cards (data-id) match state.selectedTaskId.
+// Three kinds of card, matched by which key they carry:
+//   data-pending → a placeholder, lit while its loading window is the active dock
+//   data-pane    → a remote node's task, keyed by its string pane id ("n<host>:<id>")
+//   data-id      → a local task, keyed by its numeric id
+// The data-pane branch is what stops this poll-driven repaint from stripping a
+// selected remote card (its pane id never matched the numeric data-id test, so it
+// used to flip back off every refresh — the flicker the remote view showed).
 export function paintSelection() {
   document.querySelectorAll("#m-list .task").forEach(el => {
     const on = el.dataset.pending != null
       ? pendingIsActive(el.dataset.pending)
-      : Number(el.dataset.id) === state.selectedTaskId;
+      : el.dataset.pane != null
+        ? el.dataset.pane === state.selectedTaskId
+        : Number(el.dataset.id) === state.selectedTaskId;
     el.classList.toggle("selected", on);
   });
 }

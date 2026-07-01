@@ -6,12 +6,13 @@
 // boots a listening server that holds the loop open, so the process stays alive —
 // an explicit exit() would kill the server it just started.
 import os from "node:os";
+import path from "node:path";
 import { runCli } from "./cli.js";
 import { db, type Task } from "./db.js";
 import { NS, DATA_DIR, ROOT } from "./paths.js";
 import { applyInstall } from "./bootstrap.js";
 import { localRunner } from "./runner.js";
-import { startShellSession, killSession } from "./tmux.js";
+import { startShellSession, killSession, listSessions } from "./tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./createtask.js";
 import { listBranches } from "./git.js";
 import { buildRepoTaskEnv, repoFindOrCreate } from "./repoenv.js";
@@ -31,6 +32,27 @@ process.exitCode = await runCli(process.argv.slice(2), {
   err: (s) => process.stderr.write(s + "\n"),
   serve: async () => {
     await import("./index.js");
+  },
+  // This node's own task liveness, for `tdsp list`. The node is the sole authority
+  // for its tmux server + worktrees, so it computes the same three signals the
+  // controller computes for local tasks in GET /api/tasks — green when the session
+  // is alive, yellow when it's blocked on a permission prompt — and ships them so a
+  // remote card lights up identically. One `tmux list-sessions` covers every task
+  // (set membership) instead of an exec per task.
+  liveness: async (tasks) => {
+    const live = new Set(await listSessions(localRunner));
+    const out = new Map<number, { alive: boolean; hasWorktree: boolean; waiting: boolean }>();
+    for (const t of tasks) {
+      const cleaned = t.status === "cleaned";
+      const hasWt = !!t.worktree_path && (await localRunner.exists(t.worktree_path).catch(() => false));
+      out.set(t.id, {
+        alive: !cleaned && !!t.session && live.has(t.session),
+        hasWorktree: hasWt,
+        waiting:
+          !cleaned && hasWt && (await localRunner.exists(path.join(t.worktree_path, ".claude/waiting")).catch(() => false)),
+      });
+    }
+    return out;
   },
   createLocal: (opts) =>
     createLocalTask(

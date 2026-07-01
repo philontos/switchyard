@@ -18,6 +18,12 @@ let hostsOrder = [];               // API order: local machine first. Active mac
 const collapsedRepos = new Set();  // collapsed repo groups (repo id) — read by renderList
 let archivedOpen = false;          // is the archived section expanded
 let menuHostId = null;             // remote machine whose ⚙ menu is open (null = none)
+// renderList buffer: the markup last written to #m-list (+ the host it was for). An
+// unchanged poll produces byte-identical markup, so we skip the DOM write — a 4s/5s
+// refresh then never restarts the breathing-dot animations or churns the list.
+// Invalidated (set null) whenever renderList bails mid-edit/drag, since those mutate
+// #m-list out of band and the cache would otherwise wrongly believe it's in sync.
+let lastListHtml = null, lastListHost = null;
 
 // ---- machines: col1 is a vertical icon rail; col2 (renderList, added next)
 // lists the active machine's repos + tasks. loadHosts/loadRepos/loadTasks all
@@ -72,6 +78,10 @@ export function connectNode(hostId, taskId) {
   if (!tk) return;
   const paneId = `n${hostId}:${taskId}`;
   state.selectedTaskId = paneId;
+  // remember this machine's "current" task (its pane id) so switching back to the
+  // node re-opens it instead of stranding the dock — the remote half of what
+  // connect() does for local tasks via lastTaskByHost.
+  state.lastTaskByHost[hostId] = paneId;
   const host = state.hostsById[hostId];
   const attach = host ? `ssh ${host.target} tmux attach -t ${tk.session}` : `tmux attach -t ${tk.session}`;
   openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, "", attach, paneId, "");
@@ -103,18 +113,39 @@ export async function stopNodeTask(hostId, taskId) {
   }
 }
 
+// The status dot for a remote node's task — mirrors taskCard's local dot so the
+// remote breathing light reads identically: a live session breathes green, one
+// blocked on a permission prompt is steady amber ("needs you"), otherwise the dot
+// falls to its status colour. Prefers the node's OWN liveness (alive/waiting,
+// shipped since `tdsp list` v2 — the node is the authority on its own tmux); for
+// an un-updated node that ships neither, it degrades to a status guess so a
+// running task still breathes instead of going dark.
+function fleetDot(tk) {
+  if (tk.alive !== undefined) {                 // node ships true liveness
+    if (!tk.alive) return `<span class="sdot ${tk.status}" title="${tk.status}"></span>`;
+    return tk.waiting
+      ? `<span class="sdot waiting" title="${t("task.waiting")}"></span>`
+      : `<span class="sdot live" title="live"></span>`;
+  }
+  // old node (no liveness on the wire): approximate from the static status string
+  if (tk.status === "running") return `<span class="sdot live" title="live"></span>`;
+  if (tk.status === "creating") return `<span class="sdot cloning" title="${t("task.creating")}"></span>`;
+  return `<span class="sdot ${tk.status}" title="${tk.status}"></span>`;
+}
+
 // A card for a task running ON a remote node (from the fleet snapshot). Connect
-// attaches over ssh; the corner ⏹ stops it via the node. No live/waiting dot — the
-// raw node row carries status only (the node, sat at directly, shows the rest).
+// attaches over ssh; the corner ⏹ stops it via the node. data-pane keys it for
+// paintSelection (so its selected state survives a refresh instead of flickering
+// off), and fleetDot gives it the same breathing/needs-you light a local card has.
 function fleetCard(hostId, tk) {
   const paneId = `n${hostId}:${tk.id}`;
   const sel = paneId === state.selectedTaskId ? " selected" : "";
   const meta = tk.kind === "local"
     ? `<div class="muted">📂 <code>${tk.cwd || "~"}</code> <span class="tag-local">${t("local.tag")}</span></div>`
     : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;
-  return `<div class="card task${sel} clickable" onclick="connectNode(${hostId},${tk.id})">
+  return `<div class="card task${sel} clickable" data-pane="${paneId}" onclick="connectNode(${hostId},${tk.id})">
       <button class="card-x" title="${t("task.stopTitle")}" onclick="event.stopPropagation();stopNodeTask(${hostId},${tk.id})">⏹</button>
-      <div class="t"><span class="sdot ${tk.status}"></span>#${tk.id} <span class="tname">${tk.title}</span></div>
+      <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname">${tk.title}</span></div>
       ${meta}
     </div>`;
 }
@@ -192,7 +223,35 @@ export function selectHost(id) { state.activeHostId = id; menuHostId = null; rer
 // list order (repos in sidebar order, then shells) → nothing, fall back to the
 // empty state. Only selectHost triggers this — the 5s poll's rerender() doesn't,
 // so a background refresh never yanks the dock around.
+// the task id inside a node-pane memory ("n<host>:<id>"), or null if the stored
+// value isn't one (e.g. a plain numeric id left over from a local task).
+function nodePaneTaskId(hostId, mem) {
+  const prefix = `n${hostId}:`;
+  return typeof mem === "string" && mem.startsWith(prefix) ? Number(mem.slice(prefix.length)) : null;
+}
 function followHostTask(hostId) {
+  // A bootstrapped remote shows the node's OWN tasks (fleet view), which live in
+  // state.fleet, not the local task cache — so follow those: its remembered pane
+  // (lastTaskByHost holds a pane id for a node, not a numeric id), then the first
+  // live one, then nothing. Same preference order as the local path below, so a
+  // remote machine restores its dock just like a local one. An un-updated node
+  // ships no `alive`, so treat such tasks as connectable rather than hiding them.
+  const host = state.hostsById[hostId];
+  const fl = state.fleet[hostId];
+  if (host && host.kind !== "local" && fl?.ok) {
+    const nodeTasks = fl.tasks || [];
+    const liveNode = tk => tk.status !== "cleaned" && (tk.alive ?? true);
+    const remId = nodePaneTaskId(hostId, state.lastTaskByHost[hostId]);
+    const remembered = remId != null ? nodeTasks.find(tk => tk.id === remId) : null;
+    if (remembered && liveNode(remembered)) { connectNode(hostId, remembered.id); return; }
+    const first = nodeTasks.find(liveNode);
+    if (first) { connectNode(hostId, first.id); return; }
+    state.selectedTaskId = null;
+    detachDock();
+    paintSelection();
+    return;
+  }
+
   const tasks = allTasks();
   const connectable = tk => tk.status !== "cleaned" && tk.alive;
 
@@ -223,9 +282,9 @@ function renderList() {
   // The rail/selection in rerender() still refresh; finish() re-renders on exit.
   // Same bail while a card is mid-drag (reorder.js) — a poll must not rebuild
   // #m-list and yank the dragged node; cleanup() re-renders once on drop.
-  if (isEditingTask() || isDraggingTask()) return;
+  if (isEditingTask() || isDraggingTask()) { lastListHtml = null; return; }
   const h = state.hostsById[state.activeHostId];
-  if (!h) { $("m-list").innerHTML = ""; return; }
+  if (!h) { $("m-list").innerHTML = ""; lastListHtml = ""; lastListHost = null; return; }
   const isLocal = h.kind === "local";
   const online = isLocal || h.status === "online";
   const tasks = allTasks();
@@ -346,9 +405,18 @@ function renderList() {
   // belong to the old model and would double up with the fleet, so they're hidden.
   // The local machine and not-yet-bootstrapped remotes keep the classic layout.
   const isFleetView = !isLocal && state.fleet[h.id]?.ok;
-  $("m-list").innerHTML = isFleetView
+  const html = isFleetView
     ? header + nodeBlock + nodeArchBlock
     : header + repoBlocks + shellBlock + nodeBlock + archBlock;
+  // Buffer: nothing changed since the last write → leave the DOM alone. The markup
+  // is a pure function of the render state (host, tasks, fleet, selection, collapse/
+  // menu flags), so identical markup means an identical list; rewriting it would only
+  // restart animations and flicker. paintSelection() still runs after us (rerender)
+  // to keep the highlight exact even on a skipped rebuild.
+  if (html === lastListHtml && lastListHost === state.activeHostId) return;
+  lastListHtml = html;
+  lastListHost = state.activeHostId;
+  $("m-list").innerHTML = html;
 }
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
 // Force a repo group open (no re-render — the caller renders). Used on dispatch so a

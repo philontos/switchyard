@@ -24,7 +24,11 @@ type DB = Database.Database;
 // The cross-node read contract carries its own version so a newer controller can
 // detect an older node and prompt an upgrade instead of misparsing the payload.
 // Bump ONLY for additive, backward-compatible shape changes.
-export const TASK_LIST_VERSION = 1;
+// v2: each task now carries its own liveness (alive/waiting/hasWorktree), computed
+// on the node, so a controller can light the remote breathing/needs-you dot the
+// same way it does for local tasks. Additive — an un-updated v1 node just omits
+// them and the controller degrades to a status-based guess.
+export const TASK_LIST_VERSION = 2;
 
 // A repo as a node exposes it to controllers — enough to group the node's tasks
 // by repo (name) and to dispatch a new task here using the node's OWN mirror (no
@@ -37,9 +41,24 @@ export interface NodeRepo {
   mirror_path: string;
 }
 
+// Per-task liveness a node computes for its OWN tasks — the same three signals the
+// controller computes for local tasks in GET /api/tasks, but here the node reports
+// them about itself (it's the sole authority for its tmux server + worktrees). This
+// is what lets a remote card light its breathing dot exactly like a local one.
+export interface TaskLive {
+  alive: boolean;        // its tmux session is live
+  hasWorktree: boolean;  // its worktree is still on disk
+  waiting: boolean;      // blocked on a permission prompt (the .claude/waiting marker)
+}
+// Injected probe: given this node's tasks, report each one's liveness by id. Passed
+// in (not computed here) so taskListPayload stays testable without a real tmux/fs —
+// the same dependency-injection seam aggregateNodes uses for its ssh fetch.
+export type TaskLiveness = (tasks: Task[]) => Promise<Map<number, TaskLive>>;
+export interface LiveTask extends Task, TaskLive {}
+
 export interface TaskListPayload {
   schema_version: number;
-  tasks: Task[];
+  tasks: LiveTask[];
   repos: NodeRepo[];
 }
 
@@ -48,10 +67,20 @@ export function reposForList(db: DB): NodeRepo[] {
   return db.prepare("SELECT id, name, git_url, default_branch, mirror_path FROM repos ORDER BY id").all() as NodeRepo[];
 }
 
-/** The versioned envelope emitted by `tdsp list --json`: this node's own tasks + repos. */
-export function taskListPayload(db: DB): TaskListPayload {
+/**
+ * The versioned envelope emitted by `tdsp list --json`: this node's own tasks +
+ * repos, each task enriched with the liveness the `liveness` probe reports (the
+ * node computes it about its own tmux/worktrees). A task the probe omits degrades
+ * to not-alive, so a missing/failed probe is honest rather than throwing.
+ */
+export async function taskListPayload(db: DB, liveness: TaskLiveness): Promise<TaskListPayload> {
   const tasks = db.prepare("SELECT * FROM tasks ORDER BY id DESC").all() as Task[];
-  return { schema_version: TASK_LIST_VERSION, tasks, repos: reposForList(db) };
+  const live = await liveness(tasks);
+  const enriched: LiveTask[] = tasks.map((t) => {
+    const l = live.get(t.id);
+    return { ...t, alive: l?.alive ?? false, hasWorktree: l?.hasWorktree ?? false, waiting: l?.waiting ?? false };
+  });
+  return { schema_version: TASK_LIST_VERSION, tasks: enriched, repos: reposForList(db) };
 }
 
 // ---- cross-node aggregation: the "see other nodes' tasks" half of 打通 ----
@@ -117,6 +146,8 @@ export interface CliDeps {
   out: (s: string) => void;
   err: (s: string) => void;
   serve: () => void | Promise<void>;
+  // report THIS node's own task liveness (tmux + worktree probes), for `list`
+  liveness: TaskLiveness;
   createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
   createRepo: (spec: CreateRepoSpec) => Promise<CreateRepoResult>;
   stop: (id: number) => Promise<StopResult>;
@@ -149,7 +180,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       await deps.serve();
       return 0;
     case "list":
-      deps.out(JSON.stringify(taskListPayload(deps.db)));
+      deps.out(JSON.stringify(await taskListPayload(deps.db, deps.liveness)));
       return 0;
     case "create-local": {
       const f = parseFlags(argv.slice(1));
