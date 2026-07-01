@@ -7,16 +7,16 @@
 // an explicit exit() would kill the server it just started.
 import os from "node:os";
 import path from "node:path";
-import { runCli } from "./cli.js";
-import { db, type Task } from "./db.js";
-import { NS, DATA_DIR, ROOT } from "./paths.js";
-import { applyInstall } from "./bootstrap.js";
-import { localRunner } from "./runner.js";
-import { startShellSession, killSession, listSessions } from "./tmux.js";
-import { createLocalTask, createRepoTask, stopTask } from "./createtask.js";
-import { listBranches } from "./git.js";
-import { buildRepoTaskEnv, repoFindOrCreate } from "./repoenv.js";
-import { writeTaskManifest } from "./taskmanifest.js";
+import { runCli } from "./task/cli.js";
+import { db, type Task } from "./core/db.js";
+import { NS, DATA_DIR, ROOT } from "./core/paths.js";
+import { applyInstall } from "./fleet/bootstrap.js";
+import { localRunner } from "./fleet/runner.js";
+import { startShellSession, killSession, listSessions } from "./session/tmux.js";
+import { createLocalTask, createRepoTask, stopTask } from "./task/createtask.js";
+import { listBranches } from "./repo/git.js";
+import { buildRepoTaskEnv, repoFindOrCreate } from "./repo/repoenv.js";
+import { writeTaskManifest } from "./task/taskmanifest.js";
 
 // Ensure child processes (tmux/git/claude) find Homebrew binaries regardless of
 // how tdsp was launched — a bare non-interactive ssh PATH otherwise can't resolve

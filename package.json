@@ -8,7 +8,7 @@
     "dev": "tsx watch server/index.ts",
     "start": "tsx server/index.ts",
     "tdsp": "tsx server/tdsp.ts",
-    "test": "node --import tsx --test server/*.test.ts",
+    "test": "node --import tsx --test \"server/**/*.test.ts\"",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },
   "dependencies": {

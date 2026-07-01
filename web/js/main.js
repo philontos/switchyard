@@ -5,18 +5,18 @@
 //   2. wire language-switch re-rendering;
 //   3. run the boot sequence (init terminal + selects, first data load);
 //   4. register global listeners (modal backdrop / Esc) and pollers.
-import { $ } from "./dom.js";
-import { toast } from "./feedback.js";
-import { closeDialog } from "./dialog.js";
-import { Selects, csMount } from "./select.js";
-import { initTerm, showTermEmpty, applyTermTheme } from "./terminal.js";
-import { state } from "./state.js";
-import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./repos.js";
-import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, addNodeShell, updateHost } from "./hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal } from "./tasks.js";
-import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./skills.js";
-import { initReorder } from "./reorder.js";
-import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./providers.js";
+import { $ } from "./core/dom.js";
+import { toast } from "./core/feedback.js";
+import { closeDialog } from "./core/dialog.js";
+import { Selects, csMount } from "./core/select.js";
+import { initTerm, showTermEmpty, applyTermTheme } from "./features/terminal.js";
+import { state } from "./core/state.js";
+import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./features/repos.js";
+import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, addNodeShell, updateHost } from "./features/hosts.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal } from "./features/tasks.js";
+import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./features/skills.js";
+import { initReorder } from "./features/reorder.js";
+import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./features/providers.js";
 
 // ---- inline-onclick bridge ----
 // Every function referenced by an onclick="…" attribute (static markup in
