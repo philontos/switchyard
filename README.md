@@ -110,13 +110,25 @@ The same `tdsp` runs on every machine; the controller invokes the one-shot verbs
 
 ```
 server/                REST API + /pty WebSocket; the tdsp CLI; git / tmux / pty / ssh Runner orchestration
+  index.ts             HTTP entry: build app + http server, attach WS, run boot, listen
   tdsp.ts              the tdsp entrypoint (serve + one-shot verbs)
-  cli.ts               verb dispatch + the cross-node read contract (list/aggregate)
-  createtask.ts        task-creation core (shared by the HTTP route and the CLI)
-  fleet.ts             cross-node fleet view assembly
-  bootstrap.ts         per-machine install + the one-click remote setup
-  taskmanifest.ts      per-task manifest = the edge-resident truth
+  http/                the web layer — thin HTTP glue over the domain folders below
+    app.ts             assemble express: json → preview proxy → static → routes
+    routes.ts          every /api/* handler
+    ws.ts              upgrade routing + the pty/tmux terminal relay
+    preview.ts         dev-server reverse-proxy upstream resolution
+    context.ts         shared prepared statements + cross-cutting helpers
+  core/                paths, sqlite db + schema, migration, server i18n
+  repo/                git mirrors, worktrees, per-task repo env
+  task/                task lifecycle (create/manifest/rename) + the tdsp node-local API (cli.ts)
+  fleet/               remote hosts: runners, bootstrap, liveness, cross-node fleet view
+  session/             tmux sessions, pty spawn, attach command
+  skills/              skill scan/resolve, plugin install, hook settings
+  preview/             the preview reverse-proxy engine
 web/                   board + xterm terminal (native ES Modules, no build)
+  js/main.js           entry — wires the modules, bridges inline onclick handlers
+  js/core/             shared infra: dom, state, feedback, dialog, select
+  js/features/         hosts, tasks, terminal, repos, providers, skills, reorder
 scripts/setup.sh       preflight: validate claude/tmux/git, fix PATH in ~/.zshenv
 ~/.task-dispatcher/    per machine:
   src                  pointer to this machine's clone (real clone or symlink)
@@ -124,4 +136,4 @@ scripts/setup.sh       preflight: validate claude/tmux/git, fix PATH in ~/.zshen
   <namespace>/         this machine's own data: mirrors/ worktrees/ tasks/ dispatcher.db
 ```
 
-> The server and frontend each carry their own zh/en string dictionary (`server/i18n.ts`, `web/i18n.js`), the single source of truth for that layer. For the finer data model and node semantics, see the source comments.
+> The server and frontend each carry their own zh/en string dictionary (`server/core/i18n.ts`, `web/i18n.js`), the single source of truth for that layer. For the finer data model and node semantics, see the source comments.
