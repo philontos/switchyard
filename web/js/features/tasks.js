@@ -13,6 +13,14 @@ import { rerender, expandRepo, loadFleet } from "./hosts.js";
 import { refreshProviders, selectedProviderId } from "./providers.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
+// the dispatch modal's agent pick (Claude Code | Codex), remembered across opens.
+// Codex is local-only, so it's forced back to claude for a remote repo.
+const LS_AGENT = "tdsp.agent";
+let selectedAgent = "claude";
+// whether the modal's current repo runs on THIS controller's local node. The
+// provider picker is node-local (config lives here) so it shows only when true;
+// the agent picker travels with the task, so it shows regardless.
+let modalOnLocalNode = true;
 // when set, the dispatch modal is in "node mode": dispatch to a remote node's OWN
 // repo (surfaced via the fleet) instead of a controller-registered repo.
 let nodeTask = null;   // { hostId, repo } or null
@@ -63,6 +71,36 @@ export function connect(id) {
     `#${t.id} ${t.title}`, t.prompt ? `· ${t.prompt}` : "", "tmux attach -t " + t.session, t.id, t.claude_session || "");
 }
 
+// The agent picker (Claude Code | Codex). Persists the last pick so the next
+// dispatch defaults to it, repaints the segmented control, and reflects the
+// choice onto the modal's panels via applyAgentUI.
+export function selectAgent(kind) {
+  selectedAgent = kind === "codex" ? "codex" : "claude";
+  try { localStorage.setItem(LS_AGENT, selectedAgent); } catch (_) {}
+  document.querySelectorAll("#t-agent-seg .agent-opt").forEach(b =>
+    b.classList.toggle("selected", b.dataset.agent === selectedAgent));
+  applyAgentUI();
+}
+
+// Reflect the selected agent onto the modal:
+//   codex  → provider picker hidden (codex never sends one), codex model + the
+//            full-auto note shown, skills box greyed out (no skill mechanism)
+//   claude → the reverse; the provider picker is restored only on a local-node
+//            dispatch (it's node-local config — the agent picker itself shows for
+//            remote repos too, but the provider panel stays hidden there).
+function applyAgentUI() {
+  const codex = selectedAgent === "codex";
+  $("t-codex-sec").style.display = codex ? "" : "none";
+  $("t-skills-codex-note").style.display = codex ? "" : "none";
+  $("t-skills").classList.toggle("disabled", codex);
+  if (codex) {
+    $("t-provider-sec").style.display = "none";
+    $("prov-panel").style.display = "none";
+  } else if (modalOnLocalNode) {
+    $("t-provider-sec").style.display = "";
+  }
+}
+
 export function openTaskModal(repoId) {
   const repo = state.repos.find(r => r.id === repoId && r.status === "ready");
   if (!repo) return toast(t("toast.repoNotReady"), "error");
@@ -75,7 +113,15 @@ export function openTaskModal(repoId) {
   // remote node is configured on that node — hide the picker here, matching the
   // backend, which ignores provider for any non-local dispatch.
   const onLocalNode = state.hostsById[repo.host_id]?.kind === "local";
+  modalOnLocalNode = onLocalNode;
   $("t-provider-sec").style.display = onLocalNode ? "" : "none";
+  // the agent picker shows for local AND remote repos — agent is a task property
+  // that travels to whichever node runs it (unlike the node-local provider above).
+  // selectAgent() runs applyAgentUI, so it must come AFTER the provider-sec base
+  // visibility. The last-picked agent is restored either way.
+  $("t-agent-sec").style.display = "";
+  $("t-codex-model").value = "";
+  selectAgent(localStorage.getItem(LS_AGENT) === "codex" ? "codex" : "claude");
   $("task-modal").style.display = "flex";
   loadBranches();
   loadDispatchOptions();
@@ -97,7 +143,12 @@ export function openNodeTaskModal(hostId, repoId) {
   $("tm-repo").textContent = `${repo.name} @ ${hostName}`;
   $("t-title").value = ""; $("t-prompt").value = "";
   $("prov-panel").style.display = "none";
-  $("t-provider-sec").style.display = "none";   // node owns its own claude login — picker N/A
+  modalOnLocalNode = false;                      // remote node owns its login — no provider picker
+  $("t-provider-sec").style.display = "none";
+  // agent still travels to the node, so claude/codex is choosable here too.
+  $("t-agent-sec").style.display = "";
+  $("t-codex-model").value = "";
+  selectAgent(localStorage.getItem(LS_AGENT) === "codex" ? "codex" : "claude");
   $("task-modal").style.display = "flex";
   loadNodeBranches(hostId, repo);
   loadDispatchOptions();
@@ -180,10 +231,15 @@ async function loadBranches() {
 // node builds the worktree (git fetch can be slow), so flag it as in-progress.
 async function addNodeTask() {
   const { hostId, repo } = nodeTask;
+  const codex = selectedAgent === "codex";
   const body = {
     mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url,
     base: Selects["t-base"].value, title: $("t-title").value.trim(),
-    prompt: $("t-prompt").value, skills: selectedExtraSkills(),
+    prompt: $("t-prompt").value,
+    // codex carries a model and no skills; claude keeps its skill selection
+    skills: codex ? [] : selectedExtraSkills(),
+    agent: selectedAgent,
+    model: codex ? ($("t-codex-model").value.trim() || null) : null,
   };
   if (!body.base || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
   closeTaskModal();
@@ -202,11 +258,15 @@ export async function addTask() {
   // provider only travels when the picker is shown (local-node dispatch); a hidden
   // picker (remote repo) sends null, matching the backend's local-only gate.
   const providerShown = $("t-provider-sec").style.display !== "none";
+  const codex = selectedAgent === "codex";
   const body = {
     repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
-    extra_skills: selectedExtraSkills(),
+    // codex has no skills and never takes a provider; it carries a model instead
+    extra_skills: codex ? [] : selectedExtraSkills(),
     provider_id: providerShown ? selectedProviderId() : null,   // null == default claude login
+    agent: selectedAgent,
+    agent_model: codex ? ($("t-codex-model").value.trim() || null) : null,
   };
   if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
   // Spin up BOTH placeholders before clearing the form (so the title can label them):

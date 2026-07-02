@@ -200,6 +200,18 @@ test("runCli create decodes the base64 spec, invokes createRepo, prints JSON, ex
   assert.equal(parsed.id, 77);
 });
 
+// codex dispatches to a remote node exactly like a local one: the agent + model
+// ride in the spec, so the node's own createRepoTask runs the same agent A picked.
+test("runCli create round-trips the agent + model in the spec (symmetric codex dispatch)", async () => {
+  const f = fakeDeps(seed());
+  const spec = { mirror: "/d/mirrors/5-sw.git", name: "sw", git_url: "g", base: "main", title: "fix", prompt: "go", skills: [], agent: "codex", model: "gpt-5.4" };
+  const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
+  const code = await runCli(["create", b64], f.deps);
+  assert.equal(code, 0);
+  assert.equal(f.repoCalls[0].agent, "codex", "the node is handed the chosen agent");
+  assert.equal(f.repoCalls[0].model, "gpt-5.4");
+});
+
 test("runCli create exits 1 and reports an error when the spec is not valid base64 JSON", async () => {
   const f = fakeDeps(seed());
   const code = await runCli(["create", "@@not-base64-json@@"], f.deps);

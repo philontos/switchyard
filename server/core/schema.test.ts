@@ -30,6 +30,34 @@ test("initSchema on a fresh DB has worktree_path and the newer columns", () => {
   for (const c of ["worktree_path", "kind", "host_id", "cwd"]) assert.ok(cols.includes(c), `missing ${c}`);
 });
 
+// The agent axis: every task records which coding-agent CLI it runs (claude by
+// default, or codex) plus an optional codex model. A row inserted without naming
+// an agent must default to 'claude' so existing dispatch code is unchanged.
+test("initSchema on a fresh DB has the agent columns, defaulting agent to claude", () => {
+  const db = new Database(":memory:");
+  initSchema(db, opts(false));
+  const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
+  assert.ok(cols.includes("agent"), "agent column present");
+  assert.ok(cols.includes("agent_model"), "agent_model column present");
+  db.prepare("INSERT INTO tasks (repo_id, base_branch, work_branch, title, worktree_path, session) VALUES (1,'m','f','t','/wt','s')").run();
+  const row = db.prepare("SELECT agent, agent_model FROM tasks WHERE id=1").get() as { agent: string; agent_model: string | null };
+  assert.equal(row.agent, "claude", "agent defaults to claude");
+  assert.equal(row.agent_model, null, "no codex model by default");
+});
+
+// An old tasks table predating the agent column must be backfilled (not throw),
+// and its existing rows must read as 'claude'.
+test("initSchema backfills agent='claude' onto an old tasks table", () => {
+  const db = new Database(":memory:");
+  db.exec("CREATE TABLE repos (id INTEGER PRIMARY KEY, name TEXT, mirror_path TEXT)");
+  db.exec("CREATE TABLE tasks (id INTEGER PRIMARY KEY, repo_id INTEGER, title TEXT)");
+  db.prepare("INSERT INTO tasks (repo_id, title) VALUES (1, 'old')").run();
+
+  assert.doesNotThrow(() => initSchema(db, opts(false)));
+  const row = db.prepare("SELECT agent FROM tasks WHERE id=1").get() as { agent: string };
+  assert.equal(row.agent, "claude", "existing rows backfill to claude");
+});
+
 // The presets feature was removed: initSchema must drop a pre-existing presets
 // table and the orphaned tasks.preset_id column, and never recreate them.
 test("initSchema tears down the removed presets feature", () => {

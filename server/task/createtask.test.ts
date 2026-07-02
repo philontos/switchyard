@@ -284,6 +284,50 @@ test("createRepoTask cleans up the worktree and marks error when setup fails", a
   }
 });
 
+test("createRepoTask defaults agent to claude and agent_model to null", async () => {
+  const { env, dir, db } = makeRepoEnv();
+  try {
+    const r = await createRepoTask(env, REPO, { baseBranch: "m", title: "t", prompt: "go" });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    const row = db.prepare("SELECT agent, agent_model FROM tasks WHERE id=?").get(r.id) as any;
+    assert.equal(row.agent, "claude");
+    assert.equal(row.agent_model, null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// codex: the agent + its model are recorded (so resume can rebuild the same
+// launch) and threaded into setup + session; skills are ignored entirely (codex
+// has no skill mechanism), so none are delivered and the opening is just the prompt.
+test("createRepoTask (codex) records agent+model, ignores skills, and threads agent into setup/session", async () => {
+  let startOpts: any = null;
+  let setupArgs: any = null;
+  const { env, dir, db, calls } = makeRepoEnv({
+    setupWorktree: async (a) => { setupArgs = a; calls.push("setup"); },
+    startSession: async (_s, _w, opening, o) => { startOpts = o; calls.push(`start:${opening ?? "∅"}`); },
+  });
+  try {
+    const r = await createRepoTask(env, REPO, {
+      baseBranch: "m", title: "t", prompt: "build",
+      agent: "codex", model: "gpt-5.4", extraSkills: ["dispatcher:tdd"],
+    });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    const row = db.prepare("SELECT agent, agent_model FROM tasks WHERE id=?").get(r.id) as any;
+    assert.equal(row.agent, "codex");
+    assert.equal(row.agent_model, "gpt-5.4");
+    assert.equal(setupArgs.agent, "codex", "setup is told which agent");
+    assert.equal(setupArgs.skills.length, 0, "codex delivers no skills even when some were requested");
+    assert.ok(calls.includes("start:build"), "opening is just the prompt — no skills line");
+    assert.equal(startOpts.agent, "codex", "session launches codex");
+    assert.equal(startOpts.model, "gpt-5.4");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("createRepoTask cleans up when the session fails to start after the worktree was made", async () => {
   const { env, dir, db, calls } = makeRepoEnv({
     startSession: async () => {

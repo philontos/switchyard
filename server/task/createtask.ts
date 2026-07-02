@@ -7,6 +7,7 @@ import path from "node:path";
 import { writeTaskManifest } from "./taskmanifest.js";
 import { resolveCwd } from "../fleet/local.js";
 import { skillsLine } from "../skills/skills.js";
+import { agentCaps, type AgentKind } from "../session/agent.js";
 import type Database from "better-sqlite3";
 import type { Task } from "../core/db.js";
 
@@ -136,11 +137,18 @@ export interface RepoTaskEnv {
     workBranch: string;
     baseBranch: string;
     skills: SkillRef[];
+    agent: AgentKind;
   }): Promise<void>;
-  // Launch claude in the worktree (opening = freeform prompt + skills line, or null).
-  // env (optional) injects ANTHROPIC_* vars to point claude at an alternate model
-  // backend; omitted/undefined → the machine's default claude login.
-  startSession(session: string, worktree: string, opening: string | null, env?: Record<string, string>): Promise<void>;
+  // Launch the agent in the worktree (opening = freeform prompt + skills line, or
+  // null). opts.env injects ANTHROPIC_* vars for claude's alternate model backend;
+  // opts.agent picks the CLI (claude default | codex); opts.model is codex's -m
+  // model. All omitted → the machine's default claude login.
+  startSession(
+    session: string,
+    worktree: string,
+    opening: string | null,
+    opts?: { env?: Record<string, string>; agent?: AgentKind; model?: string | null },
+  ): Promise<void>;
   // Tear down a partially-built worktree after a failed dispatch.
   removeWorktree(mirror: string, worktree: string, workBranch: string): Promise<void>;
 }
@@ -156,6 +164,10 @@ export interface CreateRepoOpts {
   // in-process caller sets these; the CLI/fleet caller leaves them undefined.
   providerId?: number | null;
   env?: Record<string, string>;
+  // Which coding-agent CLI runs the task (claude default | codex) and codex's
+  // optional -m model. Recorded on the task so resume rebuilds the same launch.
+  agent?: AgentKind;
+  model?: string | null;
 }
 
 export type CreateRepoResult =
@@ -171,17 +183,19 @@ export type CreateRepoResult =
  * becomes a thin caller, and a future `tdsp create` verb reuses this verbatim.
  */
 export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: CreateRepoOpts): Promise<CreateRepoResult> {
+  const agent = opts.agent ?? "claude";
   // Preflight skills BEFORE inserting, so a bad skill never leaves a half-built
-  // task pointing at a nonexistent skill.
-  const wantKeys = [...new Set((opts.extraSkills ?? []).map(String))];
+  // task pointing at a nonexistent skill. codex has no skill mechanism, so skills
+  // are ignored for it — never resolved, delivered, or announced in the opening.
+  const wantKeys = agentCaps(agent).injectSkills ? [...new Set((opts.extraSkills ?? []).map(String))] : [];
   const { found, missing } = env.resolveSkills(wantKeys);
   if (missing.length) return { ok: false, error: "skillsMissing", missing };
 
   const info = env.db
     .prepare(
-      "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, skills, provider_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, skills, provider_id, agent, agent_model) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
     )
-    .run(repo.id, opts.baseBranch, "", opts.title, opts.prompt || null, "", "", "creating", JSON.stringify(found.map((f) => f.key)), opts.providerId ?? null);
+    .run(repo.id, opts.baseBranch, "", opts.title, opts.prompt || null, "", "", "creating", JSON.stringify(found.map((f) => f.key)), opts.providerId ?? null, agent, opts.model ?? null);
   const id = Number(info.lastInsertRowid);
   const s = slug(opts.title);
   const workBranch = `feat/${id}-${s}`;
@@ -189,11 +203,11 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
   const session = `tdsp-${env.ns}-${id}-${slug(repo.name)}-${s}`;
 
   try {
-    await env.setupWorktree({ id, mirror: repo.mirror_path, worktree, workBranch, baseBranch: opts.baseBranch, skills: found });
+    await env.setupWorktree({ id, mirror: repo.mirror_path, worktree, workBranch, baseBranch: opts.baseBranch, skills: found, agent });
     // opening = freeform prompt + the "skills delivered" line; pass it UNTRIMMED
     // (only the null-decision uses trim) to match the prior HTTP behavior exactly.
     const opening = (opts.prompt || "") + skillsLine(found.map((f) => f.name));
-    await env.startSession(session, worktree, opening.trim() ? opening : null, opts.env);
+    await env.startSession(session, worktree, opening.trim() ? opening : null, { env: opts.env, agent, model: opts.model });
     env.db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?").run(workBranch, worktree, session, id);
     await env.writeManifest(id);
     return { ok: true, id, session, workBranch };

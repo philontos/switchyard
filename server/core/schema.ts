@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   session TEXT NOT NULL,
   status TEXT DEFAULT 'running', -- running | done | error | cleaned
   error TEXT,
+  agent TEXT DEFAULT 'claude',   -- which coding-agent CLI runs the task: claude | codex
+  agent_model TEXT,              -- codex: the -m model; NULL == the node's default model
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -108,6 +110,10 @@ function reconcileColumns(db: DB) {
   addColumn(db, "tasks", "cwd", "TEXT");                       // local tasks: working dir
   addColumn(db, "tasks", "claude_session", "TEXT");           // Claude session id, captured by the SessionStart hook
   addColumn(db, "tasks", "provider_id", "INTEGER");           // alternate model backend; NULL == default claude login
+  // the agent axis: which coding-agent CLI runs the task (claude default | codex),
+  // plus codex's optional -m model. Backfills to 'claude' on pre-existing rows.
+  addColumn(db, "tasks", "agent", "TEXT DEFAULT 'claude'");
+  addColumn(db, "tasks", "agent_model", "TEXT");
 }
 
 /**

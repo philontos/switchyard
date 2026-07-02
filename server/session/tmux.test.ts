@@ -120,3 +120,33 @@ test("startSession drops empty/blank env values (no `env` prefix when nothing to
   await startSession(runner, "tdsp-1-x", "/wt", "go", { env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_MODEL: "" } });
   assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "claude", "go"] });
 });
+
+test("startSession(agent='codex') launches codex full-auto with the prompt", async () => {
+  const { runner, calls } = fakeRunner();
+  // codex never stalls on an approval prompt the dispatcher couldn't see, so it
+  // runs `-a never -s workspace-write`; the prompt is codex's opening message.
+  await startSession(runner, "tdsp-1-x", "/wt", "do it", { agent: "codex" });
+  assert.deepEqual(calls[0], { file: "tmux", args: [
+    "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
+    "codex", "-a", "never", "-s", "workspace-write", "do it",
+  ] });
+});
+
+test("startSession(agent='codex', continue) resumes with `codex resume --last`", async () => {
+  const { runner, calls } = fakeRunner();
+  // codex resumes the most-recent conversation in this cwd — the opening prompt
+  // is NOT re-sent, mirroring claude --continue.
+  await startSession(runner, "tdsp-1-x", "/wt", "the original prompt", { agent: "codex", continue: true });
+  assert.deepEqual(calls[0], { file: "tmux", args: [
+    "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "codex", "resume", "--last",
+  ] });
+});
+
+test("startSession(agent='codex', model) passes -m <model> before the prompt", async () => {
+  const { runner, calls } = fakeRunner();
+  await startSession(runner, "tdsp-1-x", "/wt", "go", { agent: "codex", model: "gpt-5.4" });
+  assert.deepEqual(calls[0], { file: "tmux", args: [
+    "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
+    "codex", "-a", "never", "-s", "workspace-write", "-m", "gpt-5.4", "go",
+  ] });
+});
