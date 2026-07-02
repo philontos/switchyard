@@ -52,12 +52,25 @@
 <div id="task-modal" class="modal-bg" style="display:none">
   <div class="modal">
     <h2 style="margin-bottom:12px"><span data-i18n="task.modalTitle"></span> · <span id="tm-repo" style="color:#e09a7d"></span></h2>
+    <!-- agent axis: which coding-agent CLI runs the task. Only shown for a
+         local-node dispatch (codex is local-only in this version); hidden +
+         forced back to claude for a remote repo, matching the provider picker. -->
+    <div id="t-agent-sec">
+      <label class="tm-lbl" data-i18n="task.agentLabel"></label>
+      <div id="t-agent-seg" class="agent-seg">
+        <button type="button" class="agent-opt selected" data-agent="claude" onclick="selectAgent('claude')">Claude Code</button>
+        <button type="button" class="agent-opt" data-agent="codex" onclick="selectAgent('codex')">Codex</button>
+      </div>
+    </div>
     <label class="tm-lbl" data-i18n="task.baseLabel"></label>
     <div id="t-base" class="cs"></div>
     <input id="t-title" data-i18n-ph="task.titlePh" />
     <textarea id="t-prompt" rows="3" data-i18n-ph="task.promptPh"></textarea>
     <label class="tm-lbl" data-i18n="task.extraSkills"></label>
     <div id="t-skills" class="skills-box"></div>
+    <!-- codex has no skill mechanism: the box above is greyed out and this note
+         explains why (shown only when Codex is the selected agent). -->
+    <div id="t-skills-codex-note" class="hint" style="display:none" data-i18n="agent.codexSkillsNote"></div>
     <!-- model backend: only meaningful for in-process dispatch (this controller
          launches claude). Hidden in node mode — a bootstrapped remote owns its
          own claude login, so the picker doesn't apply there. -->
@@ -82,6 +95,13 @@
         <div id="pv-list" class="pv-list"></div>
         <div class="hint" style="margin-top:8px" data-i18n="provider.hint"></div>
       </div>
+    </div>
+    <!-- codex-only: an optional model (-m) + the full-auto note. Shown in place
+         of the (claude-only) provider picker when Codex is the selected agent. -->
+    <div id="t-codex-sec" style="display:none">
+      <label class="tm-lbl" data-i18n="agent.modelLabel"></label>
+      <input id="t-codex-model" data-i18n-ph="agent.codexModelPh" />
+      <div class="hint" style="margin-top:2px" data-i18n="agent.codexAutoNote"></div>
     </div>
     <div class="dlg-actions">
       <button class="sec" data-i18n="dialog.cancel" onclick="closeTaskModal()"></button>

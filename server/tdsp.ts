@@ -14,6 +14,7 @@ import { applyInstall } from "./fleet/bootstrap.js";
 import { localRunner } from "./fleet/runner.js";
 import { startShellSession, killSession, listSessions } from "./session/tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./task/createtask.js";
+import { asAgentKind } from "./session/agent.js";
 import { listBranches } from "./repo/git.js";
 import { buildRepoTaskEnv, repoFindOrCreate } from "./repo/repoenv.js";
 import { writeTaskManifest } from "./task/taskmanifest.js";
@@ -78,7 +79,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
         writeManifest: (id) => writeTaskManifest(DATA_DIR, db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task),
       }),
       repoFindOrCreate(db, { mirror: spec.mirror, name: spec.name, git_url: spec.git_url }),
-      { baseBranch: spec.base, title: spec.title, prompt: spec.prompt, extraSkills: spec.skills },
+      { baseBranch: spec.base, title: spec.title, prompt: spec.prompt, extraSkills: spec.skills, agent: asAgentKind(spec.agent), model: spec.model ?? null },
     ),
   // stop one of THIS node's tasks: kill its session, mark cleaned, re-manifest.
   stop: (id) =>

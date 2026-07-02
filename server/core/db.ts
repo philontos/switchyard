@@ -60,6 +60,8 @@ export interface Task {
   cwd: string | null;        // local tasks: working dir
   claude_session: string | null;  // Claude session id (UUID), captured by the SessionStart hook
   provider_id: number | null;      // alternate model backend; NULL == default claude login
+  agent: string;                   // which coding-agent CLI runs the task: 'claude' | 'codex'
+  agent_model: string | null;      // codex: the -m model; NULL == the node's default model
 }
 
 export interface Provider {

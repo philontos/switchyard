@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { addWorktreeFromBranch, removeWorktree } from "./git.js";
 import { startSession } from "../session/tmux.js";
+import { agentCaps } from "../session/agent.js";
 import { hookSettingsJson } from "../skills/hooks.js";
 import { resolveSkills, defaultSources } from "../skills/skills.js";
 import type { Runner } from "../fleet/runner.js";
@@ -39,33 +40,41 @@ export function repoFindOrCreate(db: DB, spec: { mirror: string; name: string; g
 // each skill into it, inject the per-task hooks, and keep both out of git status.
 // `ns` scopes the local temp path so two controllers sharing a box don't collide.
 function setupWorktreeOn(runner: Runner, ns: string): RepoTaskEnv["setupWorktree"] {
-  return async ({ id, mirror, worktree, workBranch, baseBranch, skills }) => {
+  return async ({ id, mirror, worktree, workBranch, baseBranch, skills, agent }) => {
     // create the worktree from the base branch's latest origin tip (falls back to
     // a local head for unpushed bases). The base is only a start point, so this
     // works even when a live task currently has that branch checked out.
     await addWorktreeFromBranch(runner, mirror, worktree, workBranch, baseBranch);
-    // deliver each selected skill's whole dir into the worktree's .claude/skills/
-    for (const sk of skills) await runner.putDir(sk.dir, path.join(worktree, ".claude", "skills", sk.name));
-    // keep delivered skills out of the repo's git status (worktree-local exclude)
-    if (skills.length) {
+    // Skills delivery and the waiting-hook both ride claude's .claude/ conventions;
+    // codex shares neither, so it opts out of both (agentCaps) and runs full-auto —
+    // which is also why it never needs the yellow-light hook.
+    const caps = agentCaps(agent ?? "claude");
+    if (caps.injectSkills) {
+      // deliver each selected skill's whole dir into the worktree's .claude/skills/
+      for (const sk of skills) await runner.putDir(sk.dir, path.join(worktree, ".claude", "skills", sk.name));
+      // keep delivered skills out of the repo's git status (worktree-local exclude)
+      if (skills.length) {
+        await runner.exec("sh", ["-c",
+          `cd ${JSON.stringify(worktree)} && p=$(git rev-parse --git-path info/exclude) && grep -qxF '.claude/skills/' "$p" || printf '.claude/skills/\\n' >> "$p"`,
+        ]).catch(() => {});
+      }
+    }
+    if (caps.injectHooks) {
+      // inject per-task hooks so the session reports when it's blocked on a
+      // permission prompt (yellow light): the hook touches/removes <wt>/.claude/waiting,
+      // which the dispatcher reads back via runner.exists — same on the local box and
+      // on remotes. Deliver settings.local.json through putDir (overlays the .claude
+      // skills/ already there); keep both injected paths out of the repo's git status.
+      const hooksTmp = path.join(os.tmpdir(), `tdsp-hooks-${ns}-${id}`, ".claude");
+      fs.mkdirSync(hooksTmp, { recursive: true });
+      fs.writeFileSync(path.join(hooksTmp, "settings.local.json"), hookSettingsJson(worktree));
+      await runner.putDir(hooksTmp, path.join(worktree, ".claude"));
+      fs.rmSync(path.dirname(hooksTmp), { recursive: true, force: true });
       await runner.exec("sh", ["-c",
-        `cd ${JSON.stringify(worktree)} && p=$(git rev-parse --git-path info/exclude) && grep -qxF '.claude/skills/' "$p" || printf '.claude/skills/\\n' >> "$p"`,
+        `cd ${JSON.stringify(worktree)} && p=$(git rev-parse --git-path info/exclude) && ` +
+        `for f in '.claude/settings.local.json' '.claude/waiting' '.claude/session-id'; do grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
       ]).catch(() => {});
     }
-    // inject per-task hooks so the session reports when it's blocked on a
-    // permission prompt (yellow light): the hook touches/removes <wt>/.claude/waiting,
-    // which the dispatcher reads back via runner.exists — same on the local box and
-    // on remotes. Deliver settings.local.json through putDir (overlays the .claude
-    // skills/ already there); keep both injected paths out of the repo's git status.
-    const hooksTmp = path.join(os.tmpdir(), `tdsp-hooks-${ns}-${id}`, ".claude");
-    fs.mkdirSync(hooksTmp, { recursive: true });
-    fs.writeFileSync(path.join(hooksTmp, "settings.local.json"), hookSettingsJson(worktree));
-    await runner.putDir(hooksTmp, path.join(worktree, ".claude"));
-    fs.rmSync(path.dirname(hooksTmp), { recursive: true, force: true });
-    await runner.exec("sh", ["-c",
-      `cd ${JSON.stringify(worktree)} && p=$(git rev-parse --git-path info/exclude) && ` +
-      `for f in '.claude/settings.local.json' '.claude/waiting' '.claude/session-id'; do grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
-    ]).catch(() => {});
   };
 }
 
@@ -88,7 +97,7 @@ export function buildRepoTaskEnv(opts: RepoEnvOpts): RepoTaskEnv {
     writeManifest: opts.writeManifest,
     resolveSkills: (keys) => resolveSkills(keys, defaultSources()),
     setupWorktree: setupWorktreeOn(opts.runner, opts.ns),
-    startSession: (session, worktree, opening, env) => startSession(opts.runner, session, worktree, opening, { env }),
+    startSession: (session, worktree, opening, sopts) => startSession(opts.runner, session, worktree, opening, sopts),
     removeWorktree: (mirror, worktree, workBranch) => removeWorktree(opts.runner, mirror, worktree, workBranch).then(() => {}),
   };
 }

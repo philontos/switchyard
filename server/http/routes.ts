@@ -15,6 +15,7 @@ import { scanSkills, defaultSources } from "../skills/skills.js";
 import { extForMime, pasteTargetBase, pastedDest, pasteFilename } from "../task/paste.js";
 import { listAvailable, installPlugin } from "../skills/plugins.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions, pasteText } from "../session/tmux.js";
+import { asAgentKind } from "../session/agent.js";
 import { syncReposManifest } from "../repo/manifest.js";
 import { removeTaskManifest } from "../task/taskmanifest.js";
 import { localRunner, runnerFor, SSH_BASE_ARGS, type Runner } from "../fleet/runner.js";
@@ -181,7 +182,7 @@ function repoTaskEnvFor(runner: Runner): RepoTaskEnv {
 }
 
 app.post("/api/tasks", async (req, res) => {
-  const { repo_id, base_branch, title, prompt, provider_id } = req.body ?? {};
+  const { repo_id, base_branch, title, prompt, provider_id, agent, agent_model } = req.body ?? {};
   const lang = langFromReq(req);
   if (!repo_id || !base_branch || !title) {
     return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
@@ -191,12 +192,16 @@ app.post("/api/tasks", async (req, res) => {
   if (repo.status !== "ready") return res.status(409).json({ error: tr(lang, "repo.status", { status: repo.status }) });
   const host = getHost.get(repo.host_id) as Host | undefined;
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
-  // Alternate model backend (optional, node-local). A provider is THIS node's own
-  // config and only ever applies to tasks THIS node runs on itself — never pushed
-  // across the wire. So we resolve it only for a local-node dispatch; any remote
-  // (bootstrapped or not) owns its own claude login and is configured on its own
-  // node. An unknown id falls back to the default login rather than failing.
-  const provider = host?.kind === "local" && provider_id
+  // Which coding-agent CLI runs the task (claude default | codex). codex is a
+  // local-node feature in this version, so a codex dispatch only travels the
+  // in-process path below (never the remote-node branch).
+  const agentKind = asAgentKind(agent);
+  // Alternate model backend (optional, node-local, claude-only). A provider is
+  // THIS node's own config and only ever applies to tasks THIS node runs on
+  // itself — never pushed across the wire, and never for codex (codex switches
+  // models via -m, not the ANTHROPIC_* provider env). An unknown id falls back to
+  // the default login rather than failing.
+  const provider = agentKind === "claude" && host?.kind === "local" && provider_id
     ? (getProvider.get(provider_id) as Provider | undefined)
     : undefined;
   const extraSkills: string[] = Array.isArray(req.body?.extra_skills) ? req.body.extra_skills.map(String) : [];
@@ -205,12 +210,13 @@ app.post("/api/tasks", async (req, res) => {
   // let IT create the task (worktree + session + manifest) on itself. This node
   // does NOT record the task; it surfaces via /api/fleet. A remote that isn't
   // bootstrapped yet falls through to the legacy in-process path below.
-  // The model backend (provider) is node-local and stays out of the spec: a node
-  // never configures another node's model — the target runs on its own claude
-  // login, and is given a provider on its own node (where `provider` above is
-  // already undefined for any non-local dispatch).
+  // The agent (claude | codex) DOES travel in the spec — it's a task property, so
+  // the node runs the same agent A picked, fully symmetric with a local dispatch.
+  // The model backend (provider) does NOT: it's this controller's own node-local
+  // config (secrets), never pushed across the wire — the target runs on its own
+  // login (so `provider` above is already undefined for any non-local dispatch).
   if (host && host.kind !== "local" && host.tdsp_bin) {
-    const spec = { mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url, base: base_branch, title, prompt: prompt || null, skills: extraSkills };
+    const spec = { mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url, base: base_branch, title, prompt: prompt || null, skills: extraSkills, agent: agentKind, model: agent_model ?? null };
     const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
     const out = await runTdsp(host, ["create", b64]);
     const result = parseNodeResult(out.stdout);
@@ -226,7 +232,7 @@ app.post("/api/tasks", async (req, res) => {
   const r = await createRepoTask(
     repoTaskEnvFor(runnerFor(host as Host)),
     { id: repo.id, name: repo.name, mirror_path: repo.mirror_path },
-    { baseBranch: base_branch, title, prompt, extraSkills, providerId: provider ? provider.id : null, env: providerEnv(provider) },
+    { baseBranch: base_branch, title, prompt, extraSkills, providerId: provider ? provider.id : null, env: providerEnv(provider), agent: agentKind, model: agent_model ?? null },
   );
   if (r.ok) return res.json({ id: r.id, session: r.session, work_branch: r.workBranch });
   if (r.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: r.missing.join(", ") }) });
@@ -374,9 +380,13 @@ app.post("/api/tasks/:id/resume", async (req, res) => {
   }
   try {
     const alreadyAlive = await hasSession(runner, task.session).catch(() => false);
-    // resume on the same model backend the task was created with
+    // resume on the SAME agent + model/backend the task was created with: claude
+    // re-injects its provider env; codex re-runs `codex resume --last` with its
+    // recorded model. providerEnv is empty for a codex task (provider_id is NULL).
     const provider = task.provider_id ? (getProvider.get(task.provider_id) as Provider | undefined) : undefined;
-    if (!alreadyAlive) await startSession(runner, task.session, task.worktree_path, null, { continue: true, env: providerEnv(provider) });
+    if (!alreadyAlive) await startSession(runner, task.session, task.worktree_path, null, {
+      continue: true, env: providerEnv(provider), agent: asAgentKind(task.agent), model: task.agent_model,
+    });
     db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(task.id);
     syncTaskManifest(task.id);
     res.json({ ok: true, alreadyAlive });
@@ -489,10 +499,12 @@ app.post("/api/nodes/:hostId/tasks", async (req, res) => {
   if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
   if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
-  const { mirror, name, git_url, base, title, prompt } = req.body ?? {};
+  const { mirror, name, git_url, base, title, prompt, agent, agent_model } = req.body ?? {};
   if (!mirror || !base || !title) return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
   const skills = Array.isArray(req.body?.skills) ? req.body.skills.map(String) : [];
-  const spec = { mirror, name: name || "", git_url: git_url || "", base, title, prompt: prompt || null, skills };
+  // agent travels with the task (the node runs claude or codex the same way this
+  // box would); the node owns its own login, so no provider crosses the wire.
+  const spec = { mirror, name: name || "", git_url: git_url || "", base, title, prompt: prompt || null, skills, agent: asAgentKind(agent), model: agent_model ?? null };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const out = await runTdsp(host, ["create", b64]);
   const result = parseNodeResult(out.stdout);

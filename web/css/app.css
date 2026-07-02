@@ -216,8 +216,16 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 /* "local" tag on a repo-less task card */
 .tag-local { font-size: 10px; color: var(--accent-text); background: #d977571f; border: 1px solid #d9775744; border-radius: 999px; padding: 0 6px; margin-left: 4px; vertical-align: 1px; }
 .tm-lbl { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+/* dispatch modal: agent segmented control (Claude Code | Codex) */
+.agent-seg { display: flex; gap: 6px; margin-bottom: 9px; }
+.agent-opt { flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-family: inherit; }
+.agent-opt:hover { border-color: var(--border-hover); }
+.agent-opt.selected { border-color: var(--accent); color: var(--accent-text); background: #d977571f; }
 /* dispatch modal: extra-skill checkbox list */
 .skills-box { max-height: 132px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; margin-bottom: 7px; }
+/* codex greys out the skills box (no skill mechanism) — non-interactive + dimmed */
+.skills-box.disabled { opacity: .45; pointer-events: none; }
 .skopt { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: 12.5px; cursor: pointer; }
 .skopt input[type=checkbox] { width: auto; margin: 0; }
 .sksrc { margin-left: auto; font-size: 10.5px; color: var(--faint); background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }

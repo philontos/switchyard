@@ -1,4 +1,5 @@
 import { Runner } from "../fleet/runner.js";
+import { agentArgv, type AgentKind } from "./agent.js";
 
 async function tmux(runner: Runner, args: string[]): Promise<string> {
   return runner.exec("tmux", args);
@@ -24,25 +25,26 @@ function envPrefix(env?: Record<string, string>): string[] {
 }
 
 /**
- * Start a detached tmux session running claude in the worktree.
- * If a prompt is given it is passed as claude's initial message; the
- * session stays interactive (TUI), so permission prompts work normally.
- * opts.env injects environment for the claude process (alternate provider).
+ * Start a detached tmux session running the agent (claude by default, or codex)
+ * in the worktree. If a prompt is given it is passed as the agent's initial
+ * message; the session stays interactive (TUI). opts.env injects environment for
+ * the process (claude's alternate provider). opts.model picks a codex model.
+ * How to launch/resume each agent lives in agentArgv — this stays agent-agnostic.
  */
 export async function startSession(
   runner: Runner,
   session: string,
   cwd: string,
   prompt?: string | null,
-  opts?: { continue?: boolean; env?: Record<string, string> },
+  opts?: { continue?: boolean; env?: Record<string, string>; agent?: AgentKind; model?: string | null },
 ) {
-  // resume reattaches to the prior conversation: claude keys its transcript by
-  // cwd, so launching `claude --continue` from the same worktree reopens it. The
-  // original opening prompt is NOT re-sent — the conversation already has it.
+  // resume reattaches to the prior conversation (both agents key it by cwd:
+  // `claude --continue` / `codex resume --last`). The original opening prompt is
+  // NOT re-sent — the conversation already has it. The env prefix (provider) goes
+  // BEFORE the agent argv so the vars land on the agent process.
   const pre = envPrefix(opts?.env);
-  const launch = opts?.continue ? [...pre, "claude", "--continue"] : [...pre, "claude"];
-  const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...launch];
-  if (prompt && prompt.trim() && !opts?.continue) cmd.push(prompt);
+  const launch = agentArgv(opts?.agent ?? "claude", { prompt, model: opts?.model, resume: opts?.continue });
+  const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...pre, ...launch];
   await tmux(runner, cmd);
   // keep the pane around if claude exits so the user can read the result
   await tmux(runner, ["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});

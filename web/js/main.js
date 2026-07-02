@@ -13,7 +13,7 @@ import { initTerm, showTermEmpty, applyTermTheme } from "./features/terminal.js"
 import { state } from "./core/state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./features/repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, addNodeShell, updateHost } from "./features/hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal } from "./features/tasks.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent } from "./features/tasks.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./features/skills.js";
 import { initReorder } from "./features/reorder.js";
 import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./features/providers.js";
@@ -26,7 +26,7 @@ import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPan
 Object.assign(window, {
   // tasks
   addTask, openTaskModal, closeTaskModal, connect, archive, removeWt, deleteTask, resume,
-  addLocalTask, renameTask, focusPending, openNodeTaskModal,
+  addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent,
   // repos
   delRepo, openRepoModal, closeRepoModal, addRepo,
   // hosts

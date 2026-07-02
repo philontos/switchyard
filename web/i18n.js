@@ -85,6 +85,13 @@
       "task.promptPh": "给 claude 的初始指令（可选）",
       "task.submit": "建 worktree + 起会话",
 
+      // agent axis (which coding-agent CLI runs the task)
+      "task.agentLabel": "智能体",
+      "agent.modelLabel": "模型",
+      "agent.codexModelPh": "Codex 模型（可选），留空用默认，如 gpt-5-codex",
+      "agent.codexSkillsNote": "Codex 暂不支持附加 skill",
+      "agent.codexAutoNote": "🔒 全自动：Codex 不会中途停下来问授权，使用本机已登录的 Codex 账号",
+
       // shells (bare tmux, per machine — local or remote)
       "local.new": "新建 shell",
       "local.tag": "shell",
@@ -267,6 +274,13 @@
       "task.titlePh": "Task title",
       "task.promptPh": "Initial prompt for claude (optional)",
       "task.submit": "Create worktree + start session",
+
+      // agent axis (which coding-agent CLI runs the task)
+      "task.agentLabel": "Agent",
+      "agent.modelLabel": "Model",
+      "agent.codexModelPh": "Codex model (optional), blank = default, e.g. gpt-5-codex",
+      "agent.codexSkillsNote": "Codex doesn't support extra skills yet",
+      "agent.codexAutoNote": "🔒 Full-auto: Codex won't pause for approvals; uses this machine's Codex login",
 
       // shells (bare tmux, per machine — local or remote)
       "local.new": "New shell",
