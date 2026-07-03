@@ -140,10 +140,15 @@ function fleetDot(tk) {
 function fleetCard(hostId, tk) {
   const paneId = `n${hostId}:${tk.id}`;
   const sel = paneId === state.selectedTaskId ? " selected" : "";
+  // Same agent split as the local taskCard — the node ships `agent` in its
+  // `tdsp list` payload (SELECT *), so a remote Codex task reads identically to a
+  // local one. An un-updated node (no agent column) omits it → defaults to claude.
+  // Colour only (task-claude / task-codex accent bar + tint), no text label.
+  const agent = tk.agent === "codex" ? "codex" : "claude";
   const meta = tk.kind === "local"
     ? `<div class="muted">📂 <code>${tk.cwd || "~"}</code> <span class="tag-local">${t("local.tag")}</span></div>`
     : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;
-  return `<div class="card task${sel} clickable" data-pane="${paneId}" onclick="connectNode(${hostId},${tk.id})">
+  return `<div class="card task task-${agent}${sel} clickable" data-pane="${paneId}" onclick="connectNode(${hostId},${tk.id})">
       <button class="card-x" title="${t("task.stopTitle")}" onclick="event.stopPropagation();stopNodeTask(${hostId},${tk.id})">⏹</button>
       <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname">${tk.title}</span></div>
       ${meta}

@@ -343,11 +343,12 @@ export function isShadowedByPending(tk) {
 // data-id/data-repo — it isn't connectable or drag-reorderable until it's real.
 export function pendingCard(p) {
   const sel = pendingIsActive(p.tmpId) ? " selected" : "";
+  // agent picks the card's colour (task-claude / task-codex accent bar + tint) —
+  // no text label; the colour alone carries the claude-vs-codex distinction.
   const agent = p.agent === "codex" ? "codex" : "claude";
-  const agentName = agent === "codex" ? "Codex" : "Claude Code";
   return `<div class="card task pending-card task-${agent} clickable${sel}" data-pending="${p.tmpId}" onclick="focusPending('${p.tmpId}')">
     <div class="t"><span class="sdot cloning" title="${I18N.t("task.creating")}"></span>
-      <span class="tname" onclick="event.stopPropagation()">${p.title}</span><span class="tag-agent tag-${agent}">${agentName}</span></div>
+      <span class="tname" onclick="event.stopPropagation()">${p.title}</span></div>
     <div class="muted">${I18N.t("task.creating")}</div>
   </div>`;
 }
@@ -376,8 +377,9 @@ function rejectPending(tmpId, message) {
 
 export function taskCard(t, online) {
   const active = t.status !== "cleaned";
+  // agent picks the card's colour (task-claude / task-codex accent bar + tint) —
+  // no text label; the colour alone carries the claude-vs-codex distinction.
   const agent = t.agent === "codex" ? "codex" : "claude";
-  const agentName = agent === "codex" ? "Codex" : "Claude Code";
   // one corner action per state — stop (active) / cleanup (cleaned)
   // NOTE: the param is `t` (the task), so it shadows the global t() — use I18N.t here.
   // `needsHost` actions run a command ON the machine, so they're disabled while
@@ -413,7 +415,7 @@ export function taskCard(t, online) {
     : `<span class="sdot ${t.status}" title="${t.status}"></span>`;
   // the title is its own click zone: single clicks don't bubble to the card (so
   // they never connect()), double-click renames it in place.
-  const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" onclick="event.stopPropagation()" ondblclick="renameTask(event,${t.id})">${t.title}</span><span class="tag-agent tag-${agent}">${agentName}</span></div>
+  const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" onclick="event.stopPropagation()" ondblclick="renameTask(event,${t.id})">${t.title}</span></div>
     ${meta}`;
   // only attach-on-click when there's a live session to attach to; a resumable
   // (dead-session) card routes through its Resume button instead.
