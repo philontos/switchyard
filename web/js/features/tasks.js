@@ -179,7 +179,7 @@ export async function addLocalTask(hostId) {
   const tmpId = nextTmpId();
   const hid = hostId != null ? hostId : localHostId();
   openPending(tmpId, t("term.creating"), "", t("local.starting"));
-  addPendingCard(tmpId, { kind: "local", repoId: null, hostId: hid, title: t("term.creating") });
+  addPendingCard(tmpId, { kind: "local", repoId: null, hostId: hid, title: t("term.creating"), agent: "claude" });
   try {
     const body = hostId != null ? JSON.stringify({ host_id: hostId }) : "{}";
     const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body });
@@ -277,7 +277,7 @@ export async function addTask() {
   const tmpId = nextTmpId();
   openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
   expandRepo(body.repo_id);
-  addPendingCard(tmpId, { kind: "repo", repoId: body.repo_id, hostId: null, title: body.title });
+  addPendingCard(tmpId, { kind: "repo", repoId: body.repo_id, hostId: null, title: body.title, agent: body.agent });
   $("t-title").value = ""; $("t-prompt").value = "";
   closeTaskModal();
   try {
@@ -302,7 +302,7 @@ function nextTmpId() { return "tmp" + (++tmpSeq); }
 // gives instant feedback in BOTH places. Keyed by the same client temp id, dropped
 // the moment the POST resolves; loadTasks() then renders the real card. repoId/hostId
 // /kind place the card in the right group; title labels it.
-let pendingCards = new Map();   // tmpId -> { tmpId, repoId, hostId, kind, title }
+let pendingCards = new Map();   // tmpId -> { tmpId, repoId, hostId, kind, title, agent }
 
 // Register a placeholder and make it the selection (clearing whatever card was open —
 // the new task takes over the dock), then re-render so it paints into the list.
@@ -343,9 +343,11 @@ export function isShadowedByPending(tk) {
 // data-id/data-repo — it isn't connectable or drag-reorderable until it's real.
 export function pendingCard(p) {
   const sel = pendingIsActive(p.tmpId) ? " selected" : "";
-  return `<div class="card task pending-card clickable${sel}" data-pending="${p.tmpId}" onclick="focusPending('${p.tmpId}')">
+  const agent = p.agent === "codex" ? "codex" : "claude";
+  const agentName = agent === "codex" ? "Codex" : "Claude Code";
+  return `<div class="card task pending-card task-${agent} clickable${sel}" data-pending="${p.tmpId}" onclick="focusPending('${p.tmpId}')">
     <div class="t"><span class="sdot cloning" title="${I18N.t("task.creating")}"></span>
-      <span class="tname" onclick="event.stopPropagation()">${p.title}</span></div>
+      <span class="tname" onclick="event.stopPropagation()">${p.title}</span><span class="tag-agent tag-${agent}">${agentName}</span></div>
     <div class="muted">${I18N.t("task.creating")}</div>
   </div>`;
 }
@@ -374,6 +376,8 @@ function rejectPending(tmpId, message) {
 
 export function taskCard(t, online) {
   const active = t.status !== "cleaned";
+  const agent = t.agent === "codex" ? "codex" : "claude";
+  const agentName = agent === "codex" ? "Codex" : "Claude Code";
   // one corner action per state — stop (active) / cleanup (cleaned)
   // NOTE: the param is `t` (the task), so it shadows the global t() — use I18N.t here.
   // `needsHost` actions run a command ON the machine, so they're disabled while
@@ -409,7 +413,7 @@ export function taskCard(t, online) {
     : `<span class="sdot ${t.status}" title="${t.status}"></span>`;
   // the title is its own click zone: single clicks don't bubble to the card (so
   // they never connect()), double-click renames it in place.
-  const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" onclick="event.stopPropagation()" ondblclick="renameTask(event,${t.id})">${t.title}</span></div>
+  const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" onclick="event.stopPropagation()" ondblclick="renameTask(event,${t.id})">${t.title}</span><span class="tag-agent tag-${agent}">${agentName}</span></div>
     ${meta}`;
   // only attach-on-click when there's a live session to attach to; a resumable
   // (dead-session) card routes through its Resume button instead.
@@ -418,7 +422,7 @@ export function taskCard(t, online) {
   // data-repo marks a card as drag-reorderable (reorder.js) — only active repo
   // tasks: shells have no repo group, archived/cleaned ones aren't reorderable.
   const drag = active && t.kind !== "local" ? ` data-repo="${t.repo_id}"` : "";
-  return `<div class="card task${sel}${open}" data-id="${t.id}"${drag}>
+  return `<div class="card task task-${agent}${sel}${open}" data-id="${t.id}"${drag}>
     <button class="card-x" title="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
     ${head}${note}${resumeBtn}
   </div>`;
