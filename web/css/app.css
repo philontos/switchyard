@@ -261,6 +261,18 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 /* task card */
 .task { position: relative; }
 .task .t { padding-right: 24px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.task::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; pointer-events: none;
+  border-radius: 8px 0 0 8px; opacity: .85; }
+.task-claude::before { background: var(--accent-bar); }
+.task-codex::before { background: #4aa3df; }
+.card.task-claude { background: linear-gradient(90deg, #d977570f 0, var(--surface) 42px); }
+.card.task-codex { background: linear-gradient(90deg, #4aa3df14 0, var(--surface) 42px); border-color: color-mix(in srgb, #4aa3df 28%, var(--border)); }
+.card.task-codex.clickable:hover { border-color: #4aa3df; background: linear-gradient(90deg, #4aa3df1f 0, var(--card-hover) 42px); }
+.tag-agent { flex: none; font-size: 10px; line-height: 1.5; font-weight: 600; letter-spacing: 0;
+  border-radius: 999px; padding: 0 7px; border: 1px solid; white-space: nowrap; }
+.tag-agent.tag-claude { color: var(--accent-text); background: #d977571f; border-color: #d9775744; }
+.tag-agent.tag-codex { color: #75c8f3; background: #4aa3df1f; border-color: #4aa3df55; }
+:root[data-theme="light"] .tag-agent.tag-codex { color: #176a99; background: #d6edf9; border-color: #8fc9e8; }
 /* the editable title text — its own click zone (doesn't open the task); the text
    cursor + dotted underline on hover hint "double-click to rename".
    It pre-reserves .tname-edit's exact box (same box-sizing / padding / 1px border,
@@ -280,6 +292,8 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 /* selected: the item currently open in the bottom terminal — left accent bar + tint, wins over hover */
 .card.selected, .card.clickable.selected:hover { border-color: var(--accent); background: #d977571f;
   box-shadow: inset 3px 0 0 var(--accent-bar); }
+.card.task-codex.selected, .card.task-codex.clickable.selected:hover { border-color: #4aa3df; background: #4aa3df1c;
+  box-shadow: inset 3px 0 0 #4aa3df; }
 .card-x { position: absolute; top: 7px; right: 7px; width: auto; margin: 0; padding: 1px 6px;
   background: none; border: none; color: var(--faint); font-size: 13px; line-height: 1; }
 .card-x:hover { background: #f8514914; color: var(--red); }

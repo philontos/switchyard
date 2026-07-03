@@ -50,8 +50,14 @@ test("agentArgv codex with a model inserts -m <model> before the prompt", () => 
     "codex", "-a", "never", "-s", "workspace-write", "-m", "gpt-5.4", "go",
   ]);
 });
-test("agentArgv codex resume is `codex resume --last`, ignoring prompt and model", () => {
+test("agentArgv codex adds writable git dirs inside workspace-write", () => {
+  assert.deepEqual(agentArgv("codex", { prompt: "go", addDirs: ["/mirror/worktrees/1", "/mirror"] }), [
+    "codex", "-a", "never", "-s", "workspace-write",
+    "--add-dir", "/mirror/worktrees/1", "--add-dir", "/mirror", "go",
+  ]);
+});
+test("agentArgv codex resume keeps the same sandbox policy, ignoring prompt and model", () => {
   assert.deepEqual(agentArgv("codex", { prompt: "opening", model: "gpt-5.4", resume: true }), [
-    "codex", "resume", "--last",
+    "codex", "-a", "never", "-s", "workspace-write", "resume", "--last",
   ]);
 });
