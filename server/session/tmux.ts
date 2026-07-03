@@ -5,6 +5,34 @@ async function tmux(runner: Runner, args: string[]): Promise<string> {
   return runner.exec("tmux", args);
 }
 
+function absGitPath(cwd: string, p: string): string {
+  const s = p.trim();
+  if (!s || s.startsWith("/")) return s;
+  return `${cwd.replace(/\/+$/, "")}/${s.replace(/^\.\//, "")}`;
+}
+
+async function gitPath(runner: Runner, cwd: string, flag: "--git-dir" | "--git-common-dir"): Promise<string | null> {
+  try {
+    return (await runner.exec("git", ["-C", cwd, "rev-parse", "--path-format=absolute", flag])).trim();
+  } catch {
+    try {
+      const p = (await runner.exec("git", ["-C", cwd, "rev-parse", flag])).trim();
+      return absGitPath(cwd, p);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function codexWritableGitDirs(runner: Runner, cwd: string, agent: AgentKind): Promise<string[]> {
+  if (agent !== "codex") return [];
+  const dirs = await Promise.all([
+    gitPath(runner, cwd, "--git-dir"),
+    gitPath(runner, cwd, "--git-common-dir"),
+  ]);
+  return [...new Set(dirs.filter((d): d is string => !!d))];
+}
+
 /**
  * Build an `env K=V ...` prefix that sets per-session vars directly on the
  * launched process. `tmux new-session` does NOT propagate arbitrary env vars
@@ -42,8 +70,10 @@ export async function startSession(
   // `claude --continue` / `codex resume --last`). The original opening prompt is
   // NOT re-sent — the conversation already has it. The env prefix (provider) goes
   // BEFORE the agent argv so the vars land on the agent process.
+  const agent = opts?.agent ?? "claude";
   const pre = envPrefix(opts?.env);
-  const launch = agentArgv(opts?.agent ?? "claude", { prompt, model: opts?.model, resume: opts?.continue });
+  const addDirs = await codexWritableGitDirs(runner, cwd, agent);
+  const launch = agentArgv(agent, { prompt, model: opts?.model, resume: opts?.continue, addDirs });
   const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...pre, ...launch];
   await tmux(runner, cmd);
   // keep the pane around if claude exits so the user can read the result

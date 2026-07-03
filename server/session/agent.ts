@@ -39,9 +39,12 @@ export interface LaunchOpts {
   model?: string | null;
   /** resume the prior conversation in this cwd instead of starting fresh */
   resume?: boolean;
+  /** codex workspace-write: extra writable roots, e.g. a linked worktree's gitdir */
+  addDirs?: string[];
 }
 
 const hasText = (s?: string | null): s is string => !!s && !!s.trim();
+const addDirArgs = (dirs?: string[]) => (dirs ?? []).flatMap((d) => hasText(d) ? ["--add-dir", d.trim()] : []);
 
 /**
  * Build the agent's launch argv — the binary plus its args, WITHOUT the tmux
@@ -54,8 +57,9 @@ const hasText = (s?: string | null): s is string => !!s && !!s.trim();
  */
 export function agentArgv(agent: AgentKind, opts: LaunchOpts = {}): string[] {
   if (agent === "codex") {
-    if (opts.resume) return ["codex", "resume", "--last"];
-    const argv = ["codex", "-a", "never", "-s", "workspace-write"];
+    const base = ["codex", "-a", "never", "-s", "workspace-write", ...addDirArgs(opts.addDirs)];
+    if (opts.resume) return [...base, "resume", "--last"];
+    const argv = [...base];
     if (hasText(opts.model)) argv.push("-m", opts.model.trim());
     if (hasText(opts.prompt)) argv.push(opts.prompt);
     return argv;
