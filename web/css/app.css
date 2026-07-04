@@ -477,13 +477,41 @@ a { color: var(--accent-bar); }
   body.view-terminal .rail,
   body.view-terminal .list { visibility: hidden; }
 
-  /* term bar: reveal the back button; drop desktop-only affordances that crowd a
-     phone-width bar (drag-select hint, raw attach cmd, prompt preview, session-id
-     chip, manual preview-port box) */
-  #term-back { display: inline-flex; align-items: center; justify-content: center;
-    width: auto; margin: 0; padding: 2px 10px; font-size: 20px; line-height: 1; }
+  /* term bar: mobile app-style navigation chrome. The taller fixed row avoids the
+     cramped browser-toolbar feel, and the chevron is drawn with CSS instead of a
+     text glyph so it stays visually centered across iOS font metrics. */
+  .termbar {
+    min-height: 56px;
+    padding: 6px max(10px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
+    gap: 8px;
+  }
+  #term-back {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    padding: 0;
+    border-radius: 12px;
+    font-size: 0;
+    line-height: 1;
+    background: transparent;
+    border-color: transparent;
+  }
+  #term-back::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-left: 1.8px solid currentColor;
+    border-bottom: 1.8px solid currentColor;
+    transform: translateX(2px) rotate(45deg);
+  }
+  #term-back:active { background: var(--surface-2); }
   .termbar .hint, #term-attach, #term-desc, .term-claude, .prev-port, .prev-btn { display: none; }
-  #term-title { flex: 1; max-width: none; }
+  #term-title { flex: 1; max-width: none; font-size: 16px; text-align: center; padding-right: 44px; }
 
   /* --- quick-input bar (wired in mobile.js): auto-growing compose field + Send, with
      a Fn-toggled control-key popover --- */
