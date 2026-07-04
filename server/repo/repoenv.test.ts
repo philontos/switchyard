@@ -44,7 +44,8 @@ test("setupWorktree (claude) delivers skills and injects the .claude hooks overl
 });
 
 // codex has no .claude/skills and no hook mechanism, so neither injection runs —
-// zero putDir calls. Its full-auto launch is why it needs no waiting-hook.
+// zero putDir calls. It also has no waiting-hook (the dispatcher can't see a
+// codex approval pause — see agentArgv).
 test("setupWorktree (codex) skips skills and hooks — no .claude injection at all", async () => {
   const { runner, putDirs } = recordingRunner();
   await setupWith("codex", putDirs, runner);
