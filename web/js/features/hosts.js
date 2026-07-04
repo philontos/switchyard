@@ -10,7 +10,8 @@ import { Selects } from "../core/select.js";
 import { state } from "../core/state.js";
 import { repoGroupHead } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask, connect,
-         pendingRepoCards, pendingShellCards, isShadowedByPending, pendingCard } from "./tasks.js";
+         pendingRepoCards, pendingNodeRepoCards, pendingShellCards,
+         isShadowedByPending, isShadowedByNodePending, pendingCard } from "./tasks.js";
 import { detachDock, openPty, pruneNodePanes } from "./terminal.js";
 import { orderTasks, isDraggingTask } from "./reorder.js";
 
@@ -86,20 +87,6 @@ export function connectNode(hostId, taskId) {
   const attach = host ? `ssh ${host.target} tmux attach -t ${tk.session}` : `tmux attach -t ${tk.session}`;
   openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, "", attach, paneId, "");
   renderList();
-}
-
-// Open a new bare shell ON a remote node (sinks via the node's own tdsp). The shell
-// lives on the node, so it surfaces through the fleet — refresh it, then attach.
-export async function addNodeShell(hostId) {
-  toast(t("toast.dispatchingToNode", { name: state.hostsById[hostId]?.name || hostId }), "info");
-  try {
-    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ host_id: hostId }) });
-    await loadFleet();
-    if (r.id) connectNode(hostId, r.id);
-    toast(t("toast.taskDispatched", { session: r.session }), "success");
-  } catch (e) {
-    toast(String(e?.message || e), "error");
-  }
 }
 
 // Stop a remote node's task — the server drives the node's own tdsp to kill it.
@@ -373,15 +360,21 @@ function renderList() {
       const repos = fl.repos || [];
       const known = new Set(repos.map(r => r.id));
       const repoGroups = repos.map(r => {
-        const mine = live.filter(tk => tk.kind === "repo" && tk.repo_id === r.id);
-        const cards = mine.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("repo.noTasks")}</div>`;
+        // optimistic placeholders (newest-on-top) render ahead of the node's real
+        // cards; the matching real 'creating' card is shadowed until the POST resolves.
+        const pend = pendingNodeRepoCards(h.id, r.id).map(pendingCard).join("");
+        const mine = live.filter(tk => tk.kind === "repo" && tk.repo_id === r.id && !isShadowedByNodePending(h.id, tk));
+        const cards = pend + mine.map(tk => fleetCard(h.id, tk)).join("");
+        const body = cards || `<div class="grp-empty">${t("repo.noTasks")}</div>`;
         const add = `<button class="grp-act" title="${t("node.newTask")}" onclick="event.stopPropagation();openNodeTaskModal(${h.id},${r.id})">＋</button>`;
-        return `<div class="grp open"><div class="grp-head static"><span class="grp-name">📦 ${r.name}</span>${add}</div>${cards}</div>`;
+        return `<div class="grp open"><div class="grp-head static"><span class="grp-name">📦 ${r.name}</span>${add}</div>${body}</div>`;
       }).join("");
       // the node's own shells, with a ＋ that opens a new shell ON the node
-      const nodeShells = live.filter(tk => tk.kind === "local");
+      const pendShells = pendingShellCards(h.id).map(pendingCard).join("");
+      const nodeShells = live.filter(tk => tk.kind === "local" && !isShadowedByNodePending(h.id, tk));
       const addShell = `<button class="grp-act" title="${t("local.new")}" onclick="event.stopPropagation();addNodeShell(${h.id})">＋</button>`;
-      const shellGroup = `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>${nodeShells.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
+      const shellCards = pendShells + nodeShells.map(tk => fleetCard(h.id, tk)).join("");
+      const shellGroup = `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>${shellCards || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
       // repo tasks whose repo the node didn't list — rare safety net
       const orphans = live.filter(tk => tk.kind === "repo" && !known.has(tk.repo_id));
       const orphanGroup = orphans.length

@@ -9,7 +9,7 @@ import { Selects } from "../core/select.js";
 import { state } from "../core/state.js";
 import { openPty, disposePty, prunePanes, setClaudeSession,
          openPending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
-import { rerender, expandRepo, loadFleet } from "./hosts.js";
+import { rerender, expandRepo, loadFleet, connectNode } from "./hosts.js";
 import { refreshProviders, selectedProviderId } from "./providers.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
@@ -194,6 +194,28 @@ export async function addLocalTask(hostId) {
   }
 }
 
+// Open a new bare shell ON a remote node (sinks via the node's own tdsp). The shell
+// lives on the node, so it surfaces through the fleet. Mirrors addLocalTask's optimistic
+// feel — a dock loading window + placeholder card up before the (ssh-slow) POST — then
+// attaches to the node's live shell via the fleet path (loadFleet + connectNode).
+export async function addNodeShell(hostId) {
+  const tmpId = nextTmpId();
+  openPending(tmpId, t("term.creating"), "", t("local.starting"));
+  addPendingCard(tmpId, { kind: "local", repoId: null, hostId, title: t("term.creating"), agent: "claude" });
+  try {
+    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ host_id: hostId }) });
+    dropPendingCard(tmpId);          // the real fleet card replaces the placeholder
+    await loadFleet();
+    settleNodePending(tmpId, hostId, r.id);
+    nudgeFleet();
+    toast(t("toast.taskDispatched", { session: r.session }), "success");
+  } catch (e) {
+    dropPendingCard(tmpId);
+    await loadFleet();
+    rejectPending(tmpId, e.message);
+  }
+}
+
 // extra-skill checkboxes for the dispatch modal; reset each open. Dispatch works
 // fine even if this fails to load (just no skills offered).
 async function loadDispatchOptions() {
@@ -227,8 +249,9 @@ async function loadBranches() {
 
 // Dispatch a repo task to a remote node's own repo. The node creates the worktree
 // from its existing mirror + owns the task, so it surfaces via the fleet (not this
-// controller's db) — we just toast and refresh the fleet. The POST blocks while the
-// node builds the worktree (git fetch can be slow), so flag it as in-progress.
+// controller's db). Optimistic like a local dispatch: a placeholder card + dock
+// spinner cover the POST, which blocks while the node builds the worktree (git fetch
+// over ssh can be slow), then settle into the node's live terminal.
 async function addNodeTask() {
   const { hostId, repo } = nodeTask;
   const codex = selectedAgent === "codex";
@@ -242,14 +265,26 @@ async function addNodeTask() {
     model: codex ? ($("t-codex-model").value.trim() || null) : null,
   };
   if (!body.base || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
+  // Same optimistic feedback as a local dispatch (addTask): a dock loading window +
+  // a placeholder card in the node's repo group, both up BEFORE the POST — which is
+  // ssh-slow (the node fetches the branch + builds the worktree over there), so a
+  // click must never sit silent. The card carries hostId so it lands only in this
+  // node's fleet group; on success it settles into the node's live terminal.
+  const tmpId = nextTmpId();
+  openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
+  addPendingCard(tmpId, { kind: "repo", repoId: repo.id, hostId, title: body.title, agent: body.agent });
   closeTaskModal();
-  toast(t("toast.dispatchingToNode", { name: state.hostsById[hostId]?.name || hostId }), "info");
   try {
     const r = await api(`/api/nodes/${hostId}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    dropPendingCard(tmpId);          // the real fleet card replaces the placeholder
     await loadFleet();
+    settleNodePending(tmpId, hostId, r.id);
+    nudgeFleet();                    // catch the creating→running flip before the 15s poll
     toast(t("toast.taskDispatched", { session: r.session }), "success");
   } catch (e) {
-    toast(String(e?.message || e), "error");
+    dropPendingCard(tmpId);
+    await loadFleet();
+    rejectPending(tmpId, e.message);
   }
 }
 
@@ -319,9 +354,15 @@ function localHostId() {
   return h ? h.id : null;
 }
 
-// pending cards belonging to a repo group / a machine's Shells group (hosts.js renderList)
+// pending cards belonging to a repo group / a machine's Shells group (hosts.js renderList).
+// Local controller repos carry hostId == null; a remote node's repo card carries the
+// node's id and renders via pendingNodeRepoCards — the two never cross-render even if a
+// controller repo id happens to equal a node's fleet repo id (separate DBs).
 export function pendingRepoCards(repoId) {
-  return [...pendingCards.values()].filter(p => p.kind !== "local" && p.repoId === repoId);
+  return [...pendingCards.values()].filter(p => p.kind === "repo" && p.hostId == null && p.repoId === repoId);
+}
+export function pendingNodeRepoCards(hostId, repoId) {
+  return [...pendingCards.values()].filter(p => p.kind === "repo" && p.hostId === hostId && p.repoId === repoId);
 }
 export function pendingShellCards(hostId) {
   return [...pendingCards.values()].filter(p => p.kind === "local" && p.hostId === hostId);
@@ -334,6 +375,20 @@ export function isShadowedByPending(tk) {
   if (tk.status !== "creating") return false;
   for (const p of pendingCards.values()) {
     if (p.kind === "local") { if (tk.kind === "local" && p.hostId === tk.host_id) return true; }
+    else if (tk.repo_id === p.repoId && p.title === tk.title) return true;
+  }
+  return false;
+}
+// The fleet-view twin of isShadowedByPending: a remote node's freshly-polled
+// 'creating' task is hidden while our optimistic placeholder for it is still up, so
+// the fleet card and the placeholder never briefly double-render (the 15s fleet poll
+// can fire mid-dispatch). Matched within one host: repo tasks by repo + title, shells
+// by host (a shell has no stable title until the node names it).
+export function isShadowedByNodePending(hostId, tk) {
+  if (tk.status !== "creating") return false;
+  for (const p of pendingCards.values()) {
+    if (p.hostId !== hostId) continue;
+    if (p.kind === "local") { if (tk.kind === "local") return true; }
     else if (tk.repo_id === p.repoId && p.title === tk.title) return true;
   }
   return false;
@@ -366,6 +421,19 @@ function settlePending(tmpId, taskId) {
   if (pendingIsActive(tmpId)) connect(taskId);   // showPane() clears the placeholder
   closePending(tmpId);
 }
+
+// The remote twin of settlePending: a node task lives in the fleet, so it attaches
+// over ssh via connectNode (not the local connect). Call it after loadFleet(), so the
+// just-created task is in the snapshot connectNode reads. If the snapshot hasn't caught
+// it yet, connectNode no-ops and the card simply appears on the next fleet poll.
+function settleNodePending(tmpId, hostId, taskId) {
+  if (pendingIsActive(tmpId) && taskId != null) connectNode(hostId, taskId);
+  closePending(tmpId);
+}
+
+// After a remote dispatch, the 15s fleet poll lags the creating→running flip; nudge a
+// couple of quick refreshes so the new card's status light catches up promptly.
+function nudgeFleet() { setTimeout(loadFleet, 2000); setTimeout(loadFleet, 6000); }
 
 // Creation failed: show the error in its window if still visible, else fall back to
 // a toast (the failed task also surfaces as an error card via loadTasks()).
