@@ -35,29 +35,29 @@ test("agentArgv claude ignores model (claude's model rides the provider env, not
   assert.deepEqual(agentArgv("claude", { prompt: "go", model: "glm-4.6" }), ["claude", "go"]);
 });
 
-// ---- agentArgv: codex (full-auto: never stops to ask; sandboxed to the workspace) ----
-test("agentArgv codex with a prompt is full-auto + the prompt", () => {
+// ---- agentArgv: codex (full-access: -a on-request -s danger-full-access, so tasks can push/gh/network) ----
+test("agentArgv codex with a prompt is full-access + the prompt", () => {
   assert.deepEqual(agentArgv("codex", { prompt: "build it" }), [
-    "codex", "-a", "never", "-s", "workspace-write", "build it",
+    "codex", "-a", "on-request", "-s", "danger-full-access", "build it",
   ]);
 });
-test("agentArgv codex with no prompt is full-auto with no trailing message", () => {
-  assert.deepEqual(agentArgv("codex", {}), ["codex", "-a", "never", "-s", "workspace-write"]);
-  assert.deepEqual(agentArgv("codex", { prompt: "  " }), ["codex", "-a", "never", "-s", "workspace-write"]);
+test("agentArgv codex with no prompt is full-access with no trailing message", () => {
+  assert.deepEqual(agentArgv("codex", {}), ["codex", "-a", "on-request", "-s", "danger-full-access"]);
+  assert.deepEqual(agentArgv("codex", { prompt: "  " }), ["codex", "-a", "on-request", "-s", "danger-full-access"]);
 });
 test("agentArgv codex with a model inserts -m <model> before the prompt", () => {
   assert.deepEqual(agentArgv("codex", { prompt: "go", model: "gpt-5.4" }), [
-    "codex", "-a", "never", "-s", "workspace-write", "-m", "gpt-5.4", "go",
+    "codex", "-a", "on-request", "-s", "danger-full-access", "-m", "gpt-5.4", "go",
   ]);
 });
-test("agentArgv codex adds writable git dirs inside workspace-write", () => {
+test("agentArgv codex adds writable git dirs via --add-dir", () => {
   assert.deepEqual(agentArgv("codex", { prompt: "go", addDirs: ["/mirror/worktrees/1", "/mirror"] }), [
-    "codex", "-a", "never", "-s", "workspace-write",
+    "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1", "--add-dir", "/mirror", "go",
   ]);
 });
 test("agentArgv codex resume keeps the same sandbox policy, ignoring prompt and model", () => {
   assert.deepEqual(agentArgv("codex", { prompt: "opening", model: "gpt-5.4", resume: true }), [
-    "codex", "-a", "never", "-s", "workspace-write", "resume", "--last",
+    "codex", "-a", "on-request", "-s", "danger-full-access", "resume", "--last",
   ]);
 });

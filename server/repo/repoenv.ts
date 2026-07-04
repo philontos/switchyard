@@ -46,8 +46,8 @@ function setupWorktreeOn(runner: Runner, ns: string): RepoTaskEnv["setupWorktree
     // works even when a live task currently has that branch checked out.
     await addWorktreeFromBranch(runner, mirror, worktree, workBranch, baseBranch);
     // Skills delivery and the waiting-hook both ride claude's .claude/ conventions;
-    // codex shares neither, so it opts out of both (agentCaps) and runs full-auto —
-    // which is also why it never needs the yellow-light hook.
+    // codex shares neither, so it opts out of both (agentCaps). codex also has no
+    // yellow-light hook — the dispatcher can't see a codex approval pause (see agentArgv).
     const caps = agentCaps(agent ?? "claude");
     if (caps.injectSkills) {
       // deliver each selected skill's whole dir into the worktree's .claude/skills/

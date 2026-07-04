@@ -126,15 +126,15 @@ test("startSession drops empty/blank env values (no `env` prefix when nothing to
   assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "claude", "go"] });
 });
 
-test("startSession(agent='codex') launches codex full-auto with the prompt", async () => {
+test("startSession(agent='codex') launches codex full-access with the prompt", async () => {
   const { runner, calls } = fakeRunner();
-  // codex never stalls on an approval prompt the dispatcher couldn't see, so it
-  // runs `-a never -s workspace-write`; the git metadata dirs are added as extra
-  // writable roots so linked worktrees can commit inside the sandbox.
+  // codex runs full-access (`-a on-request -s danger-full-access`) so tasks can
+  // push / run gh / reach the network; the git metadata dirs are still passed as
+  // extra writable roots (a no-op with the sandbox off, kept for uniformity).
   await startSession(runner, "tdsp-1-x", "/wt", "do it", { agent: "codex" });
   assert.deepEqual(calls.at(-2), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "codex", "-a", "never", "-s", "workspace-write",
+    "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "do it",
   ] });
 });
@@ -146,7 +146,7 @@ test("startSession(agent='codex', continue) resumes with `codex resume --last`",
   await startSession(runner, "tdsp-1-x", "/wt", "the original prompt", { agent: "codex", continue: true });
   assert.deepEqual(calls.at(-2), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "codex", "-a", "never", "-s", "workspace-write",
+    "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "resume", "--last",
   ] });
 });
@@ -156,7 +156,7 @@ test("startSession(agent='codex', model) passes -m <model> before the prompt", a
   await startSession(runner, "tdsp-1-x", "/wt", "go", { agent: "codex", model: "gpt-5.4" });
   assert.deepEqual(calls.at(-2), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "codex", "-a", "never", "-s", "workspace-write",
+    "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "-m", "gpt-5.4", "go",
   ] });
 });

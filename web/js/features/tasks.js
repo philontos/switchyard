@@ -84,7 +84,7 @@ export function selectAgent(kind) {
 
 // Reflect the selected agent onto the modal:
 //   codex  → provider picker hidden (codex never sends one), codex model + the
-//            full-auto note shown, skills box greyed out (no skill mechanism)
+//            full-access note shown, skills box greyed out (no skill mechanism)
 //   claude → the reverse; the provider picker is restored only on a local-node
 //            dispatch (it's node-local config — the agent picker itself shows for
 //            remote repos too, but the provider panel stays hidden there).
