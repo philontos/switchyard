@@ -26,8 +26,6 @@ process.on("uncaughtException", (e) => console.error("[uncaught]", e));
 process.on("unhandledRejection", (e) => console.error("[unhandledRejection]", e));
 
 const app = createApp();
-const server = createServer(app);
-attachWs(server);
 
 if (DID_MIGRATE) repairWorktrees(); // fix git worktree links after the ./data move
 startLivenessLoop();                // background ssh probe of remote machines
@@ -41,9 +39,18 @@ for (const { id } of db.prepare("SELECT id FROM tasks").all() as { id: number }[
 const PORT = Number(process.env.PORT || 4500);
 // Bind loopback by default — the web terminal is a live shell, so don't expose
 // it on the LAN unless explicitly asked. Set HOST=0.0.0.0 to listen on all
-// interfaces (then put auth / a reverse proxy in front), or use an ssh tunnel
-// (ssh -L 4500:localhost:4500 host) for remote access.
-const HOST = process.env.HOST || "127.0.0.1";
-server.listen(PORT, HOST, () => {
-  console.log(`task-dispatcher on http://${HOST}:${PORT}`);
-});
+// interfaces (then put auth / a reverse proxy in front), set HOSTS=a,b to bind
+// multiple selected addresses, or use an ssh tunnel (ssh -L 4500:localhost:4500
+// host) for remote access.
+const HOSTS = (process.env.HOSTS || process.env.HOST || "127.0.0.1")
+  .split(",")
+  .map((h) => h.trim())
+  .filter(Boolean);
+const uniqueHosts = [...new Set(HOSTS)];
+for (const host of uniqueHosts) {
+  const server = createServer(app);
+  attachWs(server);
+  server.listen(PORT, host, () => {
+    console.log(`task-dispatcher on http://${host}:${PORT}`);
+  });
+}
