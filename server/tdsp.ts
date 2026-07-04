@@ -27,11 +27,58 @@ for (const p of ["/opt/homebrew/bin", "/usr/local/bin"]) {
   if (!(process.env.PATH || "").split(":").includes(p)) process.env.PATH = `${p}:${process.env.PATH || ""}`;
 }
 
+function ipv4ToNumber(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    const v = Number(part);
+    if (v < 0 || v > 255) return null;
+    n = (n << 8) + v;
+  }
+  return n >>> 0;
+}
+
+function localIpv4s(): string[] {
+  return Object.values(os.networkInterfaces())
+    .flatMap((infos) => infos || [])
+    .filter((info) => info.family === "IPv4" && !info.internal)
+    .map((info) => info.address);
+}
+
+function ipv4InCidr(ip: string, cidr: string): boolean {
+  const [base, prefixText] = cidr.split("/");
+  const prefix = Number(prefixText);
+  const ipNum = ipv4ToNumber(ip);
+  const baseNum = ipv4ToNumber(base);
+  if (ipNum == null || baseNum == null || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return false;
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return (ipNum & mask) === (baseNum & mask);
+}
+
+function findLocalIpInCidr(cidr: string): string | null {
+  const ips = localIpv4s();
+  return ips.find((ip) => ipv4InCidr(ip, cidr)) || null;
+}
+
 process.exitCode = await runCli(process.argv.slice(2), {
   db,
   out: (s) => process.stdout.write(s + "\n"),
   err: (s) => process.stderr.write(s + "\n"),
-  serve: async () => {
+  serve: async (opts) => {
+    if (opts?.hosts?.length) process.env.HOSTS = opts.hosts.join(",");
+    else if (opts?.host) process.env.HOST = opts.host;
+
+    if (opts?.hostCidr != null) {
+      if (!opts.hostCidr) throw new Error("serve: --host-cidr requires a CIDR range, for example 10.10.0.0/24");
+      const hostIp = findLocalIpInCidr(opts.hostCidr);
+      if (!hostIp) throw new Error(`serve: no local IPv4 address found in ${opts.hostCidr}`);
+      const hosts = [...new Set(["127.0.0.1", hostIp, ...(process.env.HOSTS || "").split(",").filter(Boolean)])];
+      process.env.HOSTS = hosts.join(",");
+      delete process.env.HOST;
+    }
+
     await import("./index.js");
   },
   // This node's own task liveness, for `tdsp list`. The node is the sole authority

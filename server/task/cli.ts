@@ -150,7 +150,7 @@ export interface CliDeps {
   db: DB;
   out: (s: string) => void;
   err: (s: string) => void;
-  serve: () => void | Promise<void>;
+  serve: (opts?: ServeOpts) => void | Promise<void>;
   // report THIS node's own task liveness (tmux + worktree probes), for `list`
   liveness: TaskLiveness;
   createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
@@ -161,6 +161,12 @@ export interface CliDeps {
   // live branch list for one of this machine's mirrors (so a controller can offer
   // the node repo's real branches when dispatching here)
   branches: (mirror: string) => Promise<{ ok: boolean; branches?: string[]; error?: string }>;
+}
+
+export interface ServeOpts {
+  host?: string;
+  hosts?: string[];
+  hostCidr?: string;
 }
 
 // Minimal flag parser: supports `--key value` and `--key=value`. Bare flags
@@ -181,9 +187,23 @@ function parseFlags(args: string[]): Record<string, string> {
 export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   const [cmd] = argv;
   switch (cmd) {
-    case "serve":
-      await deps.serve();
+    case "serve": {
+      const f = parseFlags(argv.slice(1));
+      const hosts = f.hosts
+        ? f.hosts
+            .split(",")
+            .map((h) => h.trim())
+            .filter(Boolean)
+        : undefined;
+      const hostCidr = f["host-cidr"] ?? f.cidr ?? f.wireguard ?? f.wg;
+      try {
+        await deps.serve({ host: f.host || undefined, hosts, hostCidr });
+      } catch (e: any) {
+        deps.err(String(e?.message || e));
+        return 1;
+      }
       return 0;
+    }
     case "list":
       deps.out(JSON.stringify(await taskListPayload(deps.db, deps.liveness)));
       return 0;

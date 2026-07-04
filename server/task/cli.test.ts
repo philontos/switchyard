@@ -91,6 +91,7 @@ function fakeDeps(db: Database.Database) {
   let out = "";
   let err = "";
   let served = false;
+  let serveOpts: any = null;
   const createCalls: { cwd?: string | null; title?: string | null }[] = [];
   const repoCalls: any[] = [];
   const stopCalls: number[] = [];
@@ -104,8 +105,9 @@ function fakeDeps(db: Database.Database) {
       err: (s: string) => {
         err += s;
       },
-      serve: () => {
+      serve: (opts?: any) => {
         served = true;
+        serveOpts = opts;
       },
       liveness: noLive,
       createLocal: async (opts: { cwd?: string | null; title?: string | null }): Promise<CreateLocalResult> => {
@@ -139,6 +141,9 @@ function fakeDeps(db: Database.Database) {
     get served() {
       return served;
     },
+    get serveOpts() {
+      return serveOpts;
+    },
   };
 }
 
@@ -157,6 +162,14 @@ test("runCli serve boots the local server and exits 0", async () => {
   const code = await runCli(["serve"], f.deps);
   assert.equal(code, 0);
   assert.equal(f.served, true);
+});
+
+test("runCli serve passes explicit host and CIDR options", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["serve", "--host", "127.0.0.1", "--host-cidr", "10.10.0.0/24"], f.deps);
+  assert.equal(code, 0);
+  assert.equal(f.served, true);
+  assert.deepEqual(f.serveOpts, { host: "127.0.0.1", hosts: undefined, hostCidr: "10.10.0.0/24" });
 });
 
 test("runCli rejects an unknown command with a usage hint on stderr and exits 1", async () => {
