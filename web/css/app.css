@@ -436,6 +436,8 @@ a { color: var(--accent-bar); }
 #term-back, .term-input { display: none; }
 
 @media (max-width: 760px) {
+  body { font-size: 14px; line-height: 1.5; }
+
   /* --- list view: three-column grid → vertical stack (rail on top, list fills) --- */
   .wrap { display: flex; flex-direction: column; }
   /* machine rail: vertical icon column → horizontal scrolling strip */
@@ -446,12 +448,14 @@ a { color: var(--accent-bar); }
     -webkit-overflow-scrolling: touch;
     padding: 8px max(10px, env(safe-area-inset-right)) 8px max(10px, env(safe-area-inset-left));
   }
-  .rchip { flex: none; width: 44px; height: 44px; }   /* larger touch target; never shrink in the scroller */
+  .rchip { flex: none; width: 48px; height: 48px; border-radius: 12px; font-size: 19px; }   /* larger touch target; never shrink in the scroller */
+  .rchip.add { font-size: 19px; }
+  .rdot { top: 6px; right: 6px; width: 8px; height: 8px; }
   .rchip:active { transform: scale(.93); }
   .list {
     flex: 1; border-right: none; overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: max(14px, env(safe-area-inset-bottom));   /* top/left/right stay 14px so .mh's -14px margins still bleed full-width */
+    padding: 14px 12px max(16px, env(safe-area-inset-bottom));   /* top/left/right stay aligned with .mh's negative margins below */
   }
 
   /* --- terminal view: .termcol overlays full-screen, sized to the VISUAL
@@ -480,7 +484,7 @@ a { color: var(--accent-bar); }
      phone-width bar (drag-select hint, raw attach cmd, prompt preview, session-id
      chip, manual preview-port box) */
   #term-back { display: inline-flex; align-items: center; justify-content: center;
-    width: auto; margin: 0; padding: 2px 10px; font-size: 20px; line-height: 1; }
+    width: 40px; height: 38px; margin: 0; padding: 0; font-size: 28px; line-height: 1; border-radius: 10px; }
   .termbar .hint, #term-attach, #term-desc, .term-claude, .prev-port, .prev-btn { display: none; }
   #term-title { flex: 1; max-width: none; }
 
@@ -523,7 +527,82 @@ a { color: var(--accent-bar); }
   #ti-send { flex: none; width: auto; height: 44px; margin: 0; padding: 0 18px; font-size: 14px; }
 
   /* 16px keeps iOS from zooming the page when a field takes focus */
-  input, textarea { font-size: 16px; }
+  input, textarea { font-size: 16px; min-height: 46px; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
+  textarea { line-height: 1.4; }
+  button { min-height: 40px; padding: 8px 14px; border-radius: 10px; font-size: 14px; }
+
+  /* custom selects read as native-sized controls on phones */
+  .cs { margin-bottom: 10px; }
+  .cs-trigger { min-height: 46px; padding: 10px 12px; border-radius: 10px; gap: 10px; font-size: 16px; }
+  .cs-caret {
+    flex: none; width: 28px; height: 28px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 0; line-height: 1; color: var(--muted);
+  }
+  .cs-caret::before {
+    content: ""; width: 11px; height: 11px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+    transform: rotate(45deg) translate(-1px, -2px);
+    border-radius: 1px;
+  }
+  .cs-menu { top: calc(100% + 7px); border-radius: 12px; padding: 6px; max-height: min(320px, 48dvh); }
+  .cs-opt { min-height: 44px; padding: 10px 12px; border-radius: 9px; font-size: 15px; }
+  .cs-opt .ck { font-size: 15px; }
+  .cs-empty { padding: 12px; font-size: 14px; }
+  .cs-spin { width: 15px; height: 15px; margin-right: 8px; vertical-align: -2px; }
+
+  /* list chrome: roomier rows and icon targets, closer to a native master list */
+  .mh { margin: -14px -12px 12px; padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left)); gap: 10px; }
+  .mh-ic { font-size: 16px; }
+  .mh-name { font-size: 15px; }
+  .mh-gear { width: 40px; height: 40px; padding: 0; font-size: 20px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; }
+  .mh-act { min-height: 38px; padding: 8px 13px; font-size: 14px; border-radius: 10px; }
+  .mh-menu { right: 8px; min-width: 210px; border-radius: 12px; padding: 8px; }
+  .mh-menu button { min-height: 42px; }
+
+  .grp { margin-bottom: 10px; padding: 3px 2px 4px; border-radius: 10px; }
+  .grp.open { padding-bottom: 8px; }
+  .grp-head { min-height: 44px; gap: 8px; padding: 7px 6px; border-radius: 10px; }
+  .grp-name { font-size: 15px; }
+  .grp-act, .grp-del { width: 38px; height: 38px; border-radius: 10px; }
+  .grp-act { font-size: 22px; }
+  .grp-del { font-size: 16px; opacity: 1; }
+  .grp-empty { font-size: 13px; padding: 5px 0 10px 18px; }
+  .grp .card.task { margin-left: 10px; margin-bottom: 8px; }
+
+  .card { padding: 12px; margin-bottom: 10px; border-radius: 10px; }
+  .task::before { border-radius: 10px 0 0 10px; width: 4px; }
+  .task .t { padding-right: 36px; gap: 7px; font-size: 14px; }
+  .tname { padding: 2px 6px; border-radius: 7px; }
+  .tname-edit { min-height: 32px; padding: 3px 7px; border-radius: 7px; font-size: 15px; }
+  .card-x { top: 8px; right: 8px; width: 36px; height: 36px; padding: 0; font-size: 17px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; }
+  .muted { font-size: 13px; }
+  .sdot { width: 9px; height: 9px; }
+  .tag-local { font-size: 11px; padding: 1px 7px; }
+  .t-resume { min-height: 36px; margin-top: 8px; padding: 6px 12px; font-size: 13px; border-radius: 10px; }
+
+  /* dispatch and settings sheets */
+  .modal h2 { font-size: 14px; margin-bottom: 14px; }
+  .tm-lbl { font-size: 12px; margin-bottom: 6px; }
+  .agent-seg { gap: 8px; margin-bottom: 12px; }
+  .agent-opt { min-height: 44px; padding: 9px 10px; border-radius: 10px; font-size: 15px; }
+  .skills-box { max-height: 176px; padding: 6px; border-radius: 10px; margin-bottom: 10px; }
+  .skopt { min-height: 42px; gap: 10px; padding: 8px 6px; font-size: 14px; }
+  .skopt input[type=checkbox] { width: 20px; height: 20px; }
+  .sksrc { font-size: 11px; padding: 1px 8px; }
+  .tm-prov { gap: 9px; margin-bottom: 10px; }
+  .prov-add-btn { width: 46px; height: 46px; padding: 0; font-size: 20px; }
+  .prov-panel { border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+  .pv-actions button { min-height: 40px; padding: 7px 14px; }
+  .pv-row { min-height: 38px; font-size: 14px; }
+  .pv-del { min-height: 34px; padding: 4px 10px; }
+  .pg-box { height: min(420px, 52dvh); border-radius: 10px; padding: 6px; }
+  .pgrow { gap: 11px; padding: 10px 4px; }
+  .pgname { font-size: 14px; }
+  .pgdesc { font-size: 12.5px; }
+  .pginstall { min-height: 36px; padding: 6px 12px; font-size: 13px; border-radius: 9px; }
+  .dlg-actions { gap: 10px; }
+  .dlg-actions button { min-height: 42px; padding: 8px 16px; }
 
   /* touch has no hover — give the primary tap targets an :active nudge instead */
   .card.clickable:active { background: var(--card-hover); border-color: var(--accent); }
