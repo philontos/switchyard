@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Task Dispatcher</title>
 <!-- No-flash theme init: set data-theme from storage BEFORE the stylesheet
      applies, so the first paint is already light/dark with no flicker. Default
@@ -19,6 +19,9 @@
   <div id="m-list" class="list"></div>
   <div class="termcol">
     <div class="termbar">
+      <!-- mobile master-detail: back to the machine/repo list. Hidden on desktop
+           (the list is always visible there). -->
+      <button id="term-back" class="sec" onclick="mobileBack()" data-i18n-title="m.back" aria-label="Back">‹</button>
       <span id="term-title" data-i18n="term.notConnected"></span>
       <span id="term-desc"></span>
       <span class="hint" style="flex:none" data-i18n="term.selectHint" data-i18n-title="term.selectHintTitle"></span>
@@ -30,6 +33,24 @@
     </div>
     <div id="term"></div>
     <div id="term-empty" class="term-empty"><div class="te-ic">🖥</div><div data-i18n="term.empty"></div></div>
+    <!-- mobile-only quick-input bar (hidden on desktop via CSS). A whole line is
+         buffered in the field (IME-friendly) and sent on 发送/Enter; the key row
+         sends control sequences that a soft keyboard can't (Esc / ⌃C / arrows /
+         Tab). All input on mobile routes through here — see js/features/mobile.js. -->
+    <div id="term-input" class="term-input">
+      <div class="ti-keys">
+        <button class="ti-key" data-k="enter" type="button">⏎</button>
+        <button class="ti-key" data-k="esc" type="button">Esc</button>
+        <button class="ti-key" data-k="int" type="button">⌃C</button>
+        <button class="ti-key" data-k="up" type="button">↑</button>
+        <button class="ti-key" data-k="down" type="button">↓</button>
+        <button class="ti-key" data-k="tab" type="button">⇥</button>
+      </div>
+      <div class="ti-row">
+        <input id="ti-field" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" data-i18n-ph="m.inputPh" />
+        <button id="ti-send" class="primary" type="button" data-i18n="m.send"></button>
+      </div>
+    </div>
   </div>
 </div>
 

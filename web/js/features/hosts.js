@@ -13,6 +13,7 @@ import { paintSelection, taskCard, allTasks, isEditingTask, connect,
          pendingRepoCards, pendingNodeRepoCards, pendingShellCards,
          isShadowedByPending, isShadowedByNodePending, pendingCard } from "./tasks.js";
 import { detachDock, openPty, pruneNodePanes } from "./terminal.js";
+import { duringAutoFollow } from "./mobile.js";
 import { orderTasks, isDraggingTask } from "./reorder.js";
 
 let hostsOrder = [];               // API order: local machine first. Active machine is state.activeHostId.
@@ -206,7 +207,10 @@ function renderRail(hosts, blocked) {
   $("m-rail").innerHTML = hosts.map(icon).join("")
     + `<button class="rchip add" title="${t("host.new")}" onclick="openHostModal()">＋</button>`;
 }
-export function selectHost(id) { state.activeHostId = id; menuHostId = null; rerender(); followHostTask(id); }
+// duringAutoFollow: on mobile, tapping a machine chip must stay on the LIST view.
+// followHostTask re-attaches the dock to that machine's last task (to keep it
+// warm), which would otherwise trip the list→terminal jump — so suppress it here.
+export function selectHost(id) { state.activeHostId = id; menuHostId = null; rerender(); duringAutoFollow(() => followHostTask(id)); }
 
 // On a user-initiated machine switch, point the dock at THIS machine's task so
 // col3 never keeps showing the previous machine's session. Preference order,

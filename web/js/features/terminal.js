@@ -14,6 +14,31 @@ import { toast } from "../core/feedback.js";
 const panes = new Map();
 let activeId = null;   // the task whose pane is currently visible (null = none)
 
+// Mobile master-detail hooks (injected by main.js so terminal.js never imports
+// mobile.js — that would be a cycle, since mobile.js imports from here). onShow
+// fires when a pane/placeholder becomes the dock content (→ switch to the
+// terminal view); onEmpty fires when the dock clears (→ back to the list view).
+// Both are no-ops on desktop.
+let onShow = null, onEmpty = null;
+export function setViewHooks(show, empty) { onShow = show; onEmpty = empty; }
+
+// Send raw bytes to the currently-visible pane's socket. Drives the mobile
+// quick-input bar (text line + control-key row); no-op if nothing's attached or
+// the socket isn't open. Returns whether the data was sent.
+export function sendToActive(data) {
+  const p = activeId != null ? panes.get(activeId) : null;
+  if (p && p.ws && p.ws.readyState === 1) { p.ws.send(data); return true; }
+  return false;
+}
+
+// Refit the visible pane synchronously (then repaint). Called after the mobile
+// view flips to terminal — the pane was display:none in list view and couldn't be
+// measured, so its column count is stale until we re-fit against the now-visible box.
+export function fitActiveNow() {
+  const p = activeId != null ? panes.get(activeId) : null;
+  if (p) { try { p.fit.fit(); sendResize(p); p.term.refresh(0, p.term.rows - 1); } catch {} }
+}
+
 // xterm paints to a canvas from a JS theme object, so it can't read the CSS
 // tokens in app.css — it carries its own light/dark pair. Kept in sync with the
 // --bg / --term-fg / --accent values for each theme. termTheme() picks by the
@@ -91,6 +116,15 @@ function createPane(id, query) {
   term.loadAddon(fit);
   term.open(pane);
 
+  // mobile: all input goes through the on-screen quick-input bar, so make xterm's
+  // hidden helper textarea readOnly + inputmode=none. Tapping the terminal then
+  // scrolls/selects the buffer without raising the iOS soft keyboard (a readOnly
+  // field doesn't trigger it) — no double-keyboard, no layout jump.
+  if (document.body.classList.contains("mobile")) {
+    const ta = pane.querySelector(".xterm-helper-textarea");
+    if (ta) { ta.readOnly = true; ta.setAttribute("inputmode", "none"); }
+  }
+
   // linkify localhost URLs the session prints (e.g. a dev server's
   // "Local: http://localhost:5173") and open them in the side preview on click,
   // instead of navigating the browser to the user's OWN (empty) localhost.
@@ -148,6 +182,8 @@ function ensureSocket(p) {
 // may have been display:none and unmeasurable), repaint, refresh the dock bar
 // and grab the keyboard.
 function showPane(p) {
+  if (onShow) onShow();   // mobile: flip to the terminal view BEFORE fitting, so the
+                          // pane's box is visible (measurable) when p.fit.fit() runs
   hidePendingView();   // a real pane takes over the dock → drop any placeholder overlay
   for (const o of panes.values()) o.pane.style.display = o === p ? "block" : "none";
   activeId = p.id;
@@ -156,7 +192,9 @@ function showPane(p) {
   try { p.fit.fit(); } catch {}
   try { p.term.refresh(0, p.term.rows - 1); } catch {}   // canvas can blank while hidden
   sendResize(p);
-  p.term.focus();
+  // on mobile the keyboard is driven by the quick-input field, not the terminal —
+  // don't focus the (readOnly) xterm textarea, which would just fight for focus.
+  if (!document.body.classList.contains("mobile")) p.term.focus();
 }
 
 function applyBar(p) {
@@ -244,7 +282,7 @@ export function detachDock() {
 
 // The terminal column is permanent (col3); the empty-state overlay shows when no
 // pane is attached. showPane() hides it; disposing the last/active pane re-shows it.
-export function showTermEmpty() { $("term-empty").classList.remove("hidden"); }
+export function showTermEmpty() { if (onEmpty) onEmpty(); $("term-empty").classList.remove("hidden"); }
 function hideTermEmpty() { $("term-empty").classList.add("hidden"); }
 
 // ---- pending creation windows ----
@@ -279,6 +317,7 @@ function pendingBar(title, desc) {
 // Open a spinner placeholder for a just-submitted creation and make it the visible
 // dock view. text = the loading line (e.g. "Creating worktree…").
 export function openPending(tmpId, title, desc, text) {
+  if (onShow) onShow();   // mobile: a just-dispatched task takes the dock → terminal view
   const el = document.createElement("div");
   el.className = "term-pane pending";
   el.dataset.pending = String(tmpId);
@@ -301,6 +340,7 @@ export function openPending(tmpId, title, desc, text) {
 export function showPending(tmpId) {
   const pe = pending.get(tmpId);
   if (!pe) return false;
+  if (onShow) onShow();   // mobile: re-showing a still-loading card → terminal view
   for (const o of panes.values()) o.pane.style.display = "none";
   for (const [k, v] of pending) v.el.style.display = k === tmpId ? "flex" : "none";
   activeId = null;
