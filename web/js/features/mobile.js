@@ -39,6 +39,7 @@ function swapDraft(id) {
   const f = $("ti-field");
   if (draftId !== null) drafts.set(draftId, f.value);   // stash the outgoing task's text
   f.value = drafts.get(id) || "";                       // restore the incoming task's (or blank)
+  autoGrow(f);                                          // resize to the restored text (may be multiline)
   draftId = id;
 }
 
@@ -70,13 +71,27 @@ function syncViewport() {
 // control sequences for the quick-key row (things a soft keyboard can't type)
 const KEYS = { enter: "\r", esc: "\x1b", int: "\x03", up: "\x1b[A", down: "\x1b[B", tab: "\t" };
 
-// Send the buffered line to the terminal, then Enter, and keep the field focused
-// so the keyboard stays up for the next line. An empty field just sends Enter
-// (handy for accepting a prompt's default).
+// The compose field is a <textarea> that grows with its content. Size it to fit the
+// text, capped at TI_MAX (past which it scrolls) — the CSS max-height matches. Reset to
+// 'auto' first so scrollHeight reflects the current content, not the last taller size.
+const TI_MAX = 160;
+function autoGrow(f) {
+  f.style.height = "auto";
+  f.style.height = Math.min(TI_MAX, f.scrollHeight) + "px";
+}
+
+// Send the composed text, then Enter, and keep the field focused so the keyboard stays
+// up. Empty field → a bare Enter (accept a prompt's default). A MULTILINE value goes as
+// one bracketed paste (ESC[200~…ESC[201~) so a TUI takes it as a single input instead of
+// submitting at every newline; the trailing Enter then fires it. Single-line is sent raw
+// (no wrapper) so a plain shell without bracketed-paste support is unaffected.
 function sendLine() {
   const f = $("ti-field");
-  sendToActive(f.value ? f.value + "\r" : "\r");
+  const v = f.value;
+  if (v.includes("\n")) sendToActive("\x1b[200~" + v + "\x1b[201~\r");
+  else sendToActive(v ? v + "\r" : "\r");
   f.value = "";
+  autoGrow(f);          // shrink back to one row
   f.focus();
 }
 
@@ -91,9 +106,14 @@ export function initMobile() {
   if (vv) { vv.addEventListener("resize", syncViewport); vv.addEventListener("scroll", syncViewport); }
   syncViewport();
 
-  // quick-input bar: field + Send (Enter in the field also sends)
+  // quick-input bar: Send fires the composed text; the field grows as you type (Enter
+  // just inserts a newline now — Send, not Enter, submits).
+  const field = $("ti-field");
   $("ti-send").addEventListener("click", sendLine);
-  $("ti-field").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendLine(); } });
+  field.addEventListener("input", () => autoGrow(field));
+  // Fn: toggle the control-key popover. pointerdown + preventDefault keeps the field
+  // focused (keyboard stays up); it's sticky — stays open until Fn is tapped again.
+  $("ti-fn").addEventListener("pointerdown", (e) => { e.preventDefault(); $("term-input").classList.toggle("keys-open"); });
   // quick keys: fire on pointerdown + preventDefault so tapping a key does NOT
   // blur the text field — the keyboard stays up across taps.
   document.querySelectorAll("#term-input .ti-key").forEach((b) => {
