@@ -467,6 +467,14 @@ a { color: var(--accent-bar); }
        transparent and the list bleeds through) */
     background: var(--bg);
   }
+  /* Keyboard-rise flash guard: .termcol is sized to --vvh, so when the iOS keyboard
+     animates up, the column shrinks to the visual-viewport height a beat BEFORE the
+     keyboard finishes rising to cover the gap — briefly exposing the list beneath it
+     (the "list flash" on focusing the input). Hiding the list/rail while in terminal
+     view means that transient gap shows only the identical body background instead.
+     visibility (not display:none) preserves the list's scroll position for the return. */
+  body.view-terminal .rail,
+  body.view-terminal .list { visibility: hidden; }
 
   /* term bar: reveal the back button; drop desktop-only affordances that crowd a
      phone-width bar (drag-select hint, raw attach cmd, prompt preview, session-id
