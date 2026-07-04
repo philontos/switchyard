@@ -83,7 +83,7 @@ try { initTerm(); } catch (e) { console.error("terminal init failed:", e); }
 // the list. Both no-op on desktop, where isMobile() is false. Wire the hooks
 // before initMobile()/showTermEmpty() so the very first render already honors them.
 setViewHooks(
-  () => { if (isMobile() && !autoFollowing()) enterTerminal(); },
+  (id) => { if (isMobile() && !autoFollowing()) enterTerminal(id); },
   () => { if (isMobile()) enterList(); },
 );
 initMobile();

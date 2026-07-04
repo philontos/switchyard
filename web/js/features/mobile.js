@@ -26,7 +26,24 @@ export function duringAutoFollow(fn) {
   try { return fn(); } finally { autoFollow = false; }
 }
 
-export function enterTerminal() {
+// Per-task input drafts. The quick-input bar is ONE shared field, so entering a
+// task must swap the field to that task's own unsent text — typing half a command
+// for task A then switching to B must not leak A's text into B (and back to A must
+// bring it back). Saved on the way out, restored on the way in, keyed by the dock id
+// (a real task id, or a pending temp id). enterTerminal fires on every task open/
+// switch (via the onShow hook), so it's the one chokepoint that sees the swap.
+const drafts = new Map();
+let draftId = null;
+function swapDraft(id) {
+  if (id === draftId) return;
+  const f = $("ti-field");
+  if (draftId !== null) drafts.set(draftId, f.value);   // stash the outgoing task's text
+  f.value = drafts.get(id) || "";                       // restore the incoming task's (or blank)
+  draftId = id;
+}
+
+export function enterTerminal(id) {
+  swapDraft(id);                // give this task its own input buffer before it's shown
   document.body.classList.add("view-terminal");
   syncViewport();               // fix --vvh/--vvt before the fixed termcol paints
   // the term column was display:none in list view, so its pane couldn't be
