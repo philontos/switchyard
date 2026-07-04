@@ -225,6 +225,7 @@
       "m.back": "返回列表",
       "m.send": "发送",
       "m.inputPh": "输入发给终端…",
+      "m.fnKeys": "特殊按键",
     },
     en: {
       "repo.new": "＋ New repo",
@@ -413,6 +414,7 @@
       "m.back": "Back to list",
       "m.send": "Send",
       "m.inputPh": "Type to the terminal…",
+      "m.fnKeys": "Special keys",
     },
   };
 

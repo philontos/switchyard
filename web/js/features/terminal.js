@@ -114,19 +114,25 @@ function sendResize(p) {
 // buffer would fly twice as fast. touchstart is left to propagate so a plain tap still
 // reaches xterm (selection); only a drag is claimed for scrolling.
 //
-// Flick inertia: a bare 1:1 drag stops dead on lift-off, which reads as sluggish.
-// We carry the release velocity into a decaying rAF loop (friction 0.92/frame) that
-// keeps emitting wheel deltas, so a flick coasts like native momentum scrolling; a new
-// touch cancels it. Velocity is tracked per move (px/ms) and a slow release doesn't fling.
+// Flick inertia: a bare 1:1 drag stops dead on lift-off, which reads as sluggish. We
+// carry the release velocity into a decaying rAF loop that keeps emitting wheel deltas,
+// so a flick coasts like native momentum scrolling; a new touch cancels it.
+//
+// Two things keep it smooth across phones. (1) Velocity is an EMA of the per-move speed,
+// so a slow final micro-move before lift-off doesn't kill the fling. (2) Both the coast
+// distance and the friction decay are computed against the REAL elapsed frame time, not
+// a fixed 16ms — a 120Hz ProMotion iPhone (≈8ms/frame) then coasts exactly as far as a
+// 60Hz one, instead of decaying twice as fast and feeling short/floaty.
 function mountTouchScroll(pane) {
   const sink = pane.querySelector(".xterm-screen") || pane;
   const emit = (dy) => sink.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }));
-  let lastY = 0, lastT = 0, vy = 0, tracking = false, raf = 0;
+  const FRICTION = 0.9975;                   // velocity decay PER MILLISECOND (≈0.96 over a 16.7ms frame)
+  let lastY = 0, lastT = 0, vel = 0, tracking = false, raf = 0, prevT = 0;
   const stopFling = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } };
   pane.addEventListener("touchstart", (e) => {
     stopFling();                             // a fresh touch halts any coasting scroll
     tracking = e.touches.length === 1;       // single finger only — a pinch isn't a scroll
-    if (tracking) { lastY = e.touches[0].clientY; lastT = e.timeStamp; vy = 0; }
+    if (tracking) { lastY = e.touches[0].clientY; lastT = e.timeStamp; vel = 0; }
   }, { passive: true });
   pane.addEventListener("touchmove", (e) => {
     if (!tracking || e.touches.length !== 1) return;
@@ -134,7 +140,7 @@ function mountTouchScroll(pane) {
     const dt = Math.max(1, e.timeStamp - lastT);
     lastY = y; lastT = e.timeStamp;
     if (!dy) return;
-    vy = dy / dt;                            // px/ms, carried into the fling on release
+    vel = vel * 0.7 + (dy / dt) * 0.3;       // smoothed px/ms — a stable release velocity for the fling
     e.preventDefault();
     e.stopPropagation();                     // keep xterm's own touch-scroll from double-driving
     emit(dy);
@@ -142,9 +148,15 @@ function mountTouchScroll(pane) {
   pane.addEventListener("touchend", () => {
     if (!tracking) return;
     tracking = false;
-    let v = vy * 16;                         // px per ~frame at lift-off
-    if (Math.abs(v) < 3) return;             // a gentle release just stops — no coast
-    const step = () => { emit(v); v *= 0.92; raf = Math.abs(v) > 0.5 ? requestAnimationFrame(step) : 0; };
+    if (Math.abs(vel) < 0.05) return;        // a slow/held release doesn't coast (px/ms)
+    prevT = 0;
+    const step = (now) => {
+      const dt = prevT ? Math.min(32, now - prevT) : 16;   // real frame time; clamp a stalled frame
+      prevT = now;
+      emit(vel * dt);
+      vel *= Math.pow(FRICTION, dt);
+      raf = Math.abs(vel) > 0.02 ? requestAnimationFrame(step) : 0;
+    };
     raf = requestAnimationFrame(step);
   }, { passive: true });
 }

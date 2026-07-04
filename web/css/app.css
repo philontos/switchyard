@@ -476,19 +476,42 @@ a { color: var(--accent-bar); }
   .termbar .hint, #term-attach, #term-desc, .term-claude, .prev-port, .prev-btn { display: none; }
   #term-title { flex: 1; max-width: none; }
 
-  /* --- quick-input bar (wired in mobile.js): control-key row + line field --- */
+  /* --- quick-input bar (wired in mobile.js): auto-growing compose field + Send, with
+     a Fn-toggled control-key popover --- */
   .term-input {
-    display: flex; flex: none; flex-direction: column; gap: 7px;
+    position: relative;   /* anchor the floating .ti-keys popover */
+    display: flex; flex: none; flex-direction: column;
     padding: 7px 10px max(7px, env(safe-area-inset-bottom));
     border-top: 1px solid var(--border); background: var(--surface);
   }
-  .ti-keys { display: flex; gap: 7px; overflow-x: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  /* control keys: a popover floating just above the input row, shown only while
+     .keys-open. Absolute so toggling it never resizes the terminal (no refit churn). */
+  .ti-keys {
+    display: none; position: absolute; left: 0; right: 0; bottom: 100%;
+    gap: 7px; padding: 7px 10px;
+    background: var(--surface); border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 20px var(--shadow);
+    overflow-x: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  }
+  .term-input.keys-open .ti-keys { display: flex; }
   .ti-key { flex: none; min-width: 46px; height: 38px; margin: 0; padding: 0 12px;
     font-size: 14px; font-family: Menlo, monospace; background: var(--surface-2);
     border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
   .ti-key:active { transform: scale(.93); background: var(--surface-3); }
-  .ti-row { display: flex; gap: 8px; align-items: center; }
-  #ti-field { flex: 1; height: 44px; margin: 0; font-size: 16px; }
+  /* buttons pin to the row's BOTTOM so they hold still as the field grows upward */
+  .ti-row { display: flex; gap: 8px; align-items: flex-end; }
+  /* compose field: one row (44px) tall, auto-grows with content up to a cap (mobile.js
+     sets the height), then scrolls. min-width:0 lets flex shrink it past its intrinsic
+     textarea width so the Fn/Send buttons keep their place. Enter inserts a newline;
+     Send fires it. */
+  #ti-field { flex: 1; min-width: 0; margin: 0; font-size: 16px; line-height: 1.4;
+    min-height: 44px; height: 44px; max-height: 160px; padding: 10px 9px;
+    resize: none; overflow-y: auto; }
+  /* Fn: a compact icon button (a chevron). Rotates 180° + tints accent when its
+     control-key popover is open, so the one glyph reads as both expand and close. */
+  .ti-fn { flex: none; width: 44px; height: 44px; margin: 0; padding: 0; font-size: 15px;
+    display: inline-flex; align-items: center; justify-content: center; transition: transform .18s ease, background .12s, border-color .12s, color .12s; }
+  .term-input.keys-open .ti-fn { transform: rotate(180deg); background: #d977571f; border-color: #d9775799; color: var(--accent-text); }
   #ti-send { flex: none; width: auto; height: 44px; margin: 0; padding: 0 18px; font-size: 14px; }
 
   /* 16px keeps iOS from zooming the page when a field takes focus */
