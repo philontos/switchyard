@@ -96,6 +96,41 @@ function sendResize(p) {
   if (p.ws && p.ws.readyState === 1) p.ws.send("\x00resize:" + p.term.cols + "x" + p.term.rows);
 }
 
+// Mobile: let a one-finger vertical drag over the terminal SCROLL it. xterm only
+// touch-scrolls while the app hasn't enabled mouse reporting; a TUI like claude turns
+// mouse reporting ON, so otherwise every drag is forwarded to the app as a mouse drag
+// and the buffer never moves — you can't read back. We translate the drag into `wheel`
+// events dispatched onto xterm, whose wheel path does the right thing in every mode:
+// forwards a wheel escape to a mouse-mode app (claude scrolls its own view), sends
+// arrow keys to a non-wheel alt-screen app, or scrolls the scrollback in a plain shell.
+// getLinesScrolled accumulates the pixel deltas into whole rows, so per-move dispatch
+// is smooth, not jumpy. preventDefault stops iOS from raising the synthetic mouse
+// events (no stray clicks/selection) and from rubber-banding the page. We dispatch on
+// .xterm-screen so the event bubbles up to xterm's listener wherever it sits.
+//
+// The move handler runs in the CAPTURE phase and stopPropagation()s, so xterm's own
+// touchmove (a descendant listener) never fires — otherwise, in a plain shell where
+// xterm DOES touch-scroll the viewport, its scroll would stack on top of ours and the
+// buffer would fly twice as fast. touchstart is left to propagate so a plain tap still
+// reaches xterm (selection); only a drag is claimed for scrolling.
+function mountTouchScroll(pane) {
+  const sink = pane.querySelector(".xterm-screen") || pane;
+  let lastY = 0, tracking = false;
+  pane.addEventListener("touchstart", (e) => {
+    tracking = e.touches.length === 1;       // single finger only — a pinch isn't a scroll
+    if (tracking) lastY = e.touches[0].clientY;
+  }, { passive: true });
+  pane.addEventListener("touchmove", (e) => {
+    if (!tracking || e.touches.length !== 1) return;
+    const y = e.touches[0].clientY, dy = lastY - y;   // finger up → dy>0 → scroll toward newer content
+    lastY = y;
+    if (!dy) return;
+    e.preventDefault();
+    e.stopPropagation();                     // keep xterm's own touch-scroll from double-driving
+    sink.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }));
+  }, { passive: false, capture: true });
+}
+
 // Build a fresh terminal pane for a task: its own xterm + FitAddon + copy/paste
 // /keystroke wiring, mounted (hidden) into the #term stack. The socket is opened
 // separately by ensureSocket(); show happens via showPane().
@@ -119,10 +154,13 @@ function createPane(id, query) {
   // mobile: all input goes through the on-screen quick-input bar, so make xterm's
   // hidden helper textarea readOnly + inputmode=none. Tapping the terminal then
   // scrolls/selects the buffer without raising the iOS soft keyboard (a readOnly
-  // field doesn't trigger it) — no double-keyboard, no layout jump.
+  // field doesn't trigger it) — no double-keyboard, no layout jump. And a one-finger
+  // drag scrolls (mountTouchScroll) — xterm's own touch-scroll is dead here because
+  // claude keeps mouse reporting on.
   if (document.body.classList.contains("mobile")) {
     const ta = pane.querySelector(".xterm-helper-textarea");
     if (ta) { ta.readOnly = true; ta.setAttribute("inputmode", "none"); }
+    mountTouchScroll(pane);
   }
 
   // linkify localhost URLs the session prints (e.g. a dev server's
