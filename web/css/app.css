@@ -263,7 +263,7 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .pginstall:hover { background: #d9775730; border-color: #d9775799; }
 /* task card */
 .task { position: relative; }
-.task .t { padding-right: 24px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.task .t { padding-right: 24px; display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-width: 0; }
 .task::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; pointer-events: none;
   border-radius: 8px 0 0 8px; opacity: .85; }
 .task-claude::before { background: var(--accent-bar); }
@@ -278,7 +278,8 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    It pre-reserves .tname-edit's exact box (same box-sizing / padding / 1px border,
    here transparent) so swapping the span for the input on edit causes ZERO reflow —
    no taller row, no sideways text shift, hence no jump. */
-.tname { box-sizing: border-box; padding: 1px 6px; border: 1px solid transparent; border-radius: 5px; cursor: text; }
+.tname { flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 1px 6px; border: 1px solid transparent; border-radius: 5px; cursor: text;
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tname:hover { text-decoration: underline dotted var(--faint); text-underline-offset: 2px; }
 /* the inline rename field. renameTask inserts it as a DIRECT flex child of `.t`
    (hiding the title span beside it) so this flex sizing actually applies: basis 0 +
