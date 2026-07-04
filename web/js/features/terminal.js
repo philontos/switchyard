@@ -113,22 +113,40 @@ function sendResize(p) {
 // xterm DOES touch-scroll the viewport, its scroll would stack on top of ours and the
 // buffer would fly twice as fast. touchstart is left to propagate so a plain tap still
 // reaches xterm (selection); only a drag is claimed for scrolling.
+//
+// Flick inertia: a bare 1:1 drag stops dead on lift-off, which reads as sluggish.
+// We carry the release velocity into a decaying rAF loop (friction 0.92/frame) that
+// keeps emitting wheel deltas, so a flick coasts like native momentum scrolling; a new
+// touch cancels it. Velocity is tracked per move (px/ms) and a slow release doesn't fling.
 function mountTouchScroll(pane) {
   const sink = pane.querySelector(".xterm-screen") || pane;
-  let lastY = 0, tracking = false;
+  const emit = (dy) => sink.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }));
+  let lastY = 0, lastT = 0, vy = 0, tracking = false, raf = 0;
+  const stopFling = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } };
   pane.addEventListener("touchstart", (e) => {
+    stopFling();                             // a fresh touch halts any coasting scroll
     tracking = e.touches.length === 1;       // single finger only — a pinch isn't a scroll
-    if (tracking) lastY = e.touches[0].clientY;
+    if (tracking) { lastY = e.touches[0].clientY; lastT = e.timeStamp; vy = 0; }
   }, { passive: true });
   pane.addEventListener("touchmove", (e) => {
     if (!tracking || e.touches.length !== 1) return;
     const y = e.touches[0].clientY, dy = lastY - y;   // finger up → dy>0 → scroll toward newer content
-    lastY = y;
+    const dt = Math.max(1, e.timeStamp - lastT);
+    lastY = y; lastT = e.timeStamp;
     if (!dy) return;
+    vy = dy / dt;                            // px/ms, carried into the fling on release
     e.preventDefault();
     e.stopPropagation();                     // keep xterm's own touch-scroll from double-driving
-    sink.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }));
+    emit(dy);
   }, { passive: false, capture: true });
+  pane.addEventListener("touchend", () => {
+    if (!tracking) return;
+    tracking = false;
+    let v = vy * 16;                         // px per ~frame at lift-off
+    if (Math.abs(v) < 3) return;             // a gentle release just stops — no coast
+    const step = () => { emit(v); v *= 0.92; raf = Math.abs(v) > 0.5 ? requestAnimationFrame(step) : 0; };
+    raf = requestAnimationFrame(step);
+  }, { passive: true });
 }
 
 // Build a fresh terminal pane for a task: its own xterm + FitAddon + copy/paste
@@ -220,8 +238,9 @@ function ensureSocket(p) {
 // may have been display:none and unmeasurable), repaint, refresh the dock bar
 // and grab the keyboard.
 function showPane(p) {
-  if (onShow) onShow();   // mobile: flip to the terminal view BEFORE fitting, so the
+  if (onShow) onShow(p.id);   // mobile: flip to the terminal view BEFORE fitting, so the
                           // pane's box is visible (measurable) when p.fit.fit() runs
+                          // — and hand over the id so the quick-input swaps to this task's draft
   hidePendingView();   // a real pane takes over the dock → drop any placeholder overlay
   for (const o of panes.values()) o.pane.style.display = o === p ? "block" : "none";
   activeId = p.id;
@@ -355,7 +374,7 @@ function pendingBar(title, desc) {
 // Open a spinner placeholder for a just-submitted creation and make it the visible
 // dock view. text = the loading line (e.g. "Creating worktree…").
 export function openPending(tmpId, title, desc, text) {
-  if (onShow) onShow();   // mobile: a just-dispatched task takes the dock → terminal view
+  if (onShow) onShow(tmpId);   // mobile: a just-dispatched task takes the dock → terminal view
   const el = document.createElement("div");
   el.className = "term-pane pending";
   el.dataset.pending = String(tmpId);
@@ -378,7 +397,7 @@ export function openPending(tmpId, title, desc, text) {
 export function showPending(tmpId) {
   const pe = pending.get(tmpId);
   if (!pe) return false;
-  if (onShow) onShow();   // mobile: re-showing a still-loading card → terminal view
+  if (onShow) onShow(tmpId);   // mobile: re-showing a still-loading card → terminal view
   for (const o of panes.values()) o.pane.style.display = "none";
   for (const [k, v] of pending) v.el.style.display = k === tmpId ? "flex" : "none";
   activeId = null;
