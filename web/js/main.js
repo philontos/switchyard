@@ -9,7 +9,8 @@ import { $ } from "./core/dom.js";
 import { toast } from "./core/feedback.js";
 import { closeDialog } from "./core/dialog.js";
 import { Selects, csMount } from "./core/select.js";
-import { initTerm, showTermEmpty, applyTermTheme } from "./features/terminal.js";
+import { initTerm, showTermEmpty, applyTermTheme, setViewHooks } from "./features/terminal.js";
+import { initMobile, isOn as isMobile, autoFollowing, enterTerminal, enterList, mobileBack } from "./features/mobile.js";
 import { state } from "./core/state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./features/repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, updateHost } from "./features/hosts.js";
@@ -36,6 +37,8 @@ Object.assign(window, {
   openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList,
   // providers (alternate model backends — picker + inline add/remove panel)
   toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider,
+  // mobile (term-bar back button → list view)
+  mobileBack,
 });
 
 // global safety net: surface uncaught API errors as toasts
@@ -75,6 +78,15 @@ renderThemeToggle();
 
 function dismissBoot() { const b = $("boot"); if (b) b.classList.add("done"); }
 try { initTerm(); } catch (e) { console.error("terminal init failed:", e); }
+// mobile master-detail: a pane/placeholder taking the dock flips to the terminal
+// view (unless it's a machine-switch auto-follow); the dock emptying flips back to
+// the list. Both no-op on desktop, where isMobile() is false. Wire the hooks
+// before initMobile()/showTermEmpty() so the very first render already honors them.
+setViewHooks(
+  () => { if (isMobile() && !autoFollowing()) enterTerminal(); },
+  () => { if (isMobile()) enterList(); },
+);
+initMobile();
 showTermEmpty();
 initHostMenuDismiss();   // close the machine ⚙ menu on any outside click
 initReorder();           // long-press drag-to-reorder of repo task cards (session-only)

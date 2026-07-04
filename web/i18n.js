@@ -220,6 +220,11 @@
       // theme toggle (header)
       "theme.toLight": "切换到浅色",
       "theme.toDark": "切换到深色",
+
+      // mobile (touch layout: master-detail views + quick-input bar)
+      "m.back": "返回列表",
+      "m.send": "发送",
+      "m.inputPh": "输入发给终端…",
     },
     en: {
       "repo.new": "＋ New repo",
@@ -403,6 +408,11 @@
       // theme toggle (header)
       "theme.toLight": "Switch to light",
       "theme.toDark": "Switch to dark",
+
+      // mobile (touch layout: master-detail views + quick-input bar)
+      "m.back": "Back to list",
+      "m.send": "Send",
+      "m.inputPh": "Type to the terminal…",
     },
   };
 

@@ -73,7 +73,10 @@
   --shadow: #6b5a3540;
 }
 * { box-sizing: border-box; }
-body { margin: 0; font: 13px/1.55 -apple-system, "SF Pro Text", system-ui, "PingFang SC", sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; -webkit-font-smoothing: antialiased; letter-spacing: .1px; }
+/* height: dvh tracks the *dynamic* viewport so iOS Safari's collapsing address bar
+   doesn't cut off the bottom of the app (100vh there counts the full-chrome height).
+   The 100vh line is the fallback for engines without dvh. */
+body { margin: 0; font: 13px/1.55 -apple-system, "SF Pro Text", system-ui, "PingFang SC", sans-serif; background: var(--bg); color: var(--text); height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; -webkit-font-smoothing: antialiased; letter-spacing: .1px; -webkit-tap-highlight-color: transparent; }
 header { padding: 12px 18px; background: var(--surface); border-bottom: 1px solid var(--border); font-weight: 600; flex: none; display: flex; align-items: center; gap: 10px; }
 #lang-toggle, #theme-toggle { width: auto; margin: 0; padding: 3px 12px; font-size: 12px; background: var(--surface-2); border-color: var(--border); }
 #theme-toggle { font-size: 14px; line-height: 1.1; padding: 3px 10px; }
@@ -415,3 +418,91 @@ a { color: var(--accent-bar); }
 #boot { position: fixed; inset: 0; z-index: 1000; background: var(--bg);
   display: flex; align-items: center; justify-content: center; transition: opacity .35s ease; }
 #boot.done { opacity: 0; pointer-events: none; }
+
+/* ============================================================================
+   MOBILE / TOUCH  (≤760px)
+   The desktop three-column grid collapses to a master-detail two-view model:
+   a LIST view (horizontal machine strip + repo/task list) and a full-screen
+   TERMINAL view, toggled by `body.view-terminal` (set from js/features/mobile.js).
+   Everything here is additive — desktop ≥761px never matches these rules.
+   iOS specifics: dvh height (see body, above); visualViewport-driven --vvh/--vvt
+   so the quick-input bar rides above the soft keyboard; safe-area insets; and
+   16px inputs (anything smaller makes iOS auto-zoom the page on focus).
+   ============================================================================ */
+/* mobile-only chrome — inert/hidden on desktop */
+#term-back, .term-input { display: none; }
+
+@media (max-width: 760px) {
+  /* --- list view: three-column grid → vertical stack (rail on top, list fills) --- */
+  .wrap { display: flex; flex-direction: column; }
+  /* machine rail: vertical icon column → horizontal scrolling strip */
+  .rail {
+    flex: none; flex-direction: row; align-items: center; gap: 8px;
+    border-right: none; border-bottom: 1px solid var(--border);
+    overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px max(10px, env(safe-area-inset-right)) 8px max(10px, env(safe-area-inset-left));
+  }
+  .rchip { flex: none; width: 44px; height: 44px; }   /* larger touch target; never shrink in the scroller */
+  .rchip:active { transform: scale(.93); }
+  .list {
+    flex: 1; border-right: none; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));   /* top/left/right stay 14px so .mh's -14px margins still bleed full-width */
+  }
+
+  /* --- terminal view: .termcol overlays full-screen, sized to the VISUAL
+     viewport so its bottom edge (the input bar) sits right above the iOS
+     keyboard. --vvh/--vvt are published by mobile.js; the fallbacks cover the
+     pre-JS frame and engines without visualViewport. --- */
+  .termcol { display: none; }
+  body.view-terminal .termcol {
+    display: flex; position: fixed; left: 0; right: 0; z-index: 45;
+    top: var(--vvt, 0px); height: var(--vvh, 100dvh);
+    /* opaque: as a fixed overlay the column must fully hide the list beneath it
+       (xterm's 6px pane padding + the strip above the input bar are otherwise
+       transparent and the list bleeds through) */
+    background: var(--bg);
+  }
+
+  /* term bar: reveal the back button; drop desktop-only affordances that crowd a
+     phone-width bar (drag-select hint, raw attach cmd, prompt preview, session-id
+     chip, manual preview-port box) */
+  #term-back { display: inline-flex; align-items: center; justify-content: center;
+    width: auto; margin: 0; padding: 2px 10px; font-size: 20px; line-height: 1; }
+  .termbar .hint, #term-attach, #term-desc, .term-claude, .prev-port, .prev-btn { display: none; }
+  #term-title { flex: 1; max-width: none; }
+
+  /* --- quick-input bar (wired in mobile.js): control-key row + line field --- */
+  .term-input {
+    display: flex; flex: none; flex-direction: column; gap: 7px;
+    padding: 7px 10px max(7px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border); background: var(--surface);
+  }
+  .ti-keys { display: flex; gap: 7px; overflow-x: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .ti-key { flex: none; min-width: 46px; height: 38px; margin: 0; padding: 0 12px;
+    font-size: 14px; font-family: Menlo, monospace; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
+  .ti-key:active { transform: scale(.93); background: var(--surface-3); }
+  .ti-row { display: flex; gap: 8px; align-items: center; }
+  #ti-field { flex: 1; height: 44px; margin: 0; font-size: 16px; }
+  #ti-send { flex: none; width: auto; height: 44px; margin: 0; padding: 0 18px; font-size: 14px; }
+
+  /* 16px keeps iOS from zooming the page when a field takes focus */
+  input, textarea { font-size: 16px; }
+
+  /* touch has no hover — give the primary tap targets an :active nudge instead */
+  .card.clickable:active { background: var(--card-hover); border-color: var(--accent); }
+  button:active { filter: brightness(.92); }
+
+  header { padding: 10px 12px; }
+
+  /* modals: full-width top sheet, scrollable, keyboard-aware (max-height tracks
+     the visible viewport so the dispatch form stays reachable with the keyboard up) */
+  .modal-bg { align-items: flex-start; }
+  .modal {
+    width: 100%; max-width: 100%; border-radius: 0 0 12px 12px;
+    max-height: var(--vvh, 100dvh); overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+  }
+}
