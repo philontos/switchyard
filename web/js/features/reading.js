@@ -98,22 +98,35 @@ function reset(id) {
   box.innerHTML = `<div class="rd-state" id="rd-state">${esc(I18N.t("read.loading"))}</div>`;
 }
 
+// Ticks run strictly one at a time. Overlapping polls — a fetch outlasting POLL_MS on a
+// slow link, or the immediate tick every openReading fires — would all ask from the same
+// not-yet-advanced cursor and each append the same window (the "my message showed up 3×"
+// bug). A tick arriving mid-flight coalesces into ONE follow-up run instead, so opening /
+// switching during a slow fetch still refreshes promptly rather than waiting a full poll.
+let busy = false, again = false;
 async function tick() {
-  const id = taskId;
-  if (id == null) return;
-  const q = new URLSearchParams({ since: String(cursor) });
-  if (source) q.set("source", source);
-  let data;
-  try { data = await api(`/api/tasks/${id}/transcript?` + q.toString()); }
-  catch { return; }
-  if (taskId !== id) return;                                   // switched away mid-fetch
-  agent = data.agent || agent;
-  if (source !== null && data.source !== source) clearRendered();   // a new session started → reload
-  const firstLoad = source === null;
-  source = data.source;
-  if (data.entries && data.entries.length) { hasContent = true; hideState(); appendAll(data.entries); }
-  else if (firstLoad && !hasContent) { showState(I18N.t("read.empty")); if (onEmpty) onEmpty(); }
-  cursor = data.cursor ?? cursor;
+  if (busy) { again = true; return; }
+  busy = true;
+  try {
+    const id = taskId;
+    if (id == null) return;
+    const q = new URLSearchParams({ since: String(cursor) });
+    if (source) q.set("source", source);
+    let data;
+    try { data = await api(`/api/tasks/${id}/transcript?` + q.toString()); }
+    catch { return; }
+    if (taskId !== id) return;                                 // switched away mid-fetch
+    agent = data.agent || agent;
+    if (source !== null && data.source !== source) clearRendered();   // a new session started → reload
+    const firstLoad = source === null;
+    source = data.source;
+    if (data.entries && data.entries.length) { hasContent = true; hideState(); appendAll(data.entries); }
+    else if (firstLoad && !hasContent) { showState(I18N.t("read.empty")); if (onEmpty) onEmpty(); }
+    cursor = data.cursor ?? cursor;
+  } finally {
+    busy = false;
+    if (again) { again = false; tick(); }
+  }
 }
 
 function clearRendered() { box.innerHTML = ""; lastRole = null; hasContent = false; tools.clear(); clearPending(); cursor = 0; }
