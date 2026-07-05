@@ -34,7 +34,74 @@ import {
   syncTaskManifest, str, providerEnv, checkProvider, slug, SESSION_RE, SSH_BIN,
 } from "./context.js";
 
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+function restartArgs(): string[] {
+  try {
+    const parsed = JSON.parse(process.env.TDSP_RESTART_ARGS || "[]");
+    if (Array.isArray(parsed) && parsed.every((v) => typeof v === "string")) return parsed;
+  } catch { /* fall through */ }
+  return ["serve"];
+}
+
+function installedPaths() {
+  const root = path.join(os.homedir(), ".task-dispatcher");
+  return {
+    src: path.join(root, "src"),
+    bin: path.join(root, "bin", "tdsp"),
+  };
+}
+
+async function updateInstalledCode(): Promise<{ ok: true; clone: string; head: string; log: string } | { ok: false; error: string }> {
+  const { src } = installedPaths();
+  let clone: string;
+  try {
+    clone = fs.realpathSync(src);
+  } catch {
+    return { ok: false, error: `no install at ${src} - run \`tdsp install\` from a clone first` };
+  }
+  try {
+    const pull = await localRunner.exec("git", ["-C", clone, "pull", "--ff-only"]);
+    await localRunner.exec("npm", ["install", "--no-fund", "--no-audit"], { cwd: clone });
+    const head = (await localRunner.exec("git", ["-C", clone, "log", "-1", "--format=%h %s"])).trim();
+    return { ok: true, clone, head, log: pull.trim() };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.stderr || e?.message || e).trim() };
+  }
+}
+
+function scheduleSelfRestart(args: string[]) {
+  const { bin, src } = installedPaths();
+  if (!fs.existsSync(bin)) throw new Error(`no tdsp wrapper at ${bin} - run \`tdsp install\` first`);
+  const script =
+    `sleep 1\n` +
+    `cd ${shellQuote(src)} 2>/dev/null || true\n` +
+    `exec ${shellQuote(bin)} "$@"`;
+  const child = spawnChild("sh", ["-c", script, "tdsp-restart", ...args], {
+    detached: true,
+    stdio: "ignore",
+    env: process.env,
+  });
+  child.unref();
+}
+
 export function registerRoutes(app: Express) {
+// ---------- system ----------
+app.post("/api/system/update", async (_req, res) => {
+  const updated = await updateInstalledCode();
+  if (!updated.ok) return res.status(500).json({ error: updated.error });
+  try {
+    const args = restartArgs();
+    scheduleSelfRestart(args);
+    res.json({ ok: true, clone: updated.clone, head: updated.head, log: updated.log, restart: { args } });
+    setTimeout(() => process.exit(0), 250).unref();
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 // ---------- repos ----------
 app.get("/api/repos", (_req, res) => {
   res.json(db.prepare("SELECT id,host_id,name,git_url,default_branch,project_path,status,error,created_at FROM repos ORDER BY id DESC").all());

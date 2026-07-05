@@ -68,6 +68,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
   out: (s) => process.stdout.write(s + "\n"),
   err: (s) => process.stderr.write(s + "\n"),
   serve: async (opts) => {
+    process.env.TDSP_RESTART_ARGS = JSON.stringify(process.argv.slice(2));
     if (opts?.hosts?.length) process.env.HOSTS = opts.hosts.join(",");
     else if (opts?.host) process.env.HOST = opts.host;
 

@@ -150,6 +150,9 @@
       // loading overlay
       "loading.default": "处理中…",
       "loading.creatingWorktree": "正在拉取分支并创建 worktree…",
+      "system.updateTitle": "更新并重启",
+      "system.updating": "正在更新代码…",
+      "system.restarting": "已更新，正在按原启动参数重启…",
 
       // toasts
       "toast.opFailed": "操作失败",
@@ -353,6 +356,9 @@
 
       "loading.default": "Working…",
       "loading.creatingWorktree": "Fetching branch and creating worktree…",
+      "system.updateTitle": "Update and restart",
+      "system.updating": "Updating code…",
+      "system.restarting": "Updated; restarting with the original serve arguments…",
 
       "toast.opFailed": "Operation failed",
       "toast.repoNotReady": "Repository is not ready yet",

@@ -20,6 +20,28 @@ import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } f
 import { initReorder } from "./features/reorder.js";
 import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./features/providers.js";
 
+let selfUpdating = false;
+async function updateSelf() {
+  if (selfUpdating) return;
+  selfUpdating = true;
+  $("self-update").disabled = true;
+  toast(t("system.updating"), "info");
+  try {
+    await fetch("/api/system/update", { method: "POST", headers: { "content-type": "application/json", "X-Lang": I18N.lang }, body: "{}" })
+      .then(async (r) => {
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || r.status);
+        return j;
+      });
+    toast(t("system.restarting"), "success");
+    setTimeout(() => location.reload(), 3500);
+  } catch (e) {
+    selfUpdating = false;
+    $("self-update").disabled = false;
+    toast(String(e?.message || e), "error");
+  }
+}
+
 // ---- inline-onclick bridge ----
 // Every function referenced by an onclick="…" attribute (static markup in
 // index.html + the strings built in repoGroupHead/taskCard/renderList) must be
@@ -34,6 +56,8 @@ Object.assign(window, {
   // hosts
   selectHost, openHostModal, closeHostModal, addHost, delHost,
   toggleRepo, toggleArchived, toggleHostMenu, bootstrapHost, connectNode, stopNodeTask, addNodeShell, updateHost,
+  // local controller
+  updateSelf,
   // skills (official-plugin install)
   openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList,
   // providers (alternate model backends — picker + inline add/remove panel)
