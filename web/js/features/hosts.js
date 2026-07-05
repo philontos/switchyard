@@ -127,7 +127,8 @@ function fleetDot(tk) {
 // off), and fleetDot gives it the same breathing/needs-you light a local card has.
 function fleetCard(hostId, tk) {
   const paneId = `n${hostId}:${tk.id}`;
-  const sel = paneId === state.selectedTaskId ? " selected" : "";
+  // selection is painted post-render by paintSelection, not baked into the markup
+  // (keeps renderList's rebuild cache selection-agnostic — see pendingCard's note).
   // Same agent split as the local taskCard — the node ships `agent` in its
   // `tdsp list` payload (SELECT *), so a remote Codex task reads identically to a
   // local one. An un-updated node (no agent column) omits it → defaults to claude.
@@ -136,7 +137,7 @@ function fleetCard(hostId, tk) {
   const meta = tk.kind === "local"
     ? `<div class="muted">📂 <code>${tk.cwd || "~"}</code> <span class="tag-local">${t("local.tag")}</span></div>`
     : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;
-  return `<div class="card task task-${agent}${sel} clickable" data-pane="${paneId}" onclick="connectNode(${hostId},${tk.id})">
+  return `<div class="card task task-${agent} clickable" data-pane="${paneId}" onclick="connectNode(${hostId},${tk.id})">
       <button class="card-x" title="${t("task.stopTitle")}" onclick="event.stopPropagation();stopNodeTask(${hostId},${tk.id})">⏹</button>
       <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname">${tk.title}</span></div>
       ${meta}
@@ -177,8 +178,7 @@ export function rerender() {
     state.activeHostId = first ? first.id : null;
   }
   renderRail(hosts, blockedHosts());
-  renderList();
-  paintSelection();
+  renderList();   // paints selection itself (every render path does)
 }
 // Machines with a task blocked on a permission prompt (alive + waiting). This is
 // how the per-task yellow ("needs you") gets pulled up to the machine's rail dot.
@@ -270,7 +270,15 @@ function followHostTask(hostId) {
 // repo groups with nested tasks, the local quick-task group (local machine), and
 // a collapsed archived section. Task loop vars are named `tk` — `t` is the global
 // i18n function and must not be shadowed here.
+// Selection is NOT part of the generated markup (see fleetCard/pendingCard notes),
+// so it must be painted after EVERY render path — including the byte-identical
+// skip, where the DOM stands but the selection may have moved. Wrapping here
+// covers all callers (toggleRepo, loadFleet, the ⚙ menu, …), not just rerender().
 function renderList() {
+  renderListHtml();
+  paintSelection();
+}
+function renderListHtml() {
   // An inline rename input lives inside #m-list as a raw DOM node (not in the
   // template), so rebuilding innerHTML would destroy it and steal focus. Bail
   // while editing — this is the single chokepoint every re-render path passes
