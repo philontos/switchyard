@@ -78,6 +78,9 @@
    The 100vh line is the fallback for engines without dvh. */
 body { margin: 0; font: 13px/1.55 -apple-system, "SF Pro Text", system-ui, "PingFang SC", sans-serif; background: var(--bg); color: var(--text); height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; -webkit-font-smoothing: antialiased; letter-spacing: .1px; -webkit-tap-highlight-color: transparent; }
 header { padding: 12px 18px; background: var(--surface); border-bottom: 1px solid var(--border); font-weight: 600; flex: none; display: flex; align-items: center; gap: 10px; }
+.brand { display: inline-flex; align-items: center; flex: none; height: 28px; text-decoration: none; }
+.brand-logo { display: block; width: auto; height: 27px; object-fit: contain; }
+:root[data-theme="light"] .brand-logo { filter: brightness(0) saturate(100%) invert(14%) sepia(13%) saturate(590%) hue-rotate(348deg) brightness(92%) contrast(88%); }
 #lang-toggle, #theme-toggle { width: auto; margin: 0; padding: 3px 12px; font-size: 12px; background: var(--surface-2); border-color: var(--border); }
 #theme-toggle { font-size: 14px; line-height: 1.1; padding: 3px 10px; }
 .wrap { display: grid; grid-template-columns: 56px 300px 1fr; flex: 1; min-height: 0; }

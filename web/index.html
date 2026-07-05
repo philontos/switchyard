@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Task Dispatcher</title>
+<title>Switchyard</title>
 <!-- No-flash theme init: set data-theme from storage BEFORE the stylesheet
      applies, so the first paint is already light/dark with no flicker. Default
      is dark (existing users unchanged). theme.js re-derives the same value. -->
@@ -13,7 +13,7 @@
 </head>
 <body>
 <div id="boot"><div class="spinner"></div></div>
-<header>🛰️ Task Dispatcher<span style="flex:1"></span><button id="skills-btn" class="sec" data-i18n="skill.manage" onclick="openSkillsModal()"></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
+<header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo" src="/assets/switchyard-wordmark.png" alt="Switchyard" /></a><span style="flex:1"></span><button id="skills-btn" class="sec" data-i18n="skill.manage" onclick="openSkillsModal()"></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
   <div id="m-list" class="list"></div>
