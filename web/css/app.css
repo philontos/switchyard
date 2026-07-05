@@ -29,6 +29,10 @@
   --accent-text: #e09a7d;   /* accent label text */
   --accent-bar: #e0906f;    /* inset accent bars, links, spinner arcs */
   --accent-text-hi: #ecae93;/* accent text, hover-brightened */
+  --codex-accent: #6f9f9b;
+  --codex-tint: #6f9f9b12;
+  --codex-tint-hover: #6f9f9b1d;
+  --codex-tint-selected: #6f9f9b24;
   /* status */
   --green: #8aaa66;
   --green-2: #6f9249;       /* toast success rail */
@@ -274,15 +278,15 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .task::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; pointer-events: none;
   border-radius: 8px 0 0 8px; opacity: .85; }
 .task-claude::before { background: var(--accent-bar); }
-.task-codex::before { background: #4aa3df; }
+.task-codex::before { background: var(--codex-accent); }
 .card.task-claude { background: linear-gradient(90deg, #d977570f 0, var(--surface) 42px); }
-.card.task-codex { background: linear-gradient(90deg, #4aa3df14 0, var(--surface) 42px); border-color: color-mix(in srgb, #4aa3df 28%, var(--border)); }
+.card.task-codex { background: linear-gradient(90deg, var(--codex-tint) 0, var(--surface) 42px); border-color: color-mix(in srgb, var(--codex-accent) 12%, var(--border)); }
 /* hover affordances live behind (hover:hover): touch has no real hover, and iOS
    "sticky hover" would otherwise pin these styles to the last-tapped card until the
    next tap — coming back from a task, the card still wore the accent border, which
    read as a stuck selection. Touch feedback is the :active rules instead. */
 @media (hover: hover) {
-  .card.task-codex.clickable:hover { border-color: #4aa3df; background: linear-gradient(90deg, #4aa3df1f 0, var(--card-hover) 42px); }
+  .card.task-codex.clickable:hover { border-color: color-mix(in srgb, var(--codex-accent) 55%, var(--border)); background: linear-gradient(90deg, var(--codex-tint-hover) 0, var(--card-hover) 42px); }
 }
 /* claude vs codex is shown by colour alone (the ::before accent bar + card tint
    above) — no text label, so a long agent name can't wrap and deform the card. */
@@ -310,8 +314,8 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 /* selected: the item currently open in the bottom terminal — left accent bar + tint, wins over hover */
 .card.selected, .card.clickable.selected:hover { border-color: var(--accent); background: #d977571f;
   box-shadow: inset 3px 0 0 var(--accent-bar); }
-.card.task-codex.selected, .card.task-codex.clickable.selected:hover { border-color: #4aa3df; background: #4aa3df1c;
-  box-shadow: inset 3px 0 0 #4aa3df; }
+.card.task-codex.selected, .card.task-codex.clickable.selected:hover { border-color: var(--codex-accent); background: var(--codex-tint-selected);
+  box-shadow: inset 3px 0 0 var(--codex-accent); }
 .card-x { position: absolute; top: 7px; right: 7px; width: auto; margin: 0; padding: 1px 6px;
   background: none; border: none; color: var(--faint); font-size: 13px; line-height: 1; }
 .card-x:hover { background: #f8514914; color: var(--red); }
