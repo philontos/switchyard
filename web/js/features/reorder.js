@@ -53,6 +53,7 @@ let startX = 0, startY = 0; // pointerdown position (for the hold tolerance chec
 let lastX = 0, lastY = 0;   // latest pointer position (drives the float + placeholder)
 let grabDX = 0, grabDY = 0; // pointer offset within the card when the drag began
 let justDragged = false;    // true briefly after a drop, to swallow the trailing click
+let lockedScrollTop = null; // #m-list scroll position while a card is being dragged
 
 export function initReorder() {
   listEl = document.getElementById("m-list");
@@ -97,6 +98,7 @@ function beginDrag() {
     margin: "0", zIndex: "1000",
   });
   dragging = true;
+  lockListScroll();
   card.classList.add("dragging");   // CSS animates the scale-up + shadow
   grp.classList.add("reordering");
   lastBefore = undefined;
@@ -114,8 +116,27 @@ function onMove(e) {
     return;
   }
   e.preventDefault();   // suppress text selection during the drag
+  keepListScrollLocked();
   moveFloat();
   placePlaceholder();
+}
+
+function lockListScroll() {
+  if (!listEl) return;
+  lockedScrollTop = listEl.scrollTop;
+  listEl.classList.add("drag-scroll-locked");
+}
+
+function keepListScrollLocked() {
+  if (!listEl || lockedScrollTop == null) return;
+  if (listEl.scrollTop !== lockedScrollTop) listEl.scrollTop = lockedScrollTop;
+}
+
+function unlockListScroll() {
+  if (!listEl) return;
+  listEl.classList.remove("drag-scroll-locked");
+  if (lockedScrollTop != null) listEl.scrollTop = lockedScrollTop;
+  lockedScrollTop = null;
 }
 
 // follow the pointer, keeping the same grab point under it
@@ -210,6 +231,7 @@ function reset() {
     for (const p of ["position", "boxSizing", "width", "margin", "zIndex", "left", "top", "transition", "transform", "boxShadow"]) card.style[p] = "";
   }
   grp?.classList.remove("reordering");
+  unlockListScroll();
   if (ph?.isConnected) ph.remove();
   card = grp = ph = null; pointerId = null; lastBefore = undefined; dragging = false;
 }
