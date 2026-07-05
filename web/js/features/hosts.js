@@ -318,7 +318,7 @@ function renderListHtml() {
   }
   // an installed + reachable node can be updated in place (git pull its src)
   const updateRow = (!isLocal && state.fleet[h.id]?.ok && !bootstrappingHosts.has(h.id))
-    ? `<button class="mh-update" onclick="updateHost(${h.id})">⟳ ${t("host.update")}</button>` : "";
+    ? `<button class="mh-update" onclick="updateHost(${h.id})"><span class="sync-icon" aria-hidden="true"></span>${t("host.update")}</button>` : "";
   const menu = (menuHostId === h.id) ? `<div class="mh-menu">
       <div class="mh-target">${h.target}</div>
       ${fleetRow}
