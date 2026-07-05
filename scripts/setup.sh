@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 #
-# task-dispatcher 预检 / 修复脚本（跑在 npm install 之前）
+# switchyard 一键装机：环境预检（修 ~/.zshenv）→ npm install → 安装全局 tdsp。
+# clone 之后跑这一个脚本，之后一切用 `tdsp`（serve / update / …）。
 #
-# dispatcher 用 `zsh -c 'claude …'`（远程走 `ssh host '<cmd>'`）起每个任务，
-# 那是只读 ~/.zshenv 的「非交互、非登录」shell —— PATH 里没有 claude/tmux/git
-# 就 `command not found`、pane 直接死（状态 127）。本脚本按 dispatcher 实际看到
-# 的那种环境去检查这三个命令，把「已装但不在 PATH」的目录幂等写进 ~/.zshenv。
+# 预检在防什么：dispatcher 用 `zsh -c 'claude …'`（远程走 `ssh host '<cmd>'`）
+# 起每个任务，那是只读 ~/.zshenv 的「非交互、非登录」shell —— PATH 里没有
+# claude/tmux/git 就 `command not found`、pane 直接死（状态 127）。本脚本按
+# dispatcher 实际看到的那种环境去检查这三个命令，把「已装但不在 PATH」的目录
+# 幂等写进 ~/.zshenv。
 #
 # 用法:
-#   ./scripts/setup.sh           检查并自动修 ~/.zshenv（自动备份 ~/.zshenv.bak）
-#   ./scripts/setup.sh --check   只检查、只读，不写任何文件（可当 CI / predev 门禁）
+#   ./scripts/setup.sh           预检并修 ~/.zshenv，然后 npm install + 安装全局 tdsp（整体幂等，重跑无害）
+#   ./scripts/setup.sh --check   只检查、只读，不写文件也不装东西（可当 CI / predev 门禁）
 #
-# 不做的事: 不装 node（README 里要求装好）、不装缺失的二进制、不跑 npm。
+# 不做的事: 不装 node（README 里要求装好）、不装缺失的二进制。
 
 set -euo pipefail
 
@@ -21,6 +23,9 @@ case "${1:-}" in
   "")      ;;
   *)       echo "未知参数: $1（可用: --check）" >&2; exit 2 ;;
 esac
+
+# 仓库根目录（本脚本在 scripts/ 下）—— 预检通过后在这里装依赖 + 装全局 tdsp。
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 ZSHENV="$HOME/.zshenv"
 MARKER_BEGIN="# >>> task-dispatcher >>>"
@@ -143,14 +148,34 @@ write_block() {
   fi
 }
 
-# 没什么要修的
+# 预检通过后的安装段：装依赖 + 装全局 tdsp（均幂等，重跑无害）。--check 不进这里。
+install_all() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "${R}缺 npm（需要 Node 22+），装好后重跑。${N}"
+    exit 1
+  fi
+  echo
+  echo "${B}npm install（依赖装进 ${ROOT}，零构建）…${N}"
+  (cd "$ROOT" && npm install --no-fund --no-audit)
+  echo
+  echo "${B}安装全局 tdsp 命令…${N}"
+  (cd "$ROOT" && npm run -s tdsp -- install)
+  echo
+  echo "${G}全部装好。启动:${N}${B} tdsp serve ${N}${G}；日后更新代码:${N}${B} tdsp update${N}"
+}
+
+# 环境本来就绪（~/.zshenv 无需改动）
 if [ -z "$UNIQ_DIRS" ]; then
   echo
   if [ -n "$MISSING" ]; then
     echo "${R}还有命令没装（见上），装好后重跑。${N}"
     exit 1
   fi
-  echo "${G}全部就绪，~/.zshenv 无需改动。${N}"
+  echo "${G}环境就绪，~/.zshenv 无需改动。${N}"
+  if [ "$CHECK_ONLY" = 1 ]; then
+    exit 0
+  fi
+  install_all
   exit 0
 fi
 
@@ -177,8 +202,8 @@ done
 
 echo
 if [ "$allok" = 1 ] && [ -z "$MISSING" ]; then
-  echo "${G}搞定。当前 shell 立即生效请 \`source ~/.zshenv\`；新开的任务会自动带上。${N}"
-  echo "接着：${B}npm install && npm run dev${N}"
+  echo "${G}环境搞定。当前 shell 立即生效请 \`source ~/.zshenv\`；新开的任务会自动带上。${N}"
+  install_all
   exit 0
 fi
 echo "${Y}还有未解决项（见上）。${N}"

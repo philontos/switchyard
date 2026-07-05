@@ -6,6 +6,7 @@
 // boots a listening server that holds the loop open, so the process stays alive —
 // an explicit exit() would kill the server it just started.
 import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import { runCli } from "./task/cli.js";
 import { db, type Task } from "./core/db.js";
@@ -142,6 +143,27 @@ process.exitCode = await runCli(process.argv.slice(2), {
   install: () => {
     const p = applyInstall(os.homedir(), ROOT);
     return { src: p.src, binPath: p.binPath, localBin: p.localBin, clone: ROOT };
+  },
+  // pull the canonical install (the clone behind ~/.task-dispatcher/src) to the
+  // latest code and refresh deps. --ff-only so a locally-diverged clone fails
+  // loud instead of silently merging; a running serve keeps the old code until
+  // it's restarted.
+  update: async () => {
+    const src = path.join(os.homedir(), ".task-dispatcher", "src");
+    let clone: string;
+    try {
+      clone = fs.realpathSync(src);
+    } catch {
+      return { ok: false as const, error: `no install at ${src} — run \`npm run tdsp -- install\` from a clone first` };
+    }
+    try {
+      await localRunner.exec("git", ["-C", clone, "pull", "--ff-only"]);
+      await localRunner.exec("npm", ["install", "--no-fund", "--no-audit"], { cwd: clone });
+      const head = (await localRunner.exec("git", ["-C", clone, "log", "-1", "--format=%h %s"])).trim();
+      return { ok: true as const, clone, head };
+    } catch (e: any) {
+      return { ok: false as const, error: String(e?.stderr || e?.message || e).trim() };
+    }
   },
   // live branches for one of this machine's mirrors (git ls-remote on the mirror)
   branches: async (mirror) => {
