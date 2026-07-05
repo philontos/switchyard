@@ -533,6 +533,9 @@ a { color: var(--accent-bar); }
      live terminal. The 阅读|实时 toggle picks which the .termcol overlay shows; the same
      input bar drives both. Show/hide uses id-qualified selectors so it out-specifies the
      desktop `#…{display:none}` hide above. Read is the default; .mode-live flips to live. */
+  /* a shell has no transcript — no 阅读: hide the toggle (and the needs-you banner,
+     which is agent-only anyway) and the view stays pinned to 实时 (mobile.js) */
+  body.no-read #term-mode, body.no-read #read-banner { display: none; }
   #term-mode { display: inline-flex; flex: none; gap: 3px; padding: 3px;
     background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; }
   #term-mode button { flex: none; margin: 0; padding: 5px 14px; font-size: 13px; font-weight: 600;
