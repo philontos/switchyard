@@ -22,6 +22,12 @@
       <!-- mobile master-detail: back to the machine/repo list. Hidden on desktop
            (the list is always visible there). -->
       <button id="term-back" class="sec" onclick="mobileBack()" data-i18n-title="m.back" aria-label="Back">‹</button>
+      <!-- mobile-only 阅读/实时 mode toggle (hidden on desktop). Reading shows the agent
+           conversation as a native-scrolling chat; 实时 is the live terminal. -->
+      <div id="term-mode" class="term-mode">
+        <button id="tm-read" type="button" class="on" onclick="setReadMode('read')" data-i18n="read.tabRead"></button>
+        <button id="tm-live" type="button" onclick="setReadMode('live')" data-i18n="read.tabLive"></button>
+      </div>
       <span id="term-title" data-i18n="term.notConnected"></span>
       <span id="term-desc"></span>
       <span class="hint" style="flex:none" data-i18n="term.selectHint" data-i18n-title="term.selectHintTitle"></span>
@@ -31,6 +37,16 @@
       <input id="prev-port" class="prev-port" data-i18n-ph="preview.portPh" data-i18n-title="preview.portTitle" />
       <button id="prev-go" class="prev-btn" data-i18n-title="preview.go">↗</button>
     </div>
+    <!-- mobile-only "needs you" bridge: shown while reading a task that's blocked on a
+         permission prompt, one tap flips to 实时 to answer it (reading.js/main.js). -->
+    <div id="read-banner" class="read-banner">
+      <span>⚠ <b data-i18n="read.needsYou"></b></span>
+      <button type="button" onclick="setReadMode('live')" data-i18n="read.goLive"></button>
+    </div>
+    <!-- mobile-only reading pane: the agent conversation as a scrollable chat (reading.js).
+         Hidden on desktop and in 实时 mode. -->
+    <div id="term-read" class="term-read"></div>
+    <button id="read-jump" class="read-jump" type="button">↓ <span data-i18n="read.latest"></span></button>
     <div id="term"></div>
     <div id="term-empty" class="term-empty"><div class="te-ic">🖥</div><div data-i18n="term.empty"></div></div>
     <!-- mobile-only quick-input bar (hidden on desktop via CSS). A whole line is

@@ -16,6 +16,7 @@ import { extForMime, pasteTargetBase, pastedDest, pasteFilename } from "../task/
 import { listAvailable, installPlugin } from "../skills/plugins.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions, pasteText } from "../session/tmux.js";
 import { asAgentKind } from "../session/agent.js";
+import { readTranscript } from "../session/transcript.js";
 import { syncReposManifest } from "../repo/manifest.js";
 import { removeTaskManifest } from "../task/taskmanifest.js";
 import { localRunner, runnerFor, SSH_BASE_ARGS, type Runner } from "../fleet/runner.js";
@@ -326,6 +327,27 @@ app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25
   // inject the path as a bracketed paste → claude shows [Image #N] in its input
   if (task.session) await pasteText(runner, task.session, dest).catch(() => {});
   res.json({ ok: true, path: dest });
+});
+
+// Read a task's agent conversation as normalized entries — the data behind the mobile
+// "阅读 / Reading" view. Incremental: pass the previous ?since byte cursor + ?source id
+// to get only what's new; a changed source (e.g. /clear started a fresh Claude session)
+// makes the client reload from the top. Read-only + best-effort: a task with no
+// transcript yet, or an offline remote, just returns an empty stream (never errors).
+app.get("/api/tasks/:id/transcript", async (req, res) => {
+  const lang = langFromReq(req);
+  const task = getTask.get(req.params.id) as Task | undefined;
+  if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (offline(taskHost(task))) {
+    return res.json({ agent: asAgentKind(task.agent), source: null, entries: [], cursor: 0 });
+  }
+  const since = Math.max(0, parseInt(String(req.query.since ?? "0"), 10) || 0);
+  const source = req.query.source ? String(req.query.source) : null;
+  try {
+    res.json(await readTranscript(taskRunner(task), task, since, source));
+  } catch (e: any) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 // archive: end the tmux session but KEEP the worktree (moves task to archived tab)

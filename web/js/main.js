@@ -10,11 +10,12 @@ import { toast } from "./core/feedback.js";
 import { closeDialog } from "./core/dialog.js";
 import { Selects, csMount } from "./core/select.js";
 import { initTerm, showTermEmpty, applyTermTheme, setViewHooks } from "./features/terminal.js";
-import { initMobile, isOn as isMobile, autoFollowing, enterTerminal, enterList, mobileBack } from "./features/mobile.js";
+import { initMobile, isOn as isMobile, autoFollowing, enterTerminal, enterList, mobileBack, setMode } from "./features/mobile.js";
+import { initReading, reflectWaiting } from "./features/reading.js";
 import { state } from "./core/state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./features/repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, updateHost } from "./features/hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, addNodeShell } from "./features/tasks.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, addNodeShell, allTasks } from "./features/tasks.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./features/skills.js";
 import { initReorder } from "./features/reorder.js";
 import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./features/providers.js";
@@ -37,9 +38,13 @@ Object.assign(window, {
   openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList,
   // providers (alternate model backends — picker + inline add/remove panel)
   toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider,
-  // mobile (term-bar back button → list view)
-  mobileBack,
+  // mobile (term-bar back button → list view; 阅读/实时 toggle + 需要确认 banner)
+  mobileBack, setReadMode: setMode,
 });
+
+// keep the reading view's "needs you" banner in sync with the task poll (a task blocked
+// on a permission prompt); reading.js stays decoupled from the task cache this way.
+function syncReadWaiting() { reflectWaiting(state.selectedTaskId, allTasks()); }
 
 // global safety net: surface uncaught API errors as toasts
 window.addEventListener("unhandledrejection", (e) => {
@@ -87,6 +92,7 @@ setViewHooks(
   () => { if (isMobile()) enterList(); },
 );
 initMobile();
+initReading({ onEmpty: () => setMode("live") });   // mobile reading view; empty transcript → 实时
 showTermEmpty();
 initHostMenuDismiss();   // close the machine ⚙ menu on any outside click
 initReorder();           // long-press drag-to-reorder of repo task cards (session-only)
@@ -96,9 +102,9 @@ csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", l
 $("t-provider").dataset.ph = t("provider.default");   // model-backend picker
 csMount("t-provider", onProviderChange);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
-Promise.allSettled([loadRepos(), loadHosts(), loadTasks(), refreshProviders()]).then(dismissBoot);
+Promise.allSettled([loadRepos(), loadHosts(), loadTasks(), refreshProviders()]).then(() => { dismissBoot(); syncReadWaiting(); });
 setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
-setInterval(loadTasks, 4000);
+setInterval(async () => { await loadTasks(); syncReadWaiting(); }, 4000);
 setInterval(loadHosts, 5000);   // refresh machine liveness dots
 loadFleet();                     // initial cross-node fleet snapshot
 setInterval(loadFleet, 15000);  // refresh each node's live task count (slower — it ssh's out)
