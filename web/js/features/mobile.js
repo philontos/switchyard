@@ -54,14 +54,25 @@ let curDockId = null;
 let curCanRead = false;
 
 // ---- platform back gesture ⇄ view stack ----
-// Entering the terminal view pushes ONE history entry, so the platform back action —
-// iOS's native edge swipe-right, Android's back gesture/button — pops it and lands on
-// the list. That gives the "swipe right to leave the page" feel with the browser's own
-// transition, and zero custom gesture math (which would fight xterm's touch handling).
-// pushedNav tracks whether our entry is on the stack; programmatic exits (the ‹ button,
-// the dock emptying, a breakpoint flip) consume it via history.back(), whose popstate
-// then no-ops (the view is already gone), so stale entries never pile up.
-let pushedNav = false;
+// The app keeps AT MOST ONE history entry above the {tdView:"list"} base, so the
+// platform back action — iOS's native edge swipe-right, Android's back gesture/button —
+// pops it and lands on the list, with the browser's own transition and zero custom
+// gesture math (which would fight xterm's touch handling). navEntry tracks what that
+// single entry currently represents: the full-screen dispatch SHEET or the TERMINAL
+// view. Programmatic exits (the ‹ button, the dock emptying, a sheet cancel) consume
+// it via history.back(), whose popstate then no-ops, so stale entries never pile up.
+//
+// WHY the sheet is a history entry at all: WebKit records the swipe-back snapshot of
+// the entry being LEFT at navigate-away time, from whatever the UI process actually
+// has on the glass — not from what JS has painted. Any pushState that fires moments
+// after the full-screen sheet closes therefore races keyboard dismissal + layer-tree
+// IPC, and the list entry's snapshot can capture the FORM (the one-frame ghost on
+// swipe-back). So navigation away from the list entry only ever happens while the
+// list is STABLY on screen: opening the sheet pushes (list on glass for seconds),
+// and dispatching MORPHS sheet→term via replaceState — no new navigation, so the
+// list's clean snapshot survives untouched. No paint-waiting, no race.
+let navEntry = null;   // null | "sheet" | "term" — our single extra entry, if any
+let onSheetClose = null;   // injected by main.js (closes the dispatch modal) — avoids a tasks.js import cycle
 
 // Raise the terminal view for curDockId (no history push, no draft swap) — shared by
 // enterTerminal and the forward-gesture popstate re-entry.
@@ -87,8 +98,15 @@ export function enterTerminal(id, canRead = typeof id === "number") {
   // still the rendered state gives the back-gesture a correct dark under-layer;
   // flip-then-push risked a wrong/blank snapshot — the white sliver that flashed at
   // the left edge during the gesture (button exits never animate, hence never flashed).
-  if (entering && !pushedNav) {
-    try { history.pushState({ tdView: "term" }, ""); pushedNav = true; } catch {}
+  // If the dispatch sheet's entry is on the stack (or any entry of ours), MORPH it
+  // instead of pushing: replaceState leaves the list entry — and its clean snapshot —
+  // completely alone, and keeps the stack at one entry above base.
+  if (entering) {
+    try {
+      if (navEntry) history.replaceState({ tdView: "term" }, "");
+      else history.pushState({ tdView: "term" }, "");
+      navEntry = "term";
+    } catch {}
   }
   showTermView();
 }
@@ -96,7 +114,30 @@ export function enterTerminal(id, canRead = typeof id === "number") {
 function exitTermView() { document.body.classList.remove("view-terminal"); closeReading(); }
 export function enterList() {
   exitTermView();
-  if (pushedNav) { pushedNav = false; try { history.back(); } catch {} }
+  // Consume only OUR terminal entry. An open sheet's entry stays put: the dock
+  // emptying (a background dispatch failing, say) while the user is mid-form must
+  // not pop the sheet out from under them.
+  if (navEntry === "term") { navEntry = null; try { history.back(); } catch {} }
+}
+
+// The dispatch sheet opens: claim the history entry NOW, while the list is still the
+// stably-rendered content (the caller flips the sheet visible right after — same
+// push-then-flip order the terminal entry uses). Desktop (wide) never pushes.
+export function sheetOpened() {
+  if (!isOn()) return;
+  try {
+    if (navEntry) history.replaceState({ tdView: "sheet" }, "");   // defensive: never stack a 2nd entry
+    else history.pushState({ tdView: "sheet" }, "");
+    navEntry = "sheet";
+  } catch {}
+}
+// Cancel paths only (取消 button / backdrop / Esc): consume the sheet's entry; the
+// popstate that back() fires re-closes the (already closed) sheet, a no-op. Dispatch
+// must NOT come here — enterTerminal morphs the entry instead of popping it.
+export function sheetCancelled() {
+  if (navEntry !== "sheet") return;
+  navEntry = null;
+  try { history.back(); } catch {}
 }
 export function mobileBack() { enterList(); }   // term-bar ‹ back button (bridged in main.js)
 
@@ -156,23 +197,30 @@ function sendLine() {
   f.focus();
 }
 
-export function initMobile() {
+export function initMobile({ closeSheet } = {}) {
+  onSheetClose = closeSheet || null;
   document.body.classList.toggle("mobile", isOn());
   MQ.addEventListener("change", () => {
     document.body.classList.toggle("mobile", isOn());
     if (!isOn()) enterList();   // crossing back to desktop: drop the view flag
   });
 
-  // Platform back gesture ⇄ view stack (see pushedNav above). The base entry is stamped
+  // Platform back gesture ⇄ view stack (see navEntry above). The base entry is stamped
   // so a pop back onto it is recognizable; a FORWARD gesture onto our term entry re-opens
   // the current task's view, so back-then-forward round-trips like a native nav stack.
   try { history.replaceState({ tdView: "list" }, ""); } catch {}
   window.addEventListener("popstate", (e) => {
-    if (e.state && e.state.tdView === "term") {
-      pushedNav = true;
+    const v = e.state && e.state.tdView;
+    if (v === "term") {
+      navEntry = "term";
       if (isOn() && curDockId != null) showTermView();
+    } else if (v === "sheet") {
+      // Forward gesture onto a cancelled sheet's entry. Don't resurrect the form —
+      // just bookkeep: the next enterTerminal morphs this entry, a back pops it.
+      navEntry = "sheet";
     } else {
-      pushedNav = false;
+      navEntry = null;
+      if (onSheetClose) onSheetClose();   // gesture-back with the sheet open dismisses it
       if (document.body.classList.contains("view-terminal")) exitTermView();
     }
   });

@@ -11,6 +11,10 @@ import { openPty, disposePty, prunePanes, setClaudeSession,
          openPending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
 import { rerender, expandRepo, loadFleet, connectNode } from "./hosts.js";
 import { refreshProviders, selectedProviderId } from "./providers.js";
+// One-way: mobile.js never imports tasks.js (its sheet-close callback is injected by
+// main.js), so this edge is acyclic. sheetOpened/sheetCancelled give the dispatch
+// sheet its own mobile history entry — see the navEntry block in mobile.js for why.
+import { sheetOpened, sheetCancelled } from "./mobile.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 // the dispatch modal's agent pick (Claude Code | Codex), remembered across opens.
@@ -128,26 +132,25 @@ export function openTaskModal(repoId) {
   $("t-agent-sec").style.display = "";
   $("t-codex-model").value = "";
   selectAgent(localStorage.getItem(LS_AGENT) === "codex" ? "codex" : "claude");
+  sheetOpened();   // claim the mobile history entry BEFORE the sheet paints (list still on the glass)
   $("task-modal").style.display = "flex";
   loadBranches();
   loadDispatchOptions();
   if (onLocalNode) refreshProviders();                 // fill the backend picker (keeps the last pick)
   setTimeout(() => $("t-title").focus(), 30);
 }
+// Pure DOM close, shared by every path. Dispatch calls THIS (the sheet's history
+// entry is then morphed into the terminal entry by enterTerminal — never popped).
 export function closeTaskModal() {
   const modal = $("task-modal");
   if (modal.contains(document.activeElement)) document.activeElement.blur();
   modal.style.display = "none";
   nodeTask = null;
 }
-
-function mobileClosePainted() {
-  if (!window.matchMedia("(max-width: 760px)").matches) return Promise.resolve();
-  // Let iOS paint the closed sheet before mobile.js pushes the terminal history entry.
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(resolve));
-  });
-}
+// Cancel paths (取消 button / backdrop / Esc) additionally consume the sheet's
+// mobile history entry; the platform back gesture takes the popstate route instead
+// (mobile.js closes the sheet via its injected hook).
+export function cancelTaskModal() { closeTaskModal(); sheetCancelled(); }
 
 // Open the dispatch modal for a remote node's OWN repo (from the fleet). The task
 // is created ON the node, using the node's existing mirror — no re-registration
@@ -168,6 +171,7 @@ export function openNodeTaskModal(hostId, repoId) {
   $("t-agent-sec").style.display = "";
   $("t-codex-model").value = "";
   selectAgent(localStorage.getItem(LS_AGENT) === "codex" ? "codex" : "claude");
+  sheetOpened();   // claim the mobile history entry BEFORE the sheet paints (list still on the glass)
   $("task-modal").style.display = "flex";
   loadNodeBranches(hostId, repo);
   loadDispatchOptions();
@@ -291,7 +295,6 @@ async function addNodeTask() {
   // node's fleet group; on success it settles into the node's live terminal.
   const tmpId = nextTmpId();
   closeTaskModal();
-  await mobileClosePainted();
   openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
   addPendingCard(tmpId, { kind: "repo", repoId: repo.id, hostId, title: body.title, agent: body.agent });
   try {
@@ -331,7 +334,6 @@ export async function addTask() {
   // success → live terminal, failure → inline error — with no global overlay.
   const tmpId = nextTmpId();
   closeTaskModal();
-  await mobileClosePainted();
   openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
   expandRepo(body.repo_id);
   addPendingCard(tmpId, { kind: "repo", repoId: body.repo_id, hostId: null, title: body.title, agent: body.agent });
