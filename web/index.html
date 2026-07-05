@@ -7,6 +7,11 @@
 <!-- Browser-chrome / edge-strip color (iOS swipe transitions, address bar). Kept in
      sync with the active theme's --bg by the no-flash script below + theme.js. -->
 <meta name="theme-color" content="#1a1613" />
+<!-- Home-screen (发送到桌面) container: without a manifest the standalone web-app
+     window's base color is WHITE, and iOS's swipe-back snapshot transition exposes it
+     as a white sliver at the screen edge. background_color paints that base dark.
+     NOTE: iOS reads the manifest when the icon is ADDED — re-add to pick this up. -->
+<link rel="manifest" href="/manifest.webmanifest" />
 <!-- No-flash theme init: set data-theme from storage BEFORE the stylesheet
      applies, so the first paint is already light/dark with no flicker. Default
      is dark (existing users unchanged). theme.js re-derives the same value. -->
