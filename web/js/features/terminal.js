@@ -10,7 +10,7 @@
 import { $ } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 
-// taskId -> { id, pane, term, fit, ws, query, title, desc, attach, resizeKey }
+// taskId -> { id, pane, term, fit, ws, query, title, attach, resizeKey }
 const panes = new Map();
 let activeId = null;   // the task whose pane is currently visible (null = none)
 
@@ -88,6 +88,13 @@ export function initTerm() {
     if (!sid) return;
     navigator.clipboard.writeText(sid)
       .then(() => toast(I18N.t("toast.claudeCopied"), "success"))
+      .catch(() => {});
+  });
+  $("term-attach").addEventListener("click", () => {
+    const attach = $("term-attach").dataset.attach;
+    if (!attach) return;
+    navigator.clipboard.writeText(attach)
+      .then(() => toast(I18N.t("toast.attachCopied"), "success"))
       .catch(() => {});
   });
 }
@@ -279,9 +286,8 @@ function applyBar(p) {
   // language switch won't overwrite the title back to "Not connected".
   $("term-title").removeAttribute("data-i18n");
   $("term-title").textContent = p.title;
-  $("term-desc").textContent = p.desc;
-  $("term-desc").title = p.desc;           // full text on hover
-  $("term-attach").textContent = p.attach;
+  $("term-attach").dataset.attach = p.attach || "";
+  $("term-attach").disabled = !p.attach;
   applyClaude(p.claude);
 }
 
@@ -382,12 +388,11 @@ function hidePendingView() {
 }
 
 // Paint the shared dock bar for a placeholder (no real pane object to read from).
-function pendingBar(title, desc) {
+function pendingBar(title) {
   $("term-title").removeAttribute("data-i18n");
   $("term-title").textContent = title;
-  $("term-desc").textContent = desc || "";
-  $("term-desc").title = desc || "";
-  $("term-attach").textContent = "";
+  $("term-attach").dataset.attach = "";
+  $("term-attach").disabled = true;
   applyClaude("");
 }
 
@@ -407,7 +412,7 @@ export function openPending(tmpId, title, desc, text) {
   activeId = null;
   activePending = tmpId;
   hideTermEmpty();
-  pendingBar(title, desc);
+  pendingBar(title);
 }
 
 // Re-show an existing placeholder as the dock view — e.g. clicking its still-loading
@@ -423,7 +428,7 @@ export function showPending(tmpId) {
   activeId = null;
   activePending = tmpId;
   hideTermEmpty();
-  pendingBar(pe.title, pe.desc);
+  pendingBar(pe.title);
   return true;
 }
 
@@ -510,13 +515,13 @@ function goPreviewPort() {
 
 // Attach the dock to a task's session: reuse its live pane if we have one (just
 // show it — instant, no reconnect), else build a new pane. Either way refresh the
-// dock bar (title/desc may have changed, e.g. after a rename) and ensure a socket.
-export function openPty(query, title, desc, attach, taskId = null, claude = "") {
+// dock bar (title may have changed, e.g. after a rename) and ensure a socket.
+export function openPty(query, title, attach, taskId = null, claude = "") {
   if (taskId == null) return;
   let p = panes.get(taskId);
   if (!p) p = createPane(taskId, query);
   else p.query = query;                  // session normally unchanged; keep it fresh
-  p.title = title; p.desc = desc || ""; p.attach = attach || ""; p.claude = claude || "";
+  p.title = title; p.attach = attach || ""; p.claude = claude || "";
   showPane(p);
   ensureSocket(p);
 }

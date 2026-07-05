@@ -44,6 +44,8 @@
       "term.dismiss": "关闭",
       "term.selectHint": "⇧ 拖拽选中",
       "term.selectHintTitle": "终端开了鼠标模式,普通拖拽会发给会话;按住 Shift(或 mac 的 Option)拖拽即可选中,松手自动复制",
+      "term.attach": "Attach",
+      "term.attachCopy": "点击复制 tmux attach 命令",
       "term.empty": "点左侧任务进入终端",
       "term.claudeCopy": "点击复制完整 session id",
 
@@ -166,6 +168,7 @@
       "toast.pasteOk": "图片已贴入终端（claude 显示为 [Image #N]）",
       "toast.pasteFailed": "贴图失败：{error}",
       "toast.claudeCopied": "已复制 Claude session id",
+      "toast.attachCopied": "已复制 attach 命令",
 
       // machines (remote hosts)
       "host.new": "＋ 新建机器",
@@ -254,6 +257,8 @@
       "term.dismiss": "Dismiss",
       "term.selectHint": "⇧ Drag-select",
       "term.selectHintTitle": "The terminal runs in mouse mode, so a plain drag is sent to the session; hold Shift (or Option on mac) and drag to select, release to copy automatically.",
+      "term.attach": "Attach",
+      "term.attachCopy": "Click to copy the tmux attach command",
       "term.empty": "Pick a task on the left to open its terminal",
       "term.claudeCopy": "Click to copy the full session id",
 
@@ -367,6 +372,7 @@
       "toast.pasteOk": "Image pasted into the terminal (shows as [Image #N] in claude)",
       "toast.pasteFailed": "Paste failed: {error}",
       "toast.claudeCopied": "Copied the Claude session id",
+      "toast.attachCopied": "Copied the attach command",
 
       "host.new": "＋ New machine",
       "host.heading": "Machines",
