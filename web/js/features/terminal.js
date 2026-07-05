@@ -31,6 +31,15 @@ export function sendToActive(data) {
   return false;
 }
 
+export function submitToActive(text) {
+  const p = activeId != null ? panes.get(activeId) : null;
+  if (p && p.ws && p.ws.readyState === 1) {
+    p.ws.send("\x00submit:" + JSON.stringify({ text }));
+    return true;
+  }
+  return false;
+}
+
 // Refit the visible pane synchronously (then repaint). Called after the mobile
 // view flips to terminal — the pane was display:none in list view and couldn't be
 // measured, so its column count is stale until we re-fit against the now-visible box.
