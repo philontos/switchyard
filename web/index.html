@@ -57,19 +57,26 @@
     <div id="term-empty" class="term-empty"><div class="te-ic">🖥</div><div data-i18n="term.empty"></div></div>
     <!-- mobile-only quick-input bar (hidden on desktop via CSS). A whole line is
          buffered in the field (IME-friendly) and sent on 发送/Enter; the key row
-         sends control sequences that a soft keyboard can't (Esc / ⌃C / arrows /
-         Tab). All input on mobile routes through here — see js/features/mobile.js. -->
+         sends single keystrokes a soft keyboard can't deliver raw: 1/2/3 answer
+         claude's numbered permission prompts (a bare digit selects AND confirms),
+         ↑↓↵ drive any other menu, ⌃C/Esc interrupt. All input on mobile routes
+         through here — see js/features/mobile.js. -->
     <div id="term-input" class="term-input">
-      <!-- control-key popover: hidden until the Fn button toggles it (mobile.js adds
-           .keys-open). Sticky — tapping a key sends but does NOT close it; only Fn
-           closes it. Absolute-positioned, so opening it overlays the terminal instead
-           of resizing/refitting it. -->
+      <!-- quick-key popover: toggled by Fn, and auto-opened while the dock task is
+           blocked on a permission prompt (mobile.js reflectKeysWaiting). Sticky —
+           tapping a key sends but does NOT close it; only Fn closes it. Absolute-
+           positioned, so opening it overlays the terminal instead of resizing/
+           refitting it. Key order: answer digits in the thumb zone, interrupt keys
+           (⌃C/Esc) far right so a stray thumb can't reach them by accident. -->
       <div class="ti-keys">
-        <button class="ti-key" data-k="esc" type="button">Esc</button>
-        <button class="ti-key" data-k="int" type="button">⌃C</button>
+        <button class="ti-key tk-num" data-k="1" type="button">1</button>
+        <button class="ti-key tk-num" data-k="2" type="button">2</button>
+        <button class="ti-key tk-num" data-k="3" type="button">3</button>
         <button class="ti-key" data-k="up" type="button">↑</button>
         <button class="ti-key" data-k="down" type="button">↓</button>
-        <button class="ti-key" data-k="tab" type="button">⇥</button>
+        <button class="ti-key" data-k="enter" type="button">↵</button>
+        <button class="ti-key" data-k="int" type="button">⌃C</button>
+        <button class="ti-key" data-k="esc" type="button">Esc</button>
       </div>
       <div class="ti-row">
         <!-- auto-growing compose field (mobile.js). Enter inserts a newline; 发送 sends
