@@ -88,7 +88,14 @@ try { initTerm(); } catch (e) { console.error("terminal init failed:", e); }
 // the list. Both no-op on desktop, where isMobile() is false. Wire the hooks
 // before initMobile()/showTermEmpty() so the very first render already honors them.
 setViewHooks(
-  (id) => { if (isMobile() && !autoFollowing()) enterTerminal(id); },
+  (id) => {
+    if (!isMobile() || autoFollowing()) return;
+    // Readable = a real local task run by an agent. A bare SHELL (kind "local") has no
+    // transcript, so it gets no 阅读|实时 toggle and opens straight in the live terminal;
+    // same for pending placeholders and remote-node panes (string ids).
+    const t = typeof id === "number" ? allTasks().find((x) => x.id === id) : null;
+    enterTerminal(id, !!t && t.kind !== "local");
+  },
   () => { if (isMobile()) enterList(); },
 );
 initMobile();

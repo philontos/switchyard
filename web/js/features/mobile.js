@@ -47,6 +47,10 @@ function swapDraft(id) {
 // The dock's current task id (real number, or a pending temp id). Reading only applies
 // to a real task; a pending/new one lands in the live terminal so you watch it start.
 let curDockId = null;
+// Whether the dock task HAS a transcript to read (agent tasks yes; a bare SHELL has
+// none — main.js resolves kind at the hook and passes this in). When false, the
+// 阅读|实时 toggle is hidden entirely (body.no-read) and the view is pinned to 实时.
+let curCanRead = false;
 
 // ---- platform back gesture ⇄ view stack ----
 // Entering the terminal view pushes ONE history entry, so the platform back action —
@@ -62,18 +66,20 @@ let pushedNav = false;
 // enterTerminal and the forward-gesture popstate re-entry.
 function showTermView() {
   document.body.classList.add("view-terminal");
-  // Landing: an existing task opens in 阅读 (openReading auto-nudges to 实时 if it has no
-  // conversation yet); a pending/new task opens straight in 实时.
-  setMode(typeof curDockId === "number" ? "read" : "live");
+  document.body.classList.toggle("no-read", !curCanRead);   // shells: hide the 阅读|实时 toggle
+  // Landing: a readable (agent) task opens in 阅读 (openReading auto-nudges to 实时 if it
+  // has no conversation yet); a shell / pending / node task opens straight in 实时.
+  setMode(curCanRead ? "read" : "live");
   syncViewport();               // fix --vvh/--vvt before the fixed termcol paints
   // the term column was display:none in list view, so its pane couldn't be
   // measured — refit once it's laid out (next frame).
   requestAnimationFrame(fitActiveNow);
 }
 
-export function enterTerminal(id) {
+export function enterTerminal(id, canRead = typeof id === "number") {
   swapDraft(id);                // give this task its own input buffer before it's shown
   curDockId = id;
+  curCanRead = !!canRead;
   const entering = !document.body.classList.contains("view-terminal");   // vs. a task switch within the view
   showTermView();
   if (entering && !pushedNav) {
@@ -92,7 +98,7 @@ export function mobileBack() { enterList(); }   // term-bar ‹ back button (bri
 // the default (no .mode-live); 实时 shows xterm and needs a refit (it was display:none).
 // Bridged to window as setReadMode for the toggle + banner onclick handlers.
 export function setMode(m) {
-  const live = m === "live";
+  const live = m === "live" || !curCanRead;   // a shell has no reading pane — pinned to 实时
   document.body.classList.toggle("mode-live", live);
   $("tm-read")?.classList.toggle("on", !live);
   $("tm-live")?.classList.toggle("on", live);
