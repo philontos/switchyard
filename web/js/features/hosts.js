@@ -138,7 +138,7 @@ function fleetCard(hostId, tk) {
     ? `<div class="muted">📂 <code>${tk.cwd || "~"}</code> <span class="tag-local">${t("local.tag")}</span></div>`
     : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;
   return `<div class="card task task-${agent} clickable" data-pane="${paneId}" onclick="connectNode(${hostId},${tk.id})">
-      <button class="card-x" title="${t("task.stopTitle")}" onclick="event.stopPropagation();stopNodeTask(${hostId},${tk.id})">⏹</button>
+      <button class="card-x stop" title="${t("task.stopTitle")}" aria-label="${t("task.stopTitle")}" onclick="event.stopPropagation();stopNodeTask(${hostId},${tk.id})"><span class="stop-ico" aria-hidden="true"></span></button>
       <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname">${tk.title}</span></div>
       ${meta}
     </div>`;

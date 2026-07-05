@@ -464,12 +464,12 @@ export function taskCard(t, online) {
   // the machine is offline; "delete record" is pure DB and stays available.
   let icon, note = "";
   if (active) {
-    icon = { glyph: "⏹", title: I18N.t("task.stopTitle"), fn: `archive(${t.id})`, needsHost: true };
+    icon = { glyph: `<span class="stop-ico" aria-hidden="true"></span>`, cls: " stop", title: I18N.t("task.stopTitle"), fn: `archive(${t.id})`, needsHost: true };
   } else if (t.hasWorktree) {
-    icon = { glyph: "🗑", title: I18N.t("task.removeWorktree"), fn: `removeWt(${t.id})`, needsHost: true };
+    icon = { glyph: "🗑", cls: "", title: I18N.t("task.removeWorktree"), fn: `removeWt(${t.id})`, needsHost: true };
     note = `<div class="muted">${I18N.t("task.worktreeKept")}</div>`;
   } else {
-    icon = { glyph: "🗑", title: I18N.t("task.deleteRecord"), fn: `deleteTask(${t.id})`, needsHost: false };
+    icon = { glyph: "🗑", cls: "", title: I18N.t("task.deleteRecord"), fn: `deleteTask(${t.id})`, needsHost: false };
   }
   const disabled = icon.needsHost && !online;
   // resumable: the worktree is on disk but the tmux session is gone — whether the
@@ -503,7 +503,7 @@ export function taskCard(t, online) {
   // tasks: shells have no repo group, archived/cleaned ones aren't reorderable.
   const drag = active && t.kind !== "local" ? ` data-repo="${t.repo_id}"` : "";
   return `<div class="card task task-${agent}${open}" data-id="${t.id}"${drag}>
-    <button class="card-x" title="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
+    <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
     ${head}${note}${resumeBtn}
   </div>`;
 }
