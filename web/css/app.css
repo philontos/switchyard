@@ -357,6 +357,8 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .t-resume:hover { background: #d9775733; border-color: var(--accent); }
 .t-resume:disabled { opacity: .5; cursor: default; }
 .muted { color: var(--muted); font-size: 12px; }
+.task > .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task > .muted code { display: inline; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 /* status dot: color = state, pulse = in-progress (replaces text pills) */
 .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint-2); }
 .sdot.ready { background: var(--green); box-shadow: 0 0 5px #8aaa6699; }
