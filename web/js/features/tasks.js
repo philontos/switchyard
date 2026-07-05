@@ -40,12 +40,18 @@ export function isEditingTask() { return editingTaskId != null; }
 // selected remote card (its pane id never matched the numeric data-id test, so it
 // used to flip back off every refresh — the flicker the remote view showed).
 export function paintSelection() {
+  // Mobile: no visual selected-state at all. Master-detail means you're either ON
+  // the list or INSIDE a task — a highlighted card is stale information by the time
+  // you can see it, and its late repaint used to read as a jumping/double border on
+  // the way back. selectedTaskId itself stays tracked (the dock re-attach and
+  // lastTaskByHost logic need it); only the paint is suppressed.
+  const mob = document.body.classList.contains("mobile");
   document.querySelectorAll("#m-list .task").forEach(el => {
-    const on = el.dataset.pending != null
+    const on = !mob && (el.dataset.pending != null
       ? pendingIsActive(el.dataset.pending)
       : el.dataset.pane != null
         ? el.dataset.pane === state.selectedTaskId
-        : Number(el.dataset.id) === state.selectedTaskId;
+        : Number(el.dataset.id) === state.selectedTaskId);
     el.classList.toggle("selected", on);
   });
 }
@@ -396,12 +402,16 @@ export function isShadowedByNodePending(hostId, tk) {
 // One placeholder card: a pulsing "creating" dot + the title, selected while its
 // loading window is the active dock view, clickable to re-focus that window. No
 // data-id/data-repo — it isn't connectable or drag-reorderable until it's real.
+// NOTE: no selection class in the markup — selection is painted AFTER render by
+// paintSelection (all three card kinds). Baking it into the HTML made the list's
+// byte-identical rebuild cache miss on every selection change, so switching tasks
+// forced a full innerHTML rebuild (animation restarts = the visible flash, and a
+// transient old/new double-selection during the swap).
 export function pendingCard(p) {
-  const sel = pendingIsActive(p.tmpId) ? " selected" : "";
   // agent picks the card's colour (task-claude / task-codex accent bar + tint) —
   // no text label; the colour alone carries the claude-vs-codex distinction.
   const agent = p.agent === "codex" ? "codex" : "claude";
-  return `<div class="card task pending-card task-${agent} clickable${sel}" data-pending="${p.tmpId}" onclick="focusPending('${p.tmpId}')">
+  return `<div class="card task pending-card task-${agent} clickable" data-pending="${p.tmpId}" onclick="focusPending('${p.tmpId}')">
     <div class="t"><span class="sdot cloning" title="${I18N.t("task.creating")}"></span>
       <span class="tname">${p.title}</span></div>
     <div class="muted">${I18N.t("task.creating")}</div>
@@ -487,11 +497,12 @@ export function taskCard(t, online) {
   // only attach-on-click when there's a live session to attach to; a resumable
   // (dead-session) card routes through its Resume button instead.
   const open = (active && t.alive) ? ` clickable" onclick="connect(${t.id})` : "";
-  const sel = t.id === state.selectedTaskId ? " selected" : "";
+  // selection is painted post-render by paintSelection, NOT baked into the markup —
+  // see pendingCard's note (keeps the list's rebuild cache selection-agnostic).
   // data-repo marks a card as drag-reorderable (reorder.js) — only active repo
   // tasks: shells have no repo group, archived/cleaned ones aren't reorderable.
   const drag = active && t.kind !== "local" ? ` data-repo="${t.repo_id}"` : "";
-  return `<div class="card task task-${agent}${sel}${open}" data-id="${t.id}"${drag}>
+  return `<div class="card task task-${agent}${open}" data-id="${t.id}"${drag}>
     <button class="card-x" title="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
     ${head}${note}${resumeBtn}
   </div>`;
