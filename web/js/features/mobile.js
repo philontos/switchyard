@@ -9,6 +9,7 @@
 // never imports this module — instead main.js injects our enter/exit callbacks
 // via setViewHooks(), so there's no import cycle.
 import { $ } from "../core/dom.js";
+import { toast } from "../core/feedback.js";
 import { sendToActive, submitToActive, fitActiveNow } from "./terminal.js";
 import { openReading, closeReading, scrollReadingToBottom } from "./reading.js";
 
@@ -144,7 +145,11 @@ function autoGrow(f) {
 function sendLine() {
   const f = $("ti-field");
   const v = f.value;
-  submitToActive(v);
+  if (!submitToActive(v)) {
+    toast(I18N.t("toast.termReconnecting"), "info");
+    f.focus();
+    return;
+  }
   if (!document.body.classList.contains("mode-live")) scrollReadingToBottom();
   f.value = "";
   autoGrow(f);          // shrink back to one row

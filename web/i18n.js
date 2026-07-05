@@ -170,6 +170,7 @@
       "toast.pasteFailed": "贴图失败：{error}",
       "toast.claudeCopied": "已复制 Claude session id",
       "toast.attachCopied": "已复制 attach 命令",
+      "toast.termReconnecting": "终端连接已断开，正在重连；输入未发送",
 
       // machines (remote hosts)
       "host.new": "＋ 新建机器",
@@ -375,6 +376,7 @@
       "toast.pasteFailed": "Paste failed: {error}",
       "toast.claudeCopied": "Copied the Claude session id",
       "toast.attachCopied": "Copied the attach command",
+      "toast.termReconnecting": "Terminal is reconnecting; your input was not sent",
 
       "host.new": "＋ New machine",
       "host.heading": "Machines",

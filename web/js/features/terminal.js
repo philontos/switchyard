@@ -1,11 +1,11 @@
 // One live xterm.js terminal PER task, all kept alive. openPty() shows a task's
 // pane (creating it on first open); switching cards just toggles which pane is
 // visible — no teardown, no reconnect, no flicker. Each pane owns its own xterm
-// instance + WebSocket, and the socket stays open in the background, so a
-// backgrounded session keeps streaming and a switch-back is instant. Panes are
-// disposed when their task goes away (archive / cleanup / delete / vanished from
-// the list — see disposePty/prunePanes, called from tasks.js). The live-pane set
-// is therefore bounded by the set of active tasks; no separate eviction needed.
+// instance + WebSocket. Mobile browsers may close background sockets, so closed
+// panes reconnect when shown/resumed; the tmux session itself stays alive. Panes
+// are disposed when their task goes away (archive / cleanup / delete / vanished
+// from the list — see disposePty/prunePanes, called from tasks.js). The live-pane
+// set is therefore bounded by the set of active tasks; no separate eviction needed.
 // Terminal/FitAddon are the globals from the vendored xterm scripts.
 import { $ } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
@@ -27,17 +27,26 @@ export function setViewHooks(show, empty) { onShow = show; onEmpty = empty; }
 // the socket isn't open. Returns whether the data was sent.
 export function sendToActive(data) {
   const p = activeId != null ? panes.get(activeId) : null;
+  if (p) ensureSocket(p);
   if (p && p.ws && p.ws.readyState === 1) { p.ws.send(data); return true; }
   return false;
 }
 
 export function submitToActive(text) {
   const p = activeId != null ? panes.get(activeId) : null;
+  if (p) ensureSocket(p);
   if (p && p.ws && p.ws.readyState === 1) {
     p.ws.send("\x00submit:" + JSON.stringify({ text }));
     return true;
   }
   return false;
+}
+
+export function reconnectActive() {
+  const p = activeId != null ? panes.get(activeId) : null;
+  if (!p) return false;
+  ensureSocket(p);
+  return !!(p.ws && p.ws.readyState === 1);
 }
 
 // Refit the visible pane synchronously (then repaint). Called after the mobile
@@ -80,6 +89,11 @@ function fitActive() {
 
 export function initTerm() {
   window.addEventListener("resize", fitActive);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") reconnectActive();
+  });
+  window.addEventListener("pageshow", reconnectActive);
+  window.addEventListener("online", reconnectActive);
   // A one-shot fit (showPane / ws.onopen) can run before the layout is final and
   // over-count columns; xterm then renders wider than the visible box, so the
   // right edge is clipped and typing there pushes the cursor — and the whole
@@ -298,7 +312,9 @@ function ensureSocket(p) {
   p.resizeKey = "";       // a new pty needs one initial size even if dimensions match the old socket
   ws.onopen = () => { if (activeId === p.id) { try { p.fit.fit(); } catch {} } sendResize(p); };
   ws.onmessage = (e) => p.term.write(typeof e.data === "string" ? e.data : "");
-  ws.onclose = () => p.term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
+  ws.onclose = () => {
+    if (p.ws === ws) p.term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
+  };
 }
 
 // Make a pane the visible one: hide every other pane, show this one, refit (it
