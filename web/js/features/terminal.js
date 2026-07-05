@@ -52,9 +52,12 @@ export function reconnectActive() {
 // Refit the visible pane synchronously (then repaint). Called after the mobile
 // view flips to terminal — the pane was display:none in list view and couldn't be
 // measured, so its column count is stale until we re-fit against the now-visible box.
+// Entering 实时 always lands on the newest output (the bottom is where prompts sit);
+// a scrollback position left over from a previous visit must not stick. Pure client-
+// side view move — no bytes reach the session, so it's safe under any running app.
 export function fitActiveNow() {
   const p = activeId != null ? panes.get(activeId) : null;
-  if (p) { try { p.fit.fit(); sendResize(p); p.term.refresh(0, p.term.rows - 1); } catch {} }
+  if (p) { try { p.fit.fit(); sendResize(p); p.term.scrollToBottom(); p.term.refresh(0, p.term.rows - 1); } catch {} }
 }
 
 // xterm paints to a canvas from a JS theme object, so it can't read the CSS
@@ -159,35 +162,28 @@ function sendResize(p) {
 //   · a touch STARTING within EDGE px of either screen edge is the browser's — we never
 //     claim it (no preventDefault/emit), only stopPropagation so xterm's plain-shell
 //     touchmove can't preventDefault it either;
-//   · a mid-screen touch stays UNDECIDED until it moves ~6px, then direction-locks:
+//   · a mid-screen touch stays UNDECIDED until it moves ~12px, then direction-locks:
 //     vertical → ours (scroll bridge), horizontal → left alone like an edge touch.
 //
-// Flick inertia: a bare 1:1 drag stops dead on lift-off, which reads as sluggish. We
-// carry the release velocity into a decaying rAF loop that keeps emitting wheel deltas,
-// so a flick coasts like native momentum scrolling; a new touch cancels it.
-//
-// Two things keep it smooth across phones. (1) Velocity is an EMA of the per-move speed,
-// so a slow final micro-move before lift-off doesn't kill the fling. (2) Both the coast
-// distance and the friction decay are computed against the REAL elapsed frame time, not
-// a fixed 16ms — a 120Hz ProMotion iPhone (≈8ms/frame) then coasts exactly as far as a
-// 60Hz one, instead of decaying twice as fast and feeling short/floaty.
-// Exported for the touch-gesture test harness; the app itself only calls it here.
+// 实时 is the INTERACTION surface — 阅读 is where you read — so the bridge is tuned
+// for taps first, scrolling second: a wide direction-lock slop keeps a jittery tap a
+// tap (it reaches xterm as a tap, e.g. onto a claude prompt) instead of becoming a
+// one-row scroll; drag maps to scroll at half speed, deliberate rather than flicky;
+// and lift-off stops the motion dead — no inertia, so the screen never coasts past
+// the prompt you switched over to answer.
 export function mountTouchScroll(pane) {
   const sink = pane.querySelector(".xterm-screen") || pane;
   const emit = (dy) => sink.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }));
-  const FRICTION = 0.9975;                   // velocity decay PER MILLISECOND (≈0.96 over a 16.7ms frame)
   const EDGE = 28;                           // px: bezel-origin touches belong to the browser's nav swipe
-  const LOCK = 6;                            // px of travel before a mid-screen touch direction-locks
+  const LOCK = 12;                           // px of travel before a mid-screen touch direction-locks
+  const DAMP = 0.5;                          // drag→scroll ratio: deliberate, tap-first feel
   // gesture ownership: 0 idle · 1 undecided · 2 ours (vertical scroll) · 3 browser's
   let mode = 0;
-  let startX = 0, startY = 0, lastY = 0, lastT = 0, vel = 0, raf = 0, prevT = 0;
-  const stopFling = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } };
+  let startX = 0, startY = 0, lastY = 0;
   pane.addEventListener("touchstart", (e) => {
-    stopFling();                             // a fresh touch halts any coasting scroll
     if (e.touches.length !== 1) { mode = 0; return; }   // a pinch isn't a scroll
     const t = e.touches[0];
-    startX = t.clientX; startY = t.clientY;
-    lastY = t.clientY; lastT = e.timeStamp; vel = 0;
+    startX = t.clientX; startY = t.clientY; lastY = t.clientY;
     mode = (t.clientX < EDGE || t.clientX > window.innerWidth - EDGE) ? 3 : 1;
   }, { passive: true });
   pane.addEventListener("touchmove", (e) => {
@@ -201,32 +197,14 @@ export function mountTouchScroll(pane) {
       if (mode === 3) { e.stopPropagation(); return; }
     }
     const y = t.clientY, dy = lastY - y;     // finger up → dy>0 → scroll toward newer content
-    const dt = Math.max(1, e.timeStamp - lastT);
-    lastY = y; lastT = e.timeStamp;
+    lastY = y;
     if (!dy) return;
-    vel = vel * 0.7 + (dy / dt) * 0.3;       // smoothed px/ms — a stable release velocity for the fling
     e.preventDefault();
     e.stopPropagation();                     // keep xterm's own touch-scroll from double-driving
-    emit(dy);
+    emit(dy * DAMP);
   }, { passive: false, capture: true });
-  // touchcancel: the browser claimed the sequence (e.g. its nav swipe engaged) — just
-  // drop tracking, no fling. touchend on a claimed drag flings.
   pane.addEventListener("touchcancel", () => { mode = 0; }, { passive: true });
-  pane.addEventListener("touchend", () => {
-    const was = mode;
-    mode = 0;
-    if (was !== 2) return;
-    if (Math.abs(vel) < 0.05) return;        // a slow/held release doesn't coast (px/ms)
-    prevT = 0;
-    const step = (now) => {
-      const dt = prevT ? Math.min(32, now - prevT) : 16;   // real frame time; clamp a stalled frame
-      prevT = now;
-      emit(vel * dt);
-      vel *= Math.pow(FRICTION, dt);
-      raf = Math.abs(vel) > 0.02 ? requestAnimationFrame(step) : 0;
-    };
-    raf = requestAnimationFrame(step);
-  }, { passive: true });
+  pane.addEventListener("touchend", () => { mode = 0; }, { passive: true });
 }
 
 // Build a fresh terminal pane for a task: its own xterm + FitAddon + copy/paste
@@ -330,6 +308,7 @@ function showPane(p) {
   hideTermEmpty();
   applyBar(p);
   try { p.fit.fit(); } catch {}
+  try { p.term.scrollToBottom(); } catch {}              // attach lands at the newest output
   try { p.term.refresh(0, p.term.rows - 1); } catch {}   // canvas can blank while hidden
   sendResize(p);
   // on mobile the keyboard is driven by the quick-input field, not the terminal —

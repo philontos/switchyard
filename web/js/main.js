@@ -10,7 +10,7 @@ import { toast } from "./core/feedback.js";
 import { closeDialog } from "./core/dialog.js";
 import { Selects, csMount } from "./core/select.js";
 import { initTerm, showTermEmpty, applyTermTheme, setViewHooks } from "./features/terminal.js";
-import { initMobile, isOn as isMobile, autoFollowing, enterTerminal, enterList, mobileBack, setMode } from "./features/mobile.js";
+import { initMobile, isOn as isMobile, autoFollowing, enterTerminal, enterList, mobileBack, setMode, reflectKeysWaiting } from "./features/mobile.js";
 import { initReading, reflectWaiting } from "./features/reading.js";
 import { state } from "./core/state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./features/repos.js";
@@ -68,9 +68,14 @@ Object.assign(window, {
   mobileBack, setReadMode: setMode,
 });
 
-// keep the reading view's "needs you" banner in sync with the task poll (a task blocked
-// on a permission prompt); reading.js stays decoupled from the task cache this way.
-function syncReadWaiting() { reflectWaiting(state.selectedTaskId, allTasks()); }
+// keep the reading view's "needs you" banner AND the quick-key row's auto-expand in
+// sync with the task poll (a task blocked on a permission prompt); reading.js and
+// mobile.js stay decoupled from the task cache this way.
+function syncReadWaiting() {
+  const tasks = allTasks();
+  reflectWaiting(state.selectedTaskId, tasks);
+  reflectKeysWaiting(tasks);
+}
 
 // global safety net: surface uncaught API errors as toasts
 window.addEventListener("unhandledrejection", (e) => {
@@ -121,6 +126,7 @@ setViewHooks(
     // same for pending placeholders and remote-node panes (string ids).
     const t = typeof id === "number" ? allTasks().find((x) => x.id === id) : null;
     enterTerminal(id, !!t && t.kind !== "local");
+    syncReadWaiting();   // a task already blocked on a prompt pops the key row now, not at the next poll
   },
   () => { if (isMobile()) enterList(); },
 );

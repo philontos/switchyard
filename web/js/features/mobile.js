@@ -10,6 +10,7 @@
 // via setViewHooks(), so there's no import cycle.
 import { $ } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
+import { state } from "../core/state.js";
 import { sendToActive, submitToActive, fitActiveNow } from "./terminal.js";
 import { openReading, closeReading, scrollReadingToBottom, echoUser } from "./reading.js";
 
@@ -90,6 +91,7 @@ function showTermView() {
 
 export function enterTerminal(id, canRead = typeof id === "number") {
   swapDraft(id);                // give this task its own input buffer before it's shown
+  if (id !== curDockId) resetKeysEpisode();   // suppression is per task+prompt, not global
   curDockId = id;
   curCanRead = !!canRead;
   const entering = !document.body.classList.contains("view-terminal");   // vs. a task switch within the view
@@ -153,6 +155,43 @@ export function setMode(m) {
   else if (typeof curDockId === "number") openReading(curDockId);
 }
 
+// ---- quick-key auto-expand on a permission prompt ----
+// main.js feeds the task poll here (same cadence as the reading banner). While the
+// dock task is blocked on a permission prompt — the amber-light signal, driven by
+// Claude Code's own notification hook — the key row pops open so the answer digits
+// are one tap away, and the digits tint amber (.keys-urgent). The signal only ever
+// drives VISIBILITY; what the keys send never depends on it, so a stale/early flag
+// costs at most a needlessly open row. A row the user closes mid-prompt stays
+// closed for that prompt (we don't fight the user); the next prompt may pop again.
+let keysAutoOpened = false;   // we opened the row (so we also close it when the prompt resolves)
+let keysSuppressed = false;   // user closed it during this prompt — don't re-open until the next one
+let lastWaiting = false;
+function resetKeysEpisode() { keysAutoOpened = false; keysSuppressed = false; lastWaiting = false; }
+
+// Whether the dock task is blocked on a permission prompt. Local tasks come from the
+// polled list (numeric id); a remote node's pane id looks like "n<host>:<task>" and
+// its waiting ships in the fleet snapshot — remote tasks pop the row like local ones.
+function dockWaiting(tasks) {
+  if (typeof curDockId === "number") {
+    const t = tasks ? tasks.find((x) => x.id === curDockId) : null;
+    return !!(t && t.alive && t.waiting);
+  }
+  const m = typeof curDockId === "string" ? /^n(\d+):(\d+)$/.exec(curDockId) : null;
+  const tk = m ? state.fleet[Number(m[1])]?.tasks?.find((x) => x.id === Number(m[2])) : null;
+  return !!(tk && tk.alive && tk.waiting);
+}
+
+export function reflectKeysWaiting(tasks) {
+  const bar = $("term-input");
+  const waiting = isOn() && document.body.classList.contains("view-terminal") && dockWaiting(tasks);
+  bar.classList.toggle("keys-urgent", waiting);
+  if (waiting && !lastWaiting) keysSuppressed = false;   // a fresh prompt lifts the old suppression
+  const open = bar.classList.contains("keys-open");
+  if (waiting && !open && !keysSuppressed) { bar.classList.add("keys-open"); keysAutoOpened = true; }
+  else if (!waiting && open && keysAutoOpened) { bar.classList.remove("keys-open"); keysAutoOpened = false; }
+  lastWaiting = waiting;
+}
+
 // Bind the terminal view to the VISUAL viewport, not the layout viewport. On iOS
 // the soft keyboard overlays the page without resizing the layout viewport, so a
 // bottom-anchored input bar would hide behind it. Publishing visualViewport's
@@ -167,8 +206,13 @@ function syncViewport() {
   s.setProperty("--vvt", vv.offsetTop + "px");
 }
 
-// control sequences for the quick-key row (things a soft keyboard can't type)
-const KEYS = { enter: "\r", esc: "\x1b", int: "\x03", up: "\x1b[A", down: "\x1b[B", tab: "\t" };
+// single raw keystrokes for the quick-key row — sent as-is to the pty, exactly like
+// a hardware key press; no Enter is appended to any of them. The digits are literal
+// characters: claude's numbered permission prompts select AND confirm on the bare
+// digit, so 1/2/3 answer an authorization in one tap. Outside a prompt a stray digit
+// merely types that character wherever focus is (delete it and move on) — the keys
+// carry no semantics of their own, which is what keeps this path unbreakable.
+const KEYS = { 1: "1", 2: "2", 3: "3", enter: "\r", esc: "\x1b", int: "\x03", up: "\x1b[A", down: "\x1b[B" };
 
 // The compose field is a <textarea> that grows with its content. Size it to fit the
 // text, capped at TI_MAX (past which it scrolls) — the CSS max-height matches. Reset to
@@ -237,9 +281,16 @@ export function initMobile({ closeSheet } = {}) {
   const field = $("ti-field");
   $("ti-send").addEventListener("click", sendLine);
   field.addEventListener("input", () => autoGrow(field));
-  // Fn: toggle the control-key popover. pointerdown + preventDefault keeps the field
+  // Fn: toggle the quick-key popover. pointerdown + preventDefault keeps the field
   // focused (keyboard stays up); it's sticky — stays open until Fn is tapped again.
-  $("ti-fn").addEventListener("pointerdown", (e) => { e.preventDefault(); $("term-input").classList.toggle("keys-open"); });
+  // A manual toggle takes ownership from the auto-expand: closing it while a prompt
+  // is still waiting suppresses re-opening for that prompt.
+  $("ti-fn").addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const open = $("term-input").classList.toggle("keys-open");
+    keysAutoOpened = false;
+    keysSuppressed = !open && lastWaiting;
+  });
   // quick keys: fire on pointerdown + preventDefault so tapping a key does NOT
   // blur the text field — the keyboard stays up across taps.
   document.querySelectorAll("#term-input .ti-key").forEach((b) => {
