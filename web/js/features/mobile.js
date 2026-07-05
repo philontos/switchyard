@@ -81,10 +81,15 @@ export function enterTerminal(id, canRead = typeof id === "number") {
   curDockId = id;
   curCanRead = !!canRead;
   const entering = !document.body.classList.contains("view-terminal");   // vs. a task switch within the view
-  showTermView();
+  // Push BEFORE flipping the view: WebKit associates the outgoing entry's swipe-back
+  // snapshot with what's on screen around pushState time. Pushing while the LIST is
+  // still the rendered state gives the back-gesture a correct dark under-layer;
+  // flip-then-push risked a wrong/blank snapshot — the white sliver that flashed at
+  // the left edge during the gesture (button exits never animate, hence never flashed).
   if (entering && !pushedNav) {
     try { history.pushState({ tdView: "term" }, ""); pushedNav = true; } catch {}
   }
+  showTermView();
 }
 // exit the view without touching history — the popstate half of the work
 function exitTermView() { document.body.classList.remove("view-terminal"); closeReading(); }
