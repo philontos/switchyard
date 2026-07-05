@@ -145,8 +145,9 @@ function autoGrow(f) {
 function sendLine() {
   const f = $("ti-field");
   const v = f.value;
-  if (v.includes("\n")) sendToActive("\x1b[200~" + v + "\x1b[201~\r");
-  else sendToActive(v ? v + "\r" : "\r");
+  if (v.includes("\n")) sendToActive("\x1b[200~" + v + "\x1b[201~");
+  else if (v) sendToActive(v);
+  requestAnimationFrame(() => sendToActive("\r"));
   f.value = "";
   autoGrow(f);          // shrink back to one row
   f.focus();
