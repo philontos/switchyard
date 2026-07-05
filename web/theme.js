@@ -16,15 +16,26 @@
 (function () {
   const KEY = "theme";
   const DEFAULT = "dark";
+  // browser-chrome color per theme = each theme's --bg (see app.css tokens). Duplicated
+  // here because <meta theme-color> takes a literal, not a CSS var — keep in sync.
+  const CHROME = { dark: "#1a1613", light: "#f5f0e8" };
 
   function current() {
     return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  }
+
+  // Mirror the theme onto <meta name="theme-color"> so iOS paints its edge strips /
+  // swipe-transition gutters and the address bar in the app background, not white.
+  function applyChrome() {
+    const m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.content = CHROME[current()];
   }
 
   function set(next) {
     if (next !== "light" && next !== "dark") return;
     if (next === current()) return;
     document.documentElement.dataset.theme = next;
+    applyChrome();
     try { localStorage.setItem(KEY, next); } catch (_) {}
     if (typeof Theme.onChange === "function") Theme.onChange(next);
   }
@@ -37,6 +48,7 @@
     let saved = null;
     try { saved = localStorage.getItem(KEY); } catch (_) {}
     document.documentElement.dataset.theme = saved === "light" ? "light" : DEFAULT;
+    applyChrome();
   }
 
   const Theme = {
