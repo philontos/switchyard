@@ -48,19 +48,44 @@ function swapDraft(id) {
 // to a real task; a pending/new one lands in the live terminal so you watch it start.
 let curDockId = null;
 
-export function enterTerminal(id) {
-  swapDraft(id);                // give this task its own input buffer before it's shown
-  curDockId = id;
+// ---- platform back gesture ⇄ view stack ----
+// Entering the terminal view pushes ONE history entry, so the platform back action —
+// iOS's native edge swipe-right, Android's back gesture/button — pops it and lands on
+// the list. That gives the "swipe right to leave the page" feel with the browser's own
+// transition, and zero custom gesture math (which would fight xterm's touch handling).
+// pushedNav tracks whether our entry is on the stack; programmatic exits (the ‹ button,
+// the dock emptying, a breakpoint flip) consume it via history.back(), whose popstate
+// then no-ops (the view is already gone), so stale entries never pile up.
+let pushedNav = false;
+
+// Raise the terminal view for curDockId (no history push, no draft swap) — shared by
+// enterTerminal and the forward-gesture popstate re-entry.
+function showTermView() {
   document.body.classList.add("view-terminal");
   // Landing: an existing task opens in 阅读 (openReading auto-nudges to 实时 if it has no
   // conversation yet); a pending/new task opens straight in 实时.
-  setMode(typeof id === "number" ? "read" : "live");
+  setMode(typeof curDockId === "number" ? "read" : "live");
   syncViewport();               // fix --vvh/--vvt before the fixed termcol paints
   // the term column was display:none in list view, so its pane couldn't be
   // measured — refit once it's laid out (next frame).
   requestAnimationFrame(fitActiveNow);
 }
-export function enterList() { document.body.classList.remove("view-terminal"); closeReading(); }
+
+export function enterTerminal(id) {
+  swapDraft(id);                // give this task its own input buffer before it's shown
+  curDockId = id;
+  const entering = !document.body.classList.contains("view-terminal");   // vs. a task switch within the view
+  showTermView();
+  if (entering && !pushedNav) {
+    try { history.pushState({ tdView: "term" }, ""); pushedNav = true; } catch {}
+  }
+}
+// exit the view without touching history — the popstate half of the work
+function exitTermView() { document.body.classList.remove("view-terminal"); closeReading(); }
+export function enterList() {
+  exitTermView();
+  if (pushedNav) { pushedNav = false; try { history.back(); } catch {} }
+}
 export function mobileBack() { enterList(); }   // term-bar ‹ back button (bridged in main.js)
 
 // Flip the .termcol overlay between the reading pane and the live terminal. Reading is
@@ -121,6 +146,20 @@ export function initMobile() {
   MQ.addEventListener("change", () => {
     document.body.classList.toggle("mobile", isOn());
     if (!isOn()) enterList();   // crossing back to desktop: drop the view flag
+  });
+
+  // Platform back gesture ⇄ view stack (see pushedNav above). The base entry is stamped
+  // so a pop back onto it is recognizable; a FORWARD gesture onto our term entry re-opens
+  // the current task's view, so back-then-forward round-trips like a native nav stack.
+  try { history.replaceState({ tdView: "list" }, ""); } catch {}
+  window.addEventListener("popstate", (e) => {
+    if (e.state && e.state.tdView === "term") {
+      pushedNav = true;
+      if (isOn() && curDockId != null) showTermView();
+    } else {
+      pushedNav = false;
+      if (document.body.classList.contains("view-terminal")) exitTermView();
+    }
   });
 
   const vv = window.visualViewport;
