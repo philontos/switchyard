@@ -1,7 +1,9 @@
 // Mobile "阅读 / Reading" view. Renders a task's agent conversation — fetched from
 // GET /api/tasks/:id/transcript as a normalized Entry stream — into a native,
 // smooth-scrolling chat, and auto-tails new messages while it's open. Read-only: the
-// shared input bar sends, and the live terminal (实时) is where you watch/act.
+// shared input bar sends, and the live terminal (实时) is where you watch/act. The one
+// write-ish exception is echoUser(): a just-sent message is echoed optimistically so it
+// shows before the next poll; the transcript stays the source of truth (see below).
 //
 // Imports only dom.js. The mode plumbing runs the OTHER way (mobile.js calls
 // openReading/closeReading; the empty-transcript "go live" nudge is an injected
@@ -20,6 +22,7 @@ let atBottom = true;
 let timer = null;
 let onEmpty = null;             // called once when a fresh load has no conversation (→ 实时)
 const tools = new Map();        // tool_call id → { body, status } nodes, to fold results in
+const pending = [];             // optimistic echoes awaiting their transcript entry: { nodes, text }
 
 export function initReading(opts = {}) {
   box = $("term-read");
@@ -50,9 +53,48 @@ export function scrollReadingToBottom() {
   $("read-jump").classList.remove("show");
 }
 
+// ---- optimistic echo (乐观上屏) ----
+// Sending is terminal-bound, so a message only shows once the agent writes it to the
+// transcript AND the next poll picks it up — seconds of "did that go through?". echoUser
+// renders it immediately instead. The echo is a pure overlay: it reuses the normal
+// user-bubble markup but touches NONE of the tail state (cursor/source/lastRole/tools),
+// so polling stays correct no matter what happens to the echo. settleEcho removes it
+// when the real entry arrives; reset/clearRendered drop leftovers with everything else.
+
+// Echo a just-sent user message for the task being read (no-op for any other id, so the
+// caller doesn't need to know whether reading is open). Empty text = a bare Enter
+// accepting some prompt's default — not a message, nothing to echo.
+export function echoUser(id, text) {
+  if (id !== taskId || !box) return;
+  const t = String(text ?? "").trim();
+  if (!t) return;
+  const nodes = [roleHeader("user"), entryNode({ t: "user", text: t })];
+  for (const n of nodes) box.appendChild(n);
+  pending.push({ nodes, text: t });
+  scrollReadingToBottom();
+}
+
+// An arriving user entry settles echoes up to and including its own: sends reach the
+// agent in order, so any echo OLDER than a transcribed message will never show up (it
+// answered a TUI prompt, say, and isn't a conversation message) — drop those too rather
+// than let phantoms linger. No exact match (text transformed in transit) settles just
+// the oldest: a transient re-render next poll beats a permanent duplicate bubble.
+function settleEcho(text) {
+  if (!pending.length) return;
+  const t = String(text ?? "").trim();
+  let i = pending.findIndex((p) => p.text === t);
+  if (i < 0) i = 0;
+  for (const p of pending.splice(0, i + 1)) for (const n of p.nodes) n.remove();
+}
+
+function clearPending() {
+  for (const p of pending) for (const n of p.nodes) n.remove();
+  pending.length = 0;
+}
+
 function reset(id) {
   taskId = id; source = null; cursor = 0; lastRole = null; hasContent = false; atBottom = true;
-  tools.clear();
+  tools.clear(); clearPending();
   box.innerHTML = `<div class="rd-state" id="rd-state">${esc(I18N.t("read.loading"))}</div>`;
 }
 
@@ -74,7 +116,7 @@ async function tick() {
   cursor = data.cursor ?? cursor;
 }
 
-function clearRendered() { box.innerHTML = ""; lastRole = null; hasContent = false; tools.clear(); cursor = 0; }
+function clearRendered() { box.innerHTML = ""; lastRole = null; hasContent = false; tools.clear(); clearPending(); cursor = 0; }
 function showState(msg) { box.innerHTML = `<div class="rd-state">${esc(msg)}</div>`; }
 function hideState() { const s = box.querySelector(".rd-state"); if (s) s.remove(); }
 
@@ -82,11 +124,15 @@ function hideState() { const s = box.querySelector(".rd-state"); if (s) s.remove
 
 function appendAll(entries) {
   for (const e of entries) {
+    if (e.t === "user") settleEcho(e.text);
     if (e.t === "tool_result") { foldResult(e); continue; }
     const dr = e.t === "user" ? "user" : "assistant";
     if (dr !== lastRole) { box.appendChild(roleHeader(dr)); lastRole = dr; }
     box.appendChild(entryNode(e));
   }
+  // unsettled echoes are still the newest sends — keep them below what just rendered
+  // (appendChild MOVES an attached node, so this is a reorder, not a duplicate)
+  for (const p of pending) for (const n of p.nodes) box.appendChild(n);
   if (atBottom) box.scrollTop = box.scrollHeight;
   else $("read-jump").classList.add("show");
 }

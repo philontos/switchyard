@@ -11,7 +11,7 @@
 import { $ } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 import { sendToActive, submitToActive, fitActiveNow } from "./terminal.js";
-import { openReading, closeReading, scrollReadingToBottom } from "./reading.js";
+import { openReading, closeReading, scrollReadingToBottom, echoUser } from "./reading.js";
 
 const MQ = window.matchMedia("(max-width: 760px)");
 export function isOn() { return MQ.matches; }
@@ -150,7 +150,10 @@ function sendLine() {
     f.focus();
     return;
   }
-  if (!document.body.classList.contains("mode-live")) scrollReadingToBottom();
+  if (!document.body.classList.contains("mode-live")) {
+    if (typeof curDockId === "number") echoUser(curDockId, v);   // show it now; the poll settles it
+    scrollReadingToBottom();
+  }
   f.value = "";
   autoGrow(f);          // shrink back to one row
   f.focus();
