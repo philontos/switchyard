@@ -158,6 +158,9 @@ export interface CliDeps {
   stop: (id: number) => Promise<StopResult>;
   // set up THIS machine's global tdsp from its clone (symlink src + wrapper)
   install: () => { src: string; binPath: string; localBin: string; clone: string };
+  // pull the machine's install (the clone behind ~/.task-dispatcher/src) to the
+  // latest code and refresh its deps; a running serve picks it up on next start
+  update: () => Promise<{ ok: true; clone: string; head: string } | { ok: false; error: string }>;
   // live branch list for one of this machine's mirrors (so a controller can offer
   // the node repo's real branches when dispatching here)
   branches: (mirror: string) => Promise<{ ok: boolean; branches?: string[]; error?: string }>;
@@ -258,8 +261,17 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       );
       return 0;
     }
+    case "update": {
+      const r = await deps.update();
+      if (!r.ok) {
+        deps.err(`update failed: ${r.error}`);
+        return 1;
+      }
+      deps.out(`tdsp updated: ${r.clone}\n  now at ${r.head}\nrestart the console to pick it up (re-run \`tdsp serve\`)`);
+      return 0;
+    }
     default:
-      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|branches|install>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|branches|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

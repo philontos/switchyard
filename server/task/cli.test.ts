@@ -123,6 +123,7 @@ function fakeDeps(db: Database.Database) {
         return { ok: true as const };
       },
       install: () => ({ src: "/h/.task-dispatcher/src", binPath: "/h/.task-dispatcher/bin/tdsp", localBin: "/h/.local/bin/tdsp", clone: "/h/clone" }),
+      update: async () => ({ ok: true as const, clone: "/h/clone", head: "abc1234 feat: latest" }),
       branches: async (mirror: string) => {
         branchCalls.push(mirror);
         return { ok: true as const, branches: ["main", "develop", "release/1.0"] };
@@ -280,6 +281,23 @@ test("runCli install sets up the machine and reports the paths", async () => {
   assert.equal(code, 0);
   assert.match(f.out, /\.task-dispatcher\/src/);
   assert.match(f.out, /\.task-dispatcher\/bin\/tdsp/);
+});
+
+test("runCli update pulls the install and reports the new head", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["update"], f.deps);
+  assert.equal(code, 0);
+  assert.match(f.out, /updated/);
+  assert.match(f.out, /abc1234/);
+  assert.match(f.out, /tdsp serve/, "tells the user a running console needs a restart");
+});
+
+test("runCli update exits 1 and surfaces the error when the pull fails", async () => {
+  const f = fakeDeps(seed());
+  f.deps.update = async () => ({ ok: false as const, error: "not possible to fast-forward" });
+  const code = await runCli(["update"], f.deps);
+  assert.equal(code, 1);
+  assert.match(f.err, /fast-forward/);
 });
 
 test("runCli create-local exits 1 and prints the error when creation fails", async () => {
