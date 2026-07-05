@@ -10,6 +10,7 @@
 // via setViewHooks(), so there's no import cycle.
 import { $ } from "../core/dom.js";
 import { sendToActive, fitActiveNow } from "./terminal.js";
+import { openReading, closeReading } from "./reading.js";
 
 const MQ = window.matchMedia("(max-width: 760px)");
 export function isOn() { return MQ.matches; }
@@ -43,16 +44,36 @@ function swapDraft(id) {
   draftId = id;
 }
 
+// The dock's current task id (real number, or a pending temp id). Reading only applies
+// to a real task; a pending/new one lands in the live terminal so you watch it start.
+let curDockId = null;
+
 export function enterTerminal(id) {
   swapDraft(id);                // give this task its own input buffer before it's shown
+  curDockId = id;
   document.body.classList.add("view-terminal");
+  // Landing: an existing task opens in 阅读 (openReading auto-nudges to 实时 if it has no
+  // conversation yet); a pending/new task opens straight in 实时.
+  setMode(typeof id === "number" ? "read" : "live");
   syncViewport();               // fix --vvh/--vvt before the fixed termcol paints
   // the term column was display:none in list view, so its pane couldn't be
   // measured — refit once it's laid out (next frame).
   requestAnimationFrame(fitActiveNow);
 }
-export function enterList() { document.body.classList.remove("view-terminal"); }
+export function enterList() { document.body.classList.remove("view-terminal"); closeReading(); }
 export function mobileBack() { enterList(); }   // term-bar ‹ back button (bridged in main.js)
+
+// Flip the .termcol overlay between the reading pane and the live terminal. Reading is
+// the default (no .mode-live); 实时 shows xterm and needs a refit (it was display:none).
+// Bridged to window as setReadMode for the toggle + banner onclick handlers.
+export function setMode(m) {
+  const live = m === "live";
+  document.body.classList.toggle("mode-live", live);
+  $("tm-read")?.classList.toggle("on", !live);
+  $("tm-live")?.classList.toggle("on", live);
+  if (live) { closeReading(); requestAnimationFrame(fitActiveNow); }
+  else if (typeof curDockId === "number") openReading(curDockId);
+}
 
 // Bind the terminal view to the VISUAL viewport, not the layout viewport. On iOS
 // the soft keyboard overlays the page without resizing the layout viewport, so a

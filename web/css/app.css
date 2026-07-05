@@ -434,7 +434,7 @@ a { color: var(--accent-bar); }
    16px inputs (anything smaller makes iOS auto-zoom the page on focus).
    ============================================================================ */
 /* mobile-only chrome — inert/hidden on desktop */
-#term-back, .term-input { display: none; }
+#term-back, .term-input, #term-mode, #read-banner, #term-read, #read-jump { display: none; }
 
 @media (max-width: 760px) {
   body { font-size: 14px; line-height: 1.5; }
@@ -515,7 +515,79 @@ a { color: var(--accent-bar); }
   }
   #term-back:active { background: var(--surface-2); }
   .termbar .hint, #term-attach, #term-desc, .term-claude, .prev-port, .prev-btn { display: none; }
-  #term-title { flex: 1; max-width: none; font-size: 16px; text-align: center; padding-right: 44px; }
+  #term-title { flex: 1; max-width: none; font-size: 13px; text-align: left; padding-right: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ===== 阅读 / Reading view (mobile only) =========================================
+     A native-scrolling chat rendering of the agent's session transcript, a peer of the
+     live terminal. The 阅读|实时 toggle picks which the .termcol overlay shows; the same
+     input bar drives both. Show/hide uses id-qualified selectors so it out-specifies the
+     desktop `#…{display:none}` hide above. Read is the default; .mode-live flips to live. */
+  #term-mode { display: inline-flex; flex: none; gap: 3px; padding: 3px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; }
+  #term-mode button { flex: none; margin: 0; padding: 5px 14px; font-size: 13px; font-weight: 600;
+    border: none; border-radius: 6px; background: transparent; color: var(--muted); }
+  #term-mode button.on { background: #d977571f; color: var(--accent-text); box-shadow: inset 0 0 0 1px #d9775566; }
+
+  /* the reading pane fills the overlay in read mode; the live #term takes over in live mode */
+  body.view-terminal #term-read {
+    display: block; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch; padding: 14px 13px calc(20px + env(safe-area-inset-bottom));
+  }
+  body.mode-live #term-read { display: none; }
+  body.view-terminal:not(.mode-live) #term,
+  body.view-terminal:not(.mode-live) #term-empty { display: none; }
+
+  /* needs-you bridge banner */
+  #read-banner.show { display: flex; align-items: center; gap: 9px; flex: none;
+    margin: 10px 12px 0; padding: 9px 12px; border-radius: 9px;
+    background: color-mix(in srgb, var(--amber) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); font-size: 13px; }
+  body.mode-live #read-banner { display: none; }
+  #read-banner b { color: var(--amber); }
+  #read-banner button { margin: 0 0 0 auto; padding: 5px 12px; font-size: 12.5px; font-weight: 600;
+    border: none; border-radius: 6px; background: var(--amber); color: #1a1613; white-space: nowrap; }
+
+  /* jump-to-latest pill (shown by reading.js when scrolled up) */
+  #read-jump.show { display: inline-flex; align-items: center; gap: 5px; position: fixed;
+    right: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 46;
+    padding: 8px 14px; font-size: 13px; font-weight: 600; border: none; border-radius: 999px;
+    background: var(--accent-strong); color: #fff; box-shadow: 0 6px 20px var(--shadow); }
+  body.mode-live #read-jump { display: none; }
+
+  /* message stream */
+  .rd-state { color: var(--faint); font-size: 13px; text-align: center; padding: 40px 16px; }
+  .rd-role { font-size: 11px; letter-spacing: .5px; color: var(--faint); text-transform: uppercase;
+    margin: 20px 0 7px; display: flex; align-items: center; gap: 7px; }
+  .rd-role:first-child { margin-top: 0; }
+  .rd-role.user { color: var(--accent-text); }
+  .rd-role .rd-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-bar); }
+  .rd-msg.user { margin-bottom: 2px; }
+  .rd-bubble { background: #d977571f; border: 1px solid #d9775733; border-radius: 12px; padding: 11px 13px; }
+  .rd-text { line-height: 1.62; }
+  .rd-p { white-space: pre-wrap; word-break: break-word; }
+  .rd-text code, .rd-p code { background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px; font-family: Menlo, monospace; font-size: 12.5px; }
+  pre.rd-code { background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+    padding: 11px 13px; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 9px 0; }
+  pre.rd-code code { display: block; font-family: Menlo, monospace; font-size: 12.5px; line-height: 1.55;
+    color: var(--text); white-space: pre; }
+  .rd-blk { margin: 9px 0; border: 1px solid var(--border); border-radius: 9px;
+    background: color-mix(in srgb, var(--text) 2.5%, transparent); }
+  .rd-blk > summary { list-style: none; cursor: pointer; padding: 9px 11px; font-size: 12.5px;
+    color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .rd-blk > summary::-webkit-details-marker { display: none; }
+  .rd-blk[open] > summary { border-bottom: 1px solid var(--border); color: var(--text); }
+  .rd-caret { color: var(--faint); font-size: 10px; transition: transform .15s ease; flex: none; }
+  .rd-blk[open] .rd-caret { transform: rotate(90deg); }
+  .rd-tname { font-family: Menlo, monospace; color: var(--text); flex: none; }
+  .rd-targ { font-family: Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rd-tstatus { margin-left: auto; flex: none; }
+  .rd-tstatus.ok { color: var(--green); }
+  .rd-tstatus.bad { color: var(--red); }
+  .rd-blkbody { padding: 10px 11px; }
+  .rd-think { font-style: italic; color: var(--faint); line-height: 1.6; white-space: pre-wrap; }
+  pre.rd-out { margin: 0; font-family: Menlo, monospace; font-size: 12px; line-height: 1.5;
+    color: var(--muted); white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; }
 
   /* --- quick-input bar (wired in mobile.js): auto-growing compose field + Send, with
      a Fn-toggled control-key popover --- */
