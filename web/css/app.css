@@ -270,7 +270,13 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .task-codex::before { background: #4aa3df; }
 .card.task-claude { background: linear-gradient(90deg, #d977570f 0, var(--surface) 42px); }
 .card.task-codex { background: linear-gradient(90deg, #4aa3df14 0, var(--surface) 42px); border-color: color-mix(in srgb, #4aa3df 28%, var(--border)); }
-.card.task-codex.clickable:hover { border-color: #4aa3df; background: linear-gradient(90deg, #4aa3df1f 0, var(--card-hover) 42px); }
+/* hover affordances live behind (hover:hover): touch has no real hover, and iOS
+   "sticky hover" would otherwise pin these styles to the last-tapped card until the
+   next tap — coming back from a task, the card still wore the accent border, which
+   read as a stuck selection. Touch feedback is the :active rules instead. */
+@media (hover: hover) {
+  .card.task-codex.clickable:hover { border-color: #4aa3df; background: linear-gradient(90deg, #4aa3df1f 0, var(--card-hover) 42px); }
+}
 /* claude vs codex is shown by colour alone (the ::before accent bar + card tint
    above) — no text label, so a long agent name can't wrap and deform the card. */
 /* the editable title text — its own click zone (doesn't open the task); the text
@@ -280,7 +286,9 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    no taller row, no sideways text shift, hence no jump. */
 .tname { flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 1px 6px; border: 1px solid transparent; border-radius: 5px; cursor: text;
   display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tname:hover { text-decoration: underline dotted var(--faint); text-underline-offset: 2px; }
+@media (hover: hover) {
+  .tname:hover { text-decoration: underline dotted var(--faint); text-underline-offset: 2px; }
+}
 /* the inline rename field. renameTask inserts it as a DIRECT flex child of `.t`
    (hiding the title span beside it) so this flex sizing actually applies: basis 0 +
    min-width 0 let it fill the row after "#id" and shrink, instead of rendering at its
@@ -289,7 +297,9 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .tname-edit { flex: 1 1 0; min-width: 0; box-sizing: border-box; margin: 0; padding: 1px 6px; font: inherit; font-weight: 600;
   color: var(--text); background: var(--surface-2); border: 1px solid var(--accent); border-radius: 5px; }
 .card.clickable { cursor: pointer; transition: border-color .12s, background .12s; }
-.card.clickable:hover { border-color: var(--accent); background: var(--card-hover); }
+@media (hover: hover) {
+  .card.clickable:hover { border-color: var(--accent); background: var(--card-hover); }
+}
 /* selected: the item currently open in the bottom terminal — left accent bar + tint, wins over hover */
 .card.selected, .card.clickable.selected:hover { border-color: var(--accent); background: #d977571f;
   box-shadow: inset 3px 0 0 var(--accent-bar); }
@@ -707,7 +717,9 @@ a { color: var(--accent-bar); }
   .dlg-actions button { min-height: 42px; padding: 8px 16px; }
 
   /* touch has no hover — give the primary tap targets an :active nudge instead */
-  .card.clickable:active { background: var(--card-hover); border-color: var(--accent); }
+  /* press feedback is a background nudge only — NO accent border, so nothing on
+     mobile ever draws the selection-like frame (matches the no-selected-state rule) */
+  .card.clickable:active { background: var(--card-hover); }
   button:active { filter: brightness(.92); }
 
   header { padding: 10px 12px; }
