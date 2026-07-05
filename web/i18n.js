@@ -14,7 +14,7 @@
 //      a literal —
 //        <button data-i18n="repo.new"></button>          // sets textContent
 //        <input  data-i18n-ph="repo.namePh">             // sets placeholder
-//        <span   data-i18n-title="term.selectHintTitle"> // sets title (tooltip)
+//        <button data-i18n-title="term.attachCopy">      // sets title (tooltip)
 //      I18N.applyStatic() fills every tagged element and re-runs on language
 //      switch, so static text needs no JS.
 //   4. DYNAMIC text built in JS (toasts, dialogs, cards, empty states): call
@@ -42,8 +42,6 @@
       "task.creating": "创建中…",
       "term.creationFailed": "创建失败",
       "term.dismiss": "关闭",
-      "term.selectHint": "⇧ 拖拽选中",
-      "term.selectHintTitle": "终端开了鼠标模式,普通拖拽会发给会话;按住 Shift(或 mac 的 Option)拖拽即可选中,松手自动复制",
       "term.attach": "Attach",
       "term.attachCopy": "点击复制 tmux attach 命令",
       "term.empty": "点左侧任务进入终端",
@@ -255,8 +253,6 @@
       "task.creating": "Creating…",
       "term.creationFailed": "Creation failed",
       "term.dismiss": "Dismiss",
-      "term.selectHint": "⇧ Drag-select",
-      "term.selectHintTitle": "The terminal runs in mouse mode, so a plain drag is sent to the session; hold Shift (or Option on mac) and drag to select, release to copy automatically.",
       "term.attach": "Attach",
       "term.attachCopy": "Click to copy the tmux attach command",
       "term.empty": "Pick a task on the left to open its terminal",

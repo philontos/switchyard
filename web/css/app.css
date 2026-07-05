@@ -525,7 +525,7 @@ a { color: var(--accent-bar); }
     transform: translateX(2px) rotate(45deg);
   }
   #term-back:active { background: var(--surface-2); }
-  .termbar .hint, #term-attach, .term-claude, .prev-port, .prev-btn { display: none; }
+  #term-attach, .term-claude, .prev-port, .prev-btn { display: none; }
   #term-title { flex: 1; max-width: none; font-size: 13px; text-align: left; padding-right: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ===== 阅读 / Reading view (mobile only) =========================================
