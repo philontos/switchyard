@@ -25,6 +25,7 @@ async function updateSelf() {
   if (selfUpdating) return;
   selfUpdating = true;
   $("self-update").disabled = true;
+  $("self-update").classList.add("updating");
   toast(t("system.updating"), "info");
   try {
     await fetch("/api/system/update", { method: "POST", headers: { "content-type": "application/json", "X-Lang": I18N.lang }, body: "{}" })
@@ -38,6 +39,7 @@ async function updateSelf() {
   } catch (e) {
     selfUpdating = false;
     $("self-update").disabled = false;
+    $("self-update").classList.remove("updating");
     toast(String(e?.message || e), "error");
   }
 }

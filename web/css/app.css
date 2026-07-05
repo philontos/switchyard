@@ -96,7 +96,15 @@ header { padding: 12px 18px; background: var(--surface); border-bottom: 1px soli
 :root[data-theme="light"] .brand-logo { filter: brightness(0) saturate(100%) invert(14%) sepia(13%) saturate(590%) hue-rotate(348deg) brightness(92%) contrast(88%); }
 #lang-toggle, #theme-toggle, #self-update { width: auto; margin: 0; padding: 3px 12px; font-size: 12px; background: var(--surface-2); border-color: var(--border); }
 #theme-toggle { font-size: 14px; line-height: 1.1; padding: 3px 10px; }
-#self-update { font-size: 14px; line-height: 1.1; padding: 3px 10px; }
+#self-update.icon-btn { width: 32px; height: 32px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+#self-update.icon-btn:hover { color: var(--text); border-color: var(--border-hover); }
+#self-update.icon-btn:disabled { opacity: .72; cursor: default; }
+.sync-icon {
+  width: 16px; height: 16px; flex: none; display: block; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='black' stroke-width='2.35' stroke-linecap='round' stroke-linejoin='round' d='M21 12a9 9 0 0 1-14.9 6.8M3 12A9 9 0 0 1 17.9 5.2M18 2v4h-4M6 22v-4h4'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='black' stroke-width='2.35' stroke-linecap='round' stroke-linejoin='round' d='M21 12a9 9 0 0 1-14.9 6.8M3 12A9 9 0 0 1 17.9 5.2M18 2v4h-4M6 22v-4h4'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+#self-update.updating .sync-icon, .mh-update.updating .sync-icon { animation: spin .8s linear infinite; }
 .wrap { display: grid; grid-template-columns: 56px 300px 1fr; flex: 1; min-height: 0; }
 .rail { border-right: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; }
 .list { border-right: 1px solid var(--border); overflow-y: auto; padding: 14px; min-width: 0; }
@@ -199,6 +207,8 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .mh-menu .mh-fleet { font-size: 11px; color: var(--faint); padding: 2px 4px; }
 .mh-menu .mh-fleet.off { color: var(--warn, #c08a00); }
 .mh-menu .mh-boot { width: 100%; margin: 0; text-align: left; color: var(--accent, #2f7); }
+.mh-menu .mh-update { display: flex; align-items: center; gap: 8px; }
+.mh-menu .mh-update .sync-icon { width: 14px; height: 14px; color: var(--muted); }
 /* col2: collapsible repo / local / archived groups + nested task cards.
    Each group is its own rounded block with a gap below it (1) — replaces the old
    hairline divider that made consecutive groups read as one continuous slab. The
@@ -698,6 +708,8 @@ a { color: var(--accent-bar); }
   .mh-act { min-height: 38px; padding: 8px 13px; font-size: 14px; border-radius: 10px; }
   .mh-menu { right: 8px; min-width: 210px; border-radius: 12px; padding: 8px; }
   .mh-menu button { min-height: 42px; }
+  #self-update.icon-btn { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 10px; }
+  #self-update .sync-icon { width: 18px; height: 18px; }
 
   .grp { margin-bottom: 10px; padding: 3px 2px 4px; border-radius: 10px; }
   .grp.open { padding-bottom: 8px; }

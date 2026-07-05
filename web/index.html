@@ -21,7 +21,7 @@
 </head>
 <body>
 <div id="boot"><div class="spinner"></div></div>
-<header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo" src="/assets/switchyard-wordmark.png" alt="Switchyard" /></a><span style="flex:1"></span><button id="self-update" class="sec" onclick="updateSelf()" data-i18n-title="system.updateTitle" aria-label="Update">⟳</button><button id="skills-btn" class="sec" data-i18n="skill.manage" onclick="openSkillsModal()"></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
+<header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo" src="/assets/switchyard-wordmark.png" alt="Switchyard" /></a><span style="flex:1"></span><button id="self-update" class="sec icon-btn" onclick="updateSelf()" data-i18n-title="system.updateTitle" aria-label="Update"><span class="sync-icon" aria-hidden="true"></span></button><button id="skills-btn" class="sec" data-i18n="skill.manage" onclick="openSkillsModal()"></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
   <div id="m-list" class="list"></div>
