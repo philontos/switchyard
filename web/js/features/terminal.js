@@ -128,6 +128,17 @@ function sendResize(p) {
 // buffer would fly twice as fast. touchstart is left to propagate so a plain tap still
 // reaches xterm (selection); only a drag is claimed for scrolling.
 //
+// NOT every touch is ours. The browser's own navigation swipe (iOS edge swipe-right =
+// back, our exit gesture) begins at the screen bezel and shows up here as a mostly-
+// horizontal move with a little vertical jitter — the old code preventDefault()ed that
+// jitter and killed the gesture, which is why swipe-back worked in 阅读 (plain scroll
+// area, nobody intercepts) but not in 实时. Two rules restore it:
+//   · a touch STARTING within EDGE px of either screen edge is the browser's — we never
+//     claim it (no preventDefault/emit), only stopPropagation so xterm's plain-shell
+//     touchmove can't preventDefault it either;
+//   · a mid-screen touch stays UNDECIDED until it moves ~6px, then direction-locks:
+//     vertical → ours (scroll bridge), horizontal → left alone like an edge touch.
+//
 // Flick inertia: a bare 1:1 drag stops dead on lift-off, which reads as sluggish. We
 // carry the release velocity into a decaying rAF loop that keeps emitting wheel deltas,
 // so a flick coasts like native momentum scrolling; a new touch cancels it.
@@ -137,20 +148,36 @@ function sendResize(p) {
 // distance and the friction decay are computed against the REAL elapsed frame time, not
 // a fixed 16ms — a 120Hz ProMotion iPhone (≈8ms/frame) then coasts exactly as far as a
 // 60Hz one, instead of decaying twice as fast and feeling short/floaty.
-function mountTouchScroll(pane) {
+// Exported for the touch-gesture test harness; the app itself only calls it here.
+export function mountTouchScroll(pane) {
   const sink = pane.querySelector(".xterm-screen") || pane;
   const emit = (dy) => sink.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }));
   const FRICTION = 0.9975;                   // velocity decay PER MILLISECOND (≈0.96 over a 16.7ms frame)
-  let lastY = 0, lastT = 0, vel = 0, tracking = false, raf = 0, prevT = 0;
+  const EDGE = 28;                           // px: bezel-origin touches belong to the browser's nav swipe
+  const LOCK = 6;                            // px of travel before a mid-screen touch direction-locks
+  // gesture ownership: 0 idle · 1 undecided · 2 ours (vertical scroll) · 3 browser's
+  let mode = 0;
+  let startX = 0, startY = 0, lastY = 0, lastT = 0, vel = 0, raf = 0, prevT = 0;
   const stopFling = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } };
   pane.addEventListener("touchstart", (e) => {
     stopFling();                             // a fresh touch halts any coasting scroll
-    tracking = e.touches.length === 1;       // single finger only — a pinch isn't a scroll
-    if (tracking) { lastY = e.touches[0].clientY; lastT = e.timeStamp; vel = 0; }
+    if (e.touches.length !== 1) { mode = 0; return; }   // a pinch isn't a scroll
+    const t = e.touches[0];
+    startX = t.clientX; startY = t.clientY;
+    lastY = t.clientY; lastT = e.timeStamp; vel = 0;
+    mode = (t.clientX < EDGE || t.clientX > window.innerWidth - EDGE) ? 3 : 1;
   }, { passive: true });
   pane.addEventListener("touchmove", (e) => {
-    if (!tracking || e.touches.length !== 1) return;
-    const y = e.touches[0].clientY, dy = lastY - y;   // finger up → dy>0 → scroll toward newer content
+    if (!mode || e.touches.length !== 1) return;
+    if (mode === 3) { e.stopPropagation(); return; }    // browser's — shield it from xterm, never preventDefault
+    const t = e.touches[0];
+    if (mode === 1) {                                   // undecided: wait for clear intent, then lock
+      const dx = t.clientX - startX, dyT = t.clientY - startY;
+      if (Math.abs(dx) < LOCK && Math.abs(dyT) < LOCK) { e.stopPropagation(); return; }
+      mode = Math.abs(dyT) >= Math.abs(dx) ? 2 : 3;
+      if (mode === 3) { e.stopPropagation(); return; }
+    }
+    const y = t.clientY, dy = lastY - y;     // finger up → dy>0 → scroll toward newer content
     const dt = Math.max(1, e.timeStamp - lastT);
     lastY = y; lastT = e.timeStamp;
     if (!dy) return;
@@ -159,9 +186,13 @@ function mountTouchScroll(pane) {
     e.stopPropagation();                     // keep xterm's own touch-scroll from double-driving
     emit(dy);
   }, { passive: false, capture: true });
+  // touchcancel: the browser claimed the sequence (e.g. its nav swipe engaged) — just
+  // drop tracking, no fling. touchend on a claimed drag flings.
+  pane.addEventListener("touchcancel", () => { mode = 0; }, { passive: true });
   pane.addEventListener("touchend", () => {
-    if (!tracking) return;
-    tracking = false;
+    const was = mode;
+    mode = 0;
+    if (was !== 2) return;
     if (Math.abs(vel) < 0.05) return;        // a slow/held release doesn't coast (px/ms)
     prevT = 0;
     const step = (now) => {
