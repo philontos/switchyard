@@ -138,6 +138,16 @@ export async function pasteText(runner: Runner, session: string, text: string) {
   await tmux(runner, ["paste-buffer", "-t", session, "-b", "tdsp-paste", "-p", "-d"]);
 }
 
+/**
+ * Mobile quick-input submits a complete message to the real tmux pane, not to
+ * the browser's attach client. Pasting handles arbitrary Unicode/newlines as one
+ * input; send-keys Enter then submits it as a real terminal Enter.
+ */
+export async function pasteSubmit(runner: Runner, session: string, text: string) {
+  if (text) await pasteText(runner, session, text);
+  await tmux(runner, ["send-keys", "-t", session, "Enter"]);
+}
+
 /** List all dispatcher-owned tmux sessions (named task-<id>). */
 export async function listSessions(runner: Runner): Promise<string[]> {
   try {

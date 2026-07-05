@@ -9,7 +9,7 @@
 // never imports this module — instead main.js injects our enter/exit callbacks
 // via setViewHooks(), so there's no import cycle.
 import { $ } from "../core/dom.js";
-import { sendToActive, fitActiveNow } from "./terminal.js";
+import { sendToActive, submitToActive, fitActiveNow } from "./terminal.js";
 import { openReading, closeReading, scrollReadingToBottom } from "./reading.js";
 
 const MQ = window.matchMedia("(max-width: 760px)");
@@ -139,15 +139,12 @@ function autoGrow(f) {
 
 // Send the composed text, then Enter, and keep the field focused so the keyboard stays
 // up. Empty field → a bare Enter (accept a prompt's default). A MULTILINE value goes as
-// one bracketed paste (ESC[200~…ESC[201~) so a TUI takes it as a single input instead of
-// submitting at every newline; the trailing Enter then fires it. Single-line is sent raw
-// (no wrapper) so a plain shell without bracketed-paste support is unaffected.
+// one server-side tmux paste so a TUI takes it as a single input instead of submitting
+// at every newline; a real tmux send-keys Enter then fires it.
 function sendLine() {
   const f = $("ti-field");
   const v = f.value;
-  if (v.includes("\n")) sendToActive("\x1b[200~" + v + "\x1b[201~");
-  else if (v) sendToActive(v);
-  requestAnimationFrame(() => sendToActive("\r"));
+  submitToActive(v);
   if (!document.body.classList.contains("mode-live")) scrollReadingToBottom();
   f.value = "";
   autoGrow(f);          // shrink back to one row
