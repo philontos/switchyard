@@ -94,8 +94,9 @@ header { padding: 12px 18px; background: var(--surface); border-bottom: 1px soli
 .brand { display: inline-flex; align-items: center; flex: none; height: 28px; text-decoration: none; }
 .brand-logo { display: block; width: auto; height: 27px; object-fit: contain; }
 :root[data-theme="light"] .brand-logo { filter: brightness(0) saturate(100%) invert(14%) sepia(13%) saturate(590%) hue-rotate(348deg) brightness(92%) contrast(88%); }
-#lang-toggle, #theme-toggle { width: auto; margin: 0; padding: 3px 12px; font-size: 12px; background: var(--surface-2); border-color: var(--border); }
+#lang-toggle, #theme-toggle, #self-update { width: auto; margin: 0; padding: 3px 12px; font-size: 12px; background: var(--surface-2); border-color: var(--border); }
 #theme-toggle { font-size: 14px; line-height: 1.1; padding: 3px 10px; }
+#self-update { font-size: 14px; line-height: 1.1; padding: 3px 10px; }
 .wrap { display: grid; grid-template-columns: 56px 300px 1fr; flex: 1; min-height: 0; }
 .rail { border-right: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; }
 .list { border-right: 1px solid var(--border); overflow-y: auto; padding: 14px; min-width: 0; }
