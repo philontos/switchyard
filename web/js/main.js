@@ -15,7 +15,7 @@ import { initReading, reflectWaiting } from "./features/reading.js";
 import { state } from "./core/state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./features/repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, updateHost } from "./features/hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, addNodeShell, allTasks } from "./features/tasks.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, cancelTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, addNodeShell, allTasks } from "./features/tasks.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./features/skills.js";
 import { initReorder } from "./features/reorder.js";
 import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./features/providers.js";
@@ -51,7 +51,7 @@ async function updateSelf() {
 // that exposes them. (I18N is already global, set by i18n.js.)
 Object.assign(window, {
   // tasks
-  addTask, openTaskModal, closeTaskModal, connect, archive, removeWt, deleteTask, resume,
+  addTask, openTaskModal, cancelTaskModal, connect, archive, removeWt, deleteTask, resume,
   addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent,
   // repos
   delRepo, openRepoModal, closeRepoModal, addRepo,
@@ -124,7 +124,9 @@ setViewHooks(
   },
   () => { if (isMobile()) enterList(); },
 );
-initMobile();
+// closeSheet: the pure DOM closer — the back gesture's popstate already popped the
+// sheet's entry, so the cancel variant (which pops it again) would double-pop.
+initMobile({ closeSheet: closeTaskModal });
 initReading({ onEmpty: () => setMode("live") });   // mobile reading view; empty transcript → 实时
 showTermEmpty();
 initHostMenuDismiss();   // close the machine ⚙ menu on any outside click
@@ -143,14 +145,14 @@ loadFleet();                     // initial cross-node fleet snapshot
 setInterval(loadFleet, 15000);  // refresh each node's live task count (slower — it ssh's out)
 // close modals on backdrop click / Esc
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
-$("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") closeTaskModal(); });
+$("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") cancelTaskModal(); });
 $("host-modal").addEventListener("click", e => { if (e.target.id === "host-modal") closeHostModal(); });
 $("skills-modal").addEventListener("click", e => { if (e.target.id === "skills-modal") closeSkillsModal(); });
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
   if ($("dialog").style.display === "flex") closeDialog(null);
-  else { closeRepoModal(); closeTaskModal(); closeHostModal(); closeSkillsModal(); }
+  else { closeRepoModal(); cancelTaskModal(); closeHostModal(); closeSkillsModal(); }
 });
 // poll repos so cloning -> ready (and clone errors) show up without manual refresh
 setInterval(() => { if (state.repos.some(r => r.status === "cloning")) loadRepos(); }, 2000);
