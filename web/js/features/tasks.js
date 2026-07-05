@@ -277,9 +277,9 @@ async function addNodeTask() {
   // click must never sit silent. The card carries hostId so it lands only in this
   // node's fleet group; on success it settles into the node's live terminal.
   const tmpId = nextTmpId();
+  closeTaskModal();
   openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
   addPendingCard(tmpId, { kind: "repo", repoId: repo.id, hostId, title: body.title, agent: body.agent });
-  closeTaskModal();
   try {
     const r = await api(`/api/nodes/${hostId}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     dropPendingCard(tmpId);          // the real fleet card replaces the placeholder
@@ -316,11 +316,11 @@ export async function addTask() {
   // collapsed. The POST runs in the background and resolves into the same window —
   // success → live terminal, failure → inline error — with no global overlay.
   const tmpId = nextTmpId();
+  closeTaskModal();
   openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
   expandRepo(body.repo_id);
   addPendingCard(tmpId, { kind: "repo", repoId: body.repo_id, hostId: null, title: body.title, agent: body.agent });
   $("t-title").value = ""; $("t-prompt").value = "";
-  closeTaskModal();
   try {
     const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
     dropPendingCard(tmpId);          // the real card replaces the placeholder
