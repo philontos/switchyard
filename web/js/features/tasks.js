@@ -134,7 +134,20 @@ export function openTaskModal(repoId) {
   if (onLocalNode) refreshProviders();                 // fill the backend picker (keeps the last pick)
   setTimeout(() => $("t-title").focus(), 30);
 }
-export function closeTaskModal() { $("task-modal").style.display = "none"; nodeTask = null; }
+export function closeTaskModal() {
+  const modal = $("task-modal");
+  if (modal.contains(document.activeElement)) document.activeElement.blur();
+  modal.style.display = "none";
+  nodeTask = null;
+}
+
+function mobileClosePainted() {
+  if (!window.matchMedia("(max-width: 760px)").matches) return Promise.resolve();
+  // Let iOS paint the closed sheet before mobile.js pushes the terminal history entry.
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
 
 // Open the dispatch modal for a remote node's OWN repo (from the fleet). The task
 // is created ON the node, using the node's existing mirror — no re-registration
@@ -278,6 +291,7 @@ async function addNodeTask() {
   // node's fleet group; on success it settles into the node's live terminal.
   const tmpId = nextTmpId();
   closeTaskModal();
+  await mobileClosePainted();
   openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
   addPendingCard(tmpId, { kind: "repo", repoId: repo.id, hostId, title: body.title, agent: body.agent });
   try {
@@ -317,6 +331,7 @@ export async function addTask() {
   // success → live terminal, failure → inline error — with no global overlay.
   const tmpId = nextTmpId();
   closeTaskModal();
+  await mobileClosePainted();
   openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
   expandRepo(body.repo_id);
   addPendingCard(tmpId, { kind: "repo", repoId: body.repo_id, hostId: null, title: body.title, agent: body.agent });
