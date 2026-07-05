@@ -127,7 +127,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .cs-spin { display: inline-block; width: 11px; height: 11px; margin-right: 6px; vertical-align: -1px;
   border: 2px solid var(--border); border-top-color: var(--accent-bar); border-radius: 50%; animation: spin .7s linear infinite; }
 @keyframes csin { from { opacity: 0; transform: translateY(-3px); } }
-button { font: inherit; font-size: 12.5px; font-weight: 500; line-height: 1.4; padding: 4px 11px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); transition: background .12s, border-color .12s; }
+button { font: inherit; font-size: 12.5px; font-weight: 500; line-height: 1.4; padding: 4px 11px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); transition: background .12s, border-color .12s; touch-action: manipulation; }
 button:hover { background: var(--surface-3); }
 button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
 button.primary:hover { background: var(--accent-strong-h); border-color: var(--accent-strong-h); }
