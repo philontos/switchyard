@@ -10,7 +10,7 @@
 // via setViewHooks(), so there's no import cycle.
 import { $ } from "../core/dom.js";
 import { sendToActive, fitActiveNow } from "./terminal.js";
-import { openReading, closeReading } from "./reading.js";
+import { openReading, closeReading, scrollReadingToBottom } from "./reading.js";
 
 const MQ = window.matchMedia("(max-width: 760px)");
 export function isOn() { return MQ.matches; }
@@ -148,6 +148,7 @@ function sendLine() {
   if (v.includes("\n")) sendToActive("\x1b[200~" + v + "\x1b[201~");
   else if (v) sendToActive(v);
   requestAnimationFrame(() => sendToActive("\r"));
+  if (!document.body.classList.contains("mode-live")) scrollReadingToBottom();
   f.value = "";
   autoGrow(f);          // shrink back to one row
   f.focus();

@@ -43,6 +43,13 @@ export function openReading(id) {
 export function closeReading() { stopPoll(); }
 function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
 
+export function scrollReadingToBottom() {
+  if (!box) return;
+  atBottom = true;
+  box.scrollTop = box.scrollHeight;
+  $("read-jump").classList.remove("show");
+}
+
 function reset(id) {
   taskId = id; source = null; cursor = 0; lastRole = null; hasContent = false; atBottom = true;
   tools.clear();
