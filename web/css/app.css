@@ -324,6 +324,10 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .card-x { position: absolute; top: 7px; right: 7px; width: auto; margin: 0; padding: 1px 6px;
   background: none; border: none; color: var(--faint); font-size: 13px; line-height: 1; }
 .card-x:hover { background: #f8514914; color: var(--red); }
+.card-x.stop { color: var(--faint); }
+.stop-ico { width: 15px; height: 15px; border: 1.5px solid currentColor; border-radius: 50%; display: block; position: relative; }
+.stop-ico::before { content: ""; position: absolute; inset: 4px; border-radius: 2px; background: currentColor; }
+.card-x.stop:hover { background: #f8514914; color: var(--red); }
 /* drag-to-reorder (reorder.js): repo task cards carry data-repo. touch-action:pan-y
    lets the browser own VERTICAL scrolling (so a swipe over a card still scrolls the
    list — `none` here silently killed touch-scroll, since cards blanket the list),
@@ -696,7 +700,8 @@ a { color: var(--accent-bar); }
   .grp-head { min-height: 44px; gap: 8px; padding: 7px 6px; border-radius: 10px; }
   .grp-name { font-size: 15px; }
   .grp-act, .grp-del { width: 38px; height: 38px; border-radius: 10px; }
-  .grp-act { font-size: 22px; }
+  .grp-act { width: 34px; height: 34px; background: transparent; border-color: transparent; font-size: 24px; color: color-mix(in srgb, var(--accent-text) 72%, var(--muted)); }
+  .grp-act:active { background: #d9775714; border-color: #d9775733; color: var(--accent-text-hi); }
   .grp-del { display: none; }
   .grp-empty { font-size: 13px; padding: 5px 0 10px 18px; }
   .grp .card.task { margin-left: 10px; margin-bottom: 8px; }
@@ -707,6 +712,10 @@ a { color: var(--accent-bar); }
   .tname { padding: 2px 6px; border-radius: 7px; }
   .tname-edit { min-height: 32px; padding: 3px 7px; border-radius: 7px; font-size: 15px; }
   .card-x { top: 8px; right: 8px; width: 36px; height: 36px; padding: 0; font-size: 17px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; }
+  .card-x.stop { background: transparent; border: 1px solid transparent; color: color-mix(in srgb, var(--red-text) 38%, var(--faint)); }
+  .card-x.stop:active { background: color-mix(in srgb, var(--red) 7%, transparent); color: color-mix(in srgb, var(--red-text) 58%, var(--muted)); }
+  .stop-ico { width: 14px; height: 14px; border-width: 1.25px; }
+  .stop-ico::before { inset: 4.5px; border-radius: 1.5px; }
   .muted { font-size: 13px; }
   .sdot { width: 9px; height: 9px; }
   .tag-local { font-size: 11px; padding: 1px 7px; }
