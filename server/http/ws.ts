@@ -11,7 +11,7 @@ import { parsePreviewHost, handlePreviewUpgrade } from "../preview/preview.js";
 import { resolvePreviewUpstream } from "./preview.js";
 import { db, Task, Host } from "../core/db.js";
 import { runnerFor, localRunner, type Runner } from "../fleet/runner.js";
-import { cancelCopyMode } from "../session/tmux.js";
+import { cancelCopyMode, pasteSubmit } from "../session/tmux.js";
 import { tr, langFromQuery } from "../core/i18n.js";
 import { taskHost, getHost, SSH_BIN, MOSH_BIN, TMUX_BIN, SESSION_RE } from "./context.js";
 
@@ -77,6 +77,12 @@ wss.on("connection", (ws, req) => {
       const [, dims] = msg.split(":");
       const [cols, rows] = dims.split("x").map(Number);
       if (cols && rows) term.resize(cols, rows);
+      return;
+    }
+    if (msg.startsWith("\x00submit:")) {
+      let text = "";
+      try { text = JSON.parse(msg.slice("\x00submit:".length)).text || ""; } catch {}
+      pasteSubmit(cancelRunner, cancelSession, text).catch(() => {});
       return;
     }
     term.write(msg);

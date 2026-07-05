@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cancelCopyMode, pasteText, killSession, startSession, hasSession } from "./tmux.ts";
+import { cancelCopyMode, pasteText, pasteSubmit, killSession, startSession, hasSession } from "./tmux.ts";
 import type { Runner } from "../fleet/runner.ts";
 
 // Minimal Runner double that records every exec() call. The other interface
@@ -46,6 +46,21 @@ test("pasteText bracketed-pastes via a named buffer (no trailing newline -> no s
   assert.deepEqual(calls[0], { file: "tmux", args: ["set-buffer", "-b", "tdsp-paste", "--", "/wt/.claude/pasted/paste-1.png"] });
   // -p = bracketed paste (so claude attaches it as an image), -d removes the buffer after
   assert.deepEqual(calls[1], { file: "tmux", args: ["paste-buffer", "-t", "tdsp-1-x", "-b", "tdsp-paste", "-p", "-d"] });
+});
+
+test("pasteSubmit bracketed-pastes text, then sends a real Enter", async () => {
+  const { runner, calls } = fakeRunner();
+  await pasteSubmit(runner, "tdsp-1-x", "hello\nworld");
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[0], { file: "tmux", args: ["set-buffer", "-b", "tdsp-paste", "--", "hello\nworld"] });
+  assert.deepEqual(calls[1], { file: "tmux", args: ["paste-buffer", "-t", "tdsp-1-x", "-b", "tdsp-paste", "-p", "-d"] });
+  assert.deepEqual(calls[2], { file: "tmux", args: ["send-keys", "-t", "tdsp-1-x", "Enter"] });
+});
+
+test("pasteSubmit with empty text only sends Enter", async () => {
+  const { runner, calls } = fakeRunner();
+  await pasteSubmit(runner, "tdsp-1-x", "");
+  assert.deepEqual(calls, [{ file: "tmux", args: ["send-keys", "-t", "tdsp-1-x", "Enter"] }]);
 });
 
 // killSession is the LAST line of defense for every cleanup/archive/kill path.
