@@ -77,6 +77,11 @@
   --shadow: #6b5a3540;
 }
 * { box-sizing: border-box; }
+/* Paint the ROOT canvas too, not just body: iOS's swipe-back transition composites
+   page snapshots, and any seam between them shows the document canvas — unset, that's
+   a white edge flashing at the left while the gesture settles. With html itself on the
+   theme background the seam is invisible. (Tokens live on :root, so var() resolves.) */
+html { background: var(--bg); }
 /* height: dvh tracks the *dynamic* viewport so iOS Safari's collapsing address bar
    doesn't cut off the bottom of the app (100vh there counts the full-chrome height).
    The 100vh line is the fallback for engines without dvh. */

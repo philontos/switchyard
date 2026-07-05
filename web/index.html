@@ -4,10 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Switchyard</title>
+<!-- Browser-chrome / edge-strip color (iOS swipe transitions, address bar). Kept in
+     sync with the active theme's --bg by the no-flash script below + theme.js. -->
+<meta name="theme-color" content="#1a1613" />
 <!-- No-flash theme init: set data-theme from storage BEFORE the stylesheet
      applies, so the first paint is already light/dark with no flicker. Default
      is dark (existing users unchanged). theme.js re-derives the same value. -->
-<script>try{var _t=localStorage.getItem("theme");document.documentElement.dataset.theme=_t==="light"?"light":"dark";}catch(e){document.documentElement.dataset.theme="dark";}</script>
+<script>try{var _t=localStorage.getItem("theme");document.documentElement.dataset.theme=_t==="light"?"light":"dark";if(_t==="light"){var _m=document.querySelector('meta[name="theme-color"]');if(_m)_m.content="#f5f0e8";}}catch(e){document.documentElement.dataset.theme="dark";}</script>
 <link rel="stylesheet" href="/vendor/xterm.css" />
 <link rel="stylesheet" href="/css/app.css" />
 </head>
