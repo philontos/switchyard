@@ -12,6 +12,23 @@ import { Selects } from "../core/select.js";
 const LS_KEY = "tdsp.providerId";   // remember the last-picked backend across opens
 let providers = [];                  // cached list (id-DESC, from the server)
 let validated = false;               // green light: the current panel inputs passed the check
+let targetHostId = null;             // null = this controller; number = remote node
+
+function endpoint(path = "") {
+  return targetHostId == null ? `/api/providers${path}` : `/api/nodes/${targetHostId}/providers${path}`;
+}
+
+function storageKey() {
+  return targetHostId == null ? LS_KEY : `${LS_KEY}.node.${targetHostId}`;
+}
+
+export function setProviderTarget(hostId) {
+  targetHostId = hostId == null ? null : Number(hostId);
+  providers = [];
+  setValidated(false);
+  paintSelect();
+  renderList();
+}
 
 // ---- the per-task picker (custom select mounted on #t-provider) ----
 
@@ -21,7 +38,7 @@ function paintSelect() {
   const sel = Selects["t-provider"];
   if (!sel) return;
   const opts = [{ value: 0, label: t("provider.default") }, ...providers.map((p) => ({ value: p.id, label: p.name }))];
-  const saved = Number(localStorage.getItem(LS_KEY) || 0);
+  const saved = Number(localStorage.getItem(storageKey()) || 0);
   const want = opts.some((o) => o.value === saved) ? saved : 0;
   sel.setOptions(opts, want);
 }
@@ -34,7 +51,7 @@ export function selectedProviderId() {
 
 // onChange for the picker: remember the pick so the next dispatch defaults to it
 export function onProviderChange(v) {
-  localStorage.setItem(LS_KEY, String(Number(v) || 0));
+  localStorage.setItem(storageKey(), String(Number(v) || 0));
 }
 
 // repaint from the cached list (no refetch) — used on a language switch so the
@@ -92,7 +109,7 @@ export async function testProvider() {
   setStatus(t("provider.testing"), "testing");
   $("pv-test").disabled = true;
   try {
-    await api("/api/providers/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(panelBody()) });
+    await api(endpoint("/test"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(panelBody()) });
     setStatus(t("provider.reachable"), "ok");
     setValidated(true);
   } catch (e) {
@@ -106,7 +123,7 @@ export async function testProvider() {
 export async function addProvider() {
   if (!validated) return;   // the button is disabled, but keep the invariant explicit
   try {
-    await api("/api/providers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(panelBody()) });
+    await api(endpoint(), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(panelBody()) });
     await refreshProviders();
     const newest = providers[0];   // id-DESC → the one we just added
     if (newest) { Selects["t-provider"].set(newest.id); onProviderChange(newest.id); }
@@ -120,14 +137,14 @@ export async function addProvider() {
 
 export async function delProvider(id) {
   try {
-    await api(`/api/providers/${id}`, { method: "DELETE" });
+    await api(endpoint(`/${id}`), { method: "DELETE" });
     await refreshProviders();
   } catch (e) { toast(e.message, "error"); }
 }
 
 // fetch + repaint both the picker and the manage list
 export async function refreshProviders() {
-  providers = await api("/api/providers").catch(() => []);
+  providers = await api(endpoint()).catch(() => []);
   paintSelect();
   renderList();
 }

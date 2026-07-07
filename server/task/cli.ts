@@ -3,7 +3,7 @@
 // both the HTTP server (tdsp serve) and the one-shot CLI verbs. A node is the
 // sole authority for its own tasks; these read/return that local truth.
 import type Database from "better-sqlite3";
-import type { Task } from "../core/db.js";
+import type { Provider, Task } from "../core/db.js";
 import type { CreateLocalOpts, CreateLocalResult, CreateRepoResult, StopResult } from "./createtask.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
@@ -22,6 +22,17 @@ export interface CreateRepoSpec {
   // the same agent A picked, using the same createRepoTask on its own machine.
   agent?: string;
   model?: string | null;
+  // Target-node local provider id. The controller never interprets this for a
+  // remote node; it only relays the id selected from that node's provider list.
+  provider_id?: number | null;
+}
+
+export interface ProviderInput {
+  name?: string | null;
+  base_url?: string | null;
+  auth_token?: string | null;
+  model?: string | null;
+  small_fast_model?: string | null;
 }
 
 type DB = Database.Database;
@@ -156,6 +167,10 @@ export interface CliDeps {
   createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
   createRepo: (spec: CreateRepoSpec) => Promise<CreateRepoResult>;
   stop: (id: number) => Promise<StopResult>;
+  providersList: () => Provider[];
+  providersTest: (body: ProviderInput) => Promise<{ ok: true } | { ok: false; error: string }>;
+  providersCreate: (body: ProviderInput) => Promise<{ ok: true; id: number } | { ok: false; error: string }>;
+  providersDelete: (id: number) => Promise<{ ok: true }>;
   // set up THIS machine's global tdsp from its clone (symlink src + wrapper)
   install: () => { src: string; binPath: string; localBin: string; clone: string };
   // pull the machine's install (the clone behind ~/.task-dispatcher/src) to the
@@ -230,6 +245,43 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(r));
       return r.ok ? 0 : 1;
     }
+    case "providers-list":
+      deps.out(JSON.stringify({ ok: true, providers: deps.providersList() }));
+      return 0;
+    case "providers-test": {
+      let body: ProviderInput;
+      try {
+        body = JSON.parse(Buffer.from(argv[1] ?? "", "base64").toString("utf8")) as ProviderInput;
+      } catch {
+        deps.out(JSON.stringify({ ok: false, error: "invalid provider spec" }));
+        return 1;
+      }
+      const r = await deps.providersTest(body);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
+    case "providers-create": {
+      let body: ProviderInput;
+      try {
+        body = JSON.parse(Buffer.from(argv[1] ?? "", "base64").toString("utf8")) as ProviderInput;
+      } catch {
+        deps.out(JSON.stringify({ ok: false, error: "invalid provider spec" }));
+        return 1;
+      }
+      const r = await deps.providersCreate(body);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
+    case "providers-delete": {
+      const id = Number(argv[1]);
+      if (!Number.isInteger(id)) {
+        deps.out(JSON.stringify({ ok: false, error: "invalid provider id" }));
+        return 1;
+      }
+      const r = await deps.providersDelete(id);
+      deps.out(JSON.stringify(r));
+      return 0;
+    }
     case "stop": {
       const id = Number(argv[1]);
       if (!Number.isInteger(id)) {
@@ -271,7 +323,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|branches|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|branches|providers-list|providers-test|providers-create|providers-delete|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

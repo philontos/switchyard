@@ -108,9 +108,8 @@
 <div id="task-modal" class="modal-bg" style="display:none">
   <div class="modal">
     <h2 style="margin-bottom:12px"><span data-i18n="task.modalTitle"></span> · <span id="tm-repo" style="color:#e09a7d"></span></h2>
-    <!-- agent axis: which coding-agent CLI runs the task. Only shown for a
-         local-node dispatch (codex is local-only in this version); hidden +
-         forced back to claude for a remote repo, matching the provider picker. -->
+    <!-- agent axis: which coding-agent CLI runs the task. The selected node runs
+         the same agent locally, whether this is the controller or a remote node. -->
     <div id="t-agent-sec">
       <label class="tm-lbl" data-i18n="task.agentLabel"></label>
       <div id="t-agent-seg" class="agent-seg">
