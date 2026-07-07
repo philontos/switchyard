@@ -96,6 +96,7 @@ function fakeDeps(db: Database.Database) {
   const repoCalls: any[] = [];
   const stopCalls: number[] = [];
   const branchCalls: string[] = [];
+  const providerCalls: any[] = [];
   return {
     deps: {
       db,
@@ -122,6 +123,19 @@ function fakeDeps(db: Database.Database) {
         stopCalls.push(id);
         return { ok: true as const };
       },
+      providersList: () => [{ id: 2, name: "GLM", base_url: "https://open.bigmodel.cn/api/anthropic", auth_token: "tok", model: "glm-5.2", small_fast_model: null, created_at: "now" }],
+      providersTest: async (body: any) => {
+        providerCalls.push(["test", body]);
+        return { ok: true as const };
+      },
+      providersCreate: async (body: any) => {
+        providerCalls.push(["create", body]);
+        return { ok: true as const, id: 3 };
+      },
+      providersDelete: async (id: number) => {
+        providerCalls.push(["delete", id]);
+        return { ok: true as const };
+      },
       install: () => ({ src: "/h/.task-dispatcher/src", binPath: "/h/.task-dispatcher/bin/tdsp", localBin: "/h/.local/bin/tdsp", clone: "/h/clone" }),
       update: async () => ({ ok: true as const, clone: "/h/clone", head: "abc1234 feat: latest" }),
       branches: async (mirror: string) => {
@@ -133,6 +147,7 @@ function fakeDeps(db: Database.Database) {
     repoCalls,
     stopCalls,
     branchCalls,
+    providerCalls,
     get out() {
       return out;
     },
@@ -224,6 +239,28 @@ test("runCli create round-trips the agent + model in the spec (symmetric codex d
   assert.equal(code, 0);
   assert.equal(f.repoCalls[0].agent, "codex", "the node is handed the chosen agent");
   assert.equal(f.repoCalls[0].model, "gpt-5.4");
+});
+
+test("runCli create round-trips provider_id in the spec (node-local provider)", async () => {
+  const f = fakeDeps(seed());
+  const spec = { mirror: "/d/mirrors/5-sw.git", name: "sw", git_url: "g", base: "main", title: "fix", prompt: "go", skills: [], agent: "claude", provider_id: 9 };
+  const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
+  const code = await runCli(["create", b64], f.deps);
+  assert.equal(code, 0);
+  assert.equal(f.repoCalls[0].provider_id, 9);
+});
+
+test("runCli provider verbs manage this node's provider catalog", async () => {
+  const f = fakeDeps(seed());
+  assert.equal(await runCli(["providers-list"], f.deps), 0);
+  assert.match(f.out, /GLM/);
+
+  const body = { name: "GLM", base_url: "https://open.bigmodel.cn/api/anthropic", auth_token: "tok", model: "glm-5.2" };
+  const b64 = Buffer.from(JSON.stringify(body)).toString("base64");
+  assert.equal(await runCli(["providers-test", b64], f.deps), 0);
+  assert.equal(await runCli(["providers-create", b64], f.deps), 0);
+  assert.equal(await runCli(["providers-delete", "3"], f.deps), 0);
+  assert.deepEqual(f.providerCalls.map((c) => c[0]), ["test", "create", "delete"]);
 });
 
 test("runCli create exits 1 and reports an error when the spec is not valid base64 JSON", async () => {

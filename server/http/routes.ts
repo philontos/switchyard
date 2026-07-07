@@ -31,8 +31,9 @@ import { NS, DATA_DIR, ROOT } from "../core/paths.js";
 import { tr, langFromReq } from "../core/i18n.js";
 import {
   getRepo, getTask, getHost, getProvider, offline, taskRunner, taskHost,
-  syncTaskManifest, str, providerEnv, checkProvider, slug, SESSION_RE, SSH_BIN,
+  syncTaskManifest, providerEnv, checkProvider, slug, SESSION_RE, SSH_BIN,
 } from "./context.js";
+import { insertCheckedProvider, listProviders } from "../provider/providers.js";
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -264,12 +265,10 @@ app.post("/api/tasks", async (req, res) => {
   // local-node feature in this version, so a codex dispatch only travels the
   // in-process path below (never the remote-node branch).
   const agentKind = asAgentKind(agent);
-  // Alternate model backend (optional, node-local, claude-only). A provider is
-  // THIS node's own config and only ever applies to tasks THIS node runs on
-  // itself — never pushed across the wire, and never for codex (codex switches
-  // models via -m, not the ANTHROPIC_* provider env). An unknown id falls back to
-  // the default login rather than failing.
-  const provider = agentKind === "claude" && host?.kind === "local" && provider_id
+  // Alternate model backend (optional, claude-only). For local dispatch the id is
+  // resolved here; for remote dispatch it is already an id from the target node's
+  // provider catalog and is only relayed in the tdsp create spec.
+  const provider = agentKind === "claude" && (!host || host.kind === "local") && provider_id
     ? (getProvider.get(provider_id) as Provider | undefined)
     : undefined;
   const extraSkills: string[] = Array.isArray(req.body?.extra_skills) ? req.body.extra_skills.map(String) : [];
@@ -278,13 +277,22 @@ app.post("/api/tasks", async (req, res) => {
   // let IT create the task (worktree + session + manifest) on itself. This node
   // does NOT record the task; it surfaces via /api/fleet. A remote that isn't
   // bootstrapped yet falls through to the legacy in-process path below.
-  // The agent (claude | codex) DOES travel in the spec — it's a task property, so
-  // the node runs the same agent A picked, fully symmetric with a local dispatch.
-  // The model backend (provider) does NOT: it's this controller's own node-local
-  // config (secrets), never pushed across the wire — the target runs on its own
-  // login (so `provider` above is already undefined for any non-local dispatch).
+  // The agent and provider_id both travel as target-node task properties. The
+  // provider secret itself does not cross here: the id refers to a row already
+  // stored on the node that will run the task.
   if (host && host.kind !== "local" && host.tdsp_bin) {
-    const spec = { mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url, base: base_branch, title, prompt: prompt || null, skills: extraSkills, agent: agentKind, model: agent_model ?? null };
+    const spec = {
+      mirror: repo.mirror_path,
+      name: repo.name,
+      git_url: repo.git_url,
+      base: base_branch,
+      title,
+      prompt: prompt || null,
+      skills: extraSkills,
+      agent: agentKind,
+      model: agent_model ?? null,
+      provider_id: agentKind === "claude" && provider_id ? Number(provider_id) : null,
+    };
     const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
     const out = await runTdsp(host, ["create", b64]);
     const result = parseNodeResult(out.stdout);
@@ -588,12 +596,22 @@ app.post("/api/nodes/:hostId/tasks", async (req, res) => {
   if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
   if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
-  const { mirror, name, git_url, base, title, prompt, agent, agent_model } = req.body ?? {};
+  const { mirror, name, git_url, base, title, prompt, agent, agent_model, provider_id } = req.body ?? {};
   if (!mirror || !base || !title) return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
   const skills = Array.isArray(req.body?.skills) ? req.body.skills.map(String) : [];
-  // agent travels with the task (the node runs claude or codex the same way this
-  // box would); the node owns its own login, so no provider crosses the wire.
-  const spec = { mirror, name: name || "", git_url: git_url || "", base, title, prompt: prompt || null, skills, agent: asAgentKind(agent), model: agent_model ?? null };
+  const agentKind = asAgentKind(agent);
+  const spec = {
+    mirror,
+    name: name || "",
+    git_url: git_url || "",
+    base,
+    title,
+    prompt: prompt || null,
+    skills,
+    agent: agentKind,
+    model: agent_model ?? null,
+    provider_id: agentKind === "claude" && provider_id ? Number(provider_id) : null,
+  };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const out = await runTdsp(host, ["create", b64]);
   const result = parseNodeResult(out.stdout);
@@ -601,6 +619,61 @@ app.post("/api/nodes/:hostId/tasks", async (req, res) => {
   if (result.ok) return res.json({ id: result.id, session: result.session, work_branch: result.workBranch, node: host.id });
   if (result.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: (result.missing || []).join(", ") }) });
   return res.status(500).json({ error: result.message || result.error });
+});
+
+function b64Json(body: unknown) {
+  return Buffer.from(JSON.stringify(body ?? {})).toString("base64");
+}
+
+async function runNodeJson(host: Host, args: string[]) {
+  const out = await runTdsp(host, args);
+  return parseNodeResult(out.stdout);
+}
+
+// Provider catalog on a remote node. The controller only relays these calls; the
+// provider rows and tokens live in the same DB as the tasks that will use them.
+app.get("/api/nodes/:hostId/providers", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const result = await runNodeJson(host, ["providers-list"]);
+  if (!result || !result.ok) return res.status(502).json({ error: result?.error || "node providers failed" });
+  res.json(result.providers ?? []);
+});
+
+app.post("/api/nodes/:hostId/providers/test", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const result = await runNodeJson(host, ["providers-test", b64Json(req.body ?? {})]);
+  if (result?.ok) return res.json({ ok: true });
+  res.status(400).json({ error: result?.error || "node provider test failed" });
+});
+
+app.post("/api/nodes/:hostId/providers", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const result = await runNodeJson(host, ["providers-create", b64Json(req.body ?? {})]);
+  if (result?.ok) return res.json({ id: result.id });
+  res.status(400).json({ error: result?.error || "node provider save failed" });
+});
+
+app.delete("/api/nodes/:hostId/providers/:id", async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+  const result = await runNodeJson(host, ["providers-delete", String(req.params.id)]);
+  if (result?.ok) return res.json({ ok: true });
+  res.status(400).json({ error: result?.error || "node provider delete failed" });
 });
 
 // Stop a task that lives ON a remote node (a fleet task this controller doesn't
@@ -768,7 +841,7 @@ app.delete("/api/hosts/:id", (req, res) => {
 
 // ---------- providers (alternate model backends for claude) ----------
 app.get("/api/providers", (_req, res) => {
-  res.json(db.prepare("SELECT * FROM providers ORDER BY id DESC").all());
+  res.json(listProviders(db));
 });
 
 // format + reachability check WITHOUT saving — drives the web's green/red light.
@@ -780,16 +853,11 @@ app.post("/api/providers/test", async (req, res) => {
 });
 
 app.post("/api/providers", async (req, res) => {
-  const { name } = req.body ?? {};
-  if (!name || !String(name).trim()) return res.status(400).json({ error: "name required" });
   // re-run the same gate on save, so only a reachable provider can ever land in
   // the DB even if a client skips the test button.
-  const chk = await checkProvider(req.body ?? {});
-  if (!chk.ok) return res.status(400).json({ error: chk.error });
-  const info = db.prepare(
-    "INSERT INTO providers (name, base_url, auth_token, model, small_fast_model) VALUES (?,?,?,?,?)"
-  ).run(String(name).trim(), str(req.body?.base_url), str(req.body?.auth_token), str(req.body?.model), str(req.body?.small_fast_model));
-  res.json({ id: Number(info.lastInsertRowid) });
+  const r = await insertCheckedProvider(db, req.body ?? {});
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json({ id: r.id });
 });
 
 app.delete("/api/providers/:id", (req, res) => {

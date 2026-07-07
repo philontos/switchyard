@@ -19,6 +19,7 @@ import { asAgentKind } from "./session/agent.js";
 import { listBranches } from "./repo/git.js";
 import { buildRepoTaskEnv, repoFindOrCreate } from "./repo/repoenv.js";
 import { writeTaskManifest } from "./task/taskmanifest.js";
+import { checkProvider, insertCheckedProvider, listProviders, providerEnv } from "./provider/providers.js";
 
 // Ensure child processes (tmux/git/claude) find Homebrew binaries regardless of
 // how tdsp was launched — a bare non-interactive ssh PATH otherwise can't resolve
@@ -119,8 +120,9 @@ process.exitCode = await runCli(process.argv.slice(2), {
   // a node dispatching a repo task ON ITSELF: register the repo locally, then run
   // the shared orchestration with the LOCAL runner. As the owner, it writes the
   // manifest to its own data dir (no ownership gate needed).
-  createRepo: (spec) =>
-    createRepoTask(
+  createRepo: (spec) => {
+    const provider = spec.provider_id ? db.prepare("SELECT * FROM providers WHERE id=?").get(spec.provider_id) as any : undefined;
+    return createRepoTask(
       buildRepoTaskEnv({
         db,
         ns: NS,
@@ -128,8 +130,18 @@ process.exitCode = await runCli(process.argv.slice(2), {
         writeManifest: (id) => writeTaskManifest(DATA_DIR, db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task),
       }),
       repoFindOrCreate(db, { mirror: spec.mirror, name: spec.name, git_url: spec.git_url }),
-      { baseBranch: spec.base, title: spec.title, prompt: spec.prompt, extraSkills: spec.skills, agent: asAgentKind(spec.agent), model: spec.model ?? null },
-    ),
+      {
+        baseBranch: spec.base,
+        title: spec.title,
+        prompt: spec.prompt,
+        extraSkills: spec.skills,
+        providerId: provider ? spec.provider_id ?? null : null,
+        env: providerEnv(provider),
+        agent: asAgentKind(spec.agent),
+        model: spec.model ?? null,
+      },
+    );
+  },
   // stop one of THIS node's tasks: kill its session, mark cleaned, re-manifest.
   stop: (id) =>
     stopTask(
@@ -173,5 +185,13 @@ process.exitCode = await runCli(process.argv.slice(2), {
     } catch (e: any) {
       return { ok: false, error: String(e?.message || e) };
     }
+  },
+  providersList: () => listProviders(db),
+  providersTest: (body) => checkProvider(body),
+  providersCreate: (body) => insertCheckedProvider(db, body),
+  providersDelete: async (id) => {
+    db.prepare("UPDATE tasks SET provider_id=NULL WHERE provider_id=?").run(id);
+    db.prepare("DELETE FROM providers WHERE id=?").run(id);
+    return { ok: true as const };
   },
 });

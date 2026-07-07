@@ -10,7 +10,7 @@ import { state } from "../core/state.js";
 import { openPty, disposePty, prunePanes, setClaudeSession,
          openPending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
 import { rerender, expandRepo, loadFleet, connectNode } from "./hosts.js";
-import { refreshProviders, selectedProviderId } from "./providers.js";
+import { refreshProviders, selectedProviderId, setProviderTarget } from "./providers.js";
 // One-way: mobile.js never imports tasks.js (its sheet-close callback is injected by
 // main.js), so this edge is acyclic. sheetOpened/sheetCancelled give the dispatch
 // sheet its own mobile history entry — see the navEntry block in mobile.js for why.
@@ -18,13 +18,12 @@ import { sheetOpened, sheetCancelled } from "./mobile.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 // the dispatch modal's agent pick (Claude Code | Codex), remembered across opens.
-// Codex is local-only, so it's forced back to claude for a remote repo.
 const LS_AGENT = "tdsp.agent";
 let selectedAgent = "claude";
-// whether the modal's current repo runs on THIS controller's local node. The
-// provider picker is node-local (config lives here) so it shows only when true;
-// the agent picker travels with the task, so it shows regardless.
-let modalOnLocalNode = true;
+// whether the modal's current target node has a provider catalog reachable from
+// this UI. Providers belong to the node that will run the task: local catalog for
+// local tasks, remote catalog through tdsp for bootstrapped remote nodes.
+let modalProviderAvailable = true;
 // when set, the dispatch modal is in "node mode": dispatch to a remote node's OWN
 // repo (surfaced via the fleet) instead of a controller-registered repo.
 let nodeTask = null;   // { hostId, repo } or null
@@ -95,9 +94,8 @@ export function selectAgent(kind) {
 // Reflect the selected agent onto the modal:
 //   codex  → provider picker hidden (codex never sends one), codex model + the
 //            full-access note shown, skills box greyed out (no skill mechanism)
-//   claude → the reverse; the provider picker is restored only on a local-node
-//            dispatch (it's node-local config — the agent picker itself shows for
-//            remote repos too, but the provider panel stays hidden there).
+//   claude → the reverse; the provider picker is restored when the current
+//            target node has a reachable provider catalog.
 function applyAgentUI() {
   const codex = selectedAgent === "codex";
   $("t-codex-sec").style.display = codex ? "" : "none";
@@ -106,7 +104,7 @@ function applyAgentUI() {
   if (codex) {
     $("t-provider-sec").style.display = "none";
     $("prov-panel").style.display = "none";
-  } else if (modalOnLocalNode) {
+  } else if (modalProviderAvailable) {
     $("t-provider-sec").style.display = "";
   }
 }
@@ -118,15 +116,13 @@ export function openTaskModal(repoId) {
   $("tm-repo").textContent = repo.name;
   $("t-title").value = ""; $("t-prompt").value = "";   // fresh form each open
   $("prov-panel").style.display = "none";              // collapse the manage panel
-  // The model-backend picker is node-local: it only applies when THIS node runs
-  // the task on itself (a repo on the local machine). A repo that lives on a
-  // remote node is configured on that node — hide the picker here, matching the
-  // backend, which ignores provider for any non-local dispatch.
-  const onLocalNode = state.hostsById[repo.host_id]?.kind === "local";
-  modalOnLocalNode = onLocalNode;
-  $("t-provider-sec").style.display = onLocalNode ? "" : "none";
+  const host = state.hostsById[repo.host_id];
+  const providerTarget = host?.kind === "local" ? null : host?.tdsp_bin ? host.id : undefined;
+  modalProviderAvailable = providerTarget !== undefined;
+  setProviderTarget(providerTarget ?? null);
+  $("t-provider-sec").style.display = modalProviderAvailable ? "" : "none";
   // the agent picker shows for local AND remote repos — agent is a task property
-  // that travels to whichever node runs it (unlike the node-local provider above).
+  // that travels to whichever node runs it.
   // selectAgent() runs applyAgentUI, so it must come AFTER the provider-sec base
   // visibility. The last-picked agent is restored either way.
   $("t-agent-sec").style.display = "";
@@ -136,7 +132,7 @@ export function openTaskModal(repoId) {
   $("task-modal").style.display = "flex";
   loadBranches();
   loadDispatchOptions();
-  if (onLocalNode) refreshProviders();                 // fill the backend picker (keeps the last pick)
+  if (modalProviderAvailable) refreshProviders();      // fill the target node's backend picker
   setTimeout(() => $("t-title").focus(), 30);
 }
 // Pure DOM close, shared by every path. Dispatch calls THIS (the sheet's history
@@ -165,8 +161,9 @@ export function openNodeTaskModal(hostId, repoId) {
   $("tm-repo").textContent = `${repo.name} @ ${hostName}`;
   $("t-title").value = ""; $("t-prompt").value = "";
   $("prov-panel").style.display = "none";
-  modalOnLocalNode = false;                      // remote node owns its login — no provider picker
-  $("t-provider-sec").style.display = "none";
+  modalProviderAvailable = true;
+  setProviderTarget(hostId);
+  $("t-provider-sec").style.display = "";
   // agent still travels to the node, so claude/codex is choosable here too.
   $("t-agent-sec").style.display = "";
   $("t-codex-model").value = "";
@@ -175,6 +172,7 @@ export function openNodeTaskModal(hostId, repoId) {
   $("task-modal").style.display = "flex";
   loadNodeBranches(hostId, repo);
   loadDispatchOptions();
+  refreshProviders();
   setTimeout(() => $("t-title").focus(), 30);
 }
 
@@ -278,12 +276,14 @@ async function loadBranches() {
 async function addNodeTask() {
   const { hostId, repo } = nodeTask;
   const codex = selectedAgent === "codex";
+  const providerShown = $("t-provider-sec").style.display !== "none";
   const body = {
     mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url,
     base: Selects["t-base"].value, title: $("t-title").value.trim(),
     prompt: $("t-prompt").value,
     // codex carries a model and no skills; claude keeps its skill selection
     skills: codex ? [] : selectedExtraSkills(),
+    provider_id: providerShown ? selectedProviderId() : null,
     agent: selectedAgent,
     model: codex ? ($("t-codex-model").value.trim() || null) : null,
   };
@@ -313,8 +313,8 @@ async function addNodeTask() {
 
 export async function addTask() {
   if (nodeTask) return addNodeTask();
-  // provider only travels when the picker is shown (local-node dispatch); a hidden
-  // picker (remote repo) sends null, matching the backend's local-only gate.
+  // provider_id belongs to the target node's own provider catalog. A hidden picker
+  // sends null, which means the target node's default Claude login.
   const providerShown = $("t-provider-sec").style.display !== "none";
   const codex = selectedAgent === "codex";
   const body = {
