@@ -76,8 +76,7 @@ export async function startSession(
   const launch = agentArgv(agent, { prompt, model: opts?.model, resume: opts?.continue, addDirs });
   const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...pre, ...launch];
   await tmux(runner, cmd);
-  // keep the pane around if claude exits so the user can read the result
-  await tmux(runner, ["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});
+  await ensureSessionOptions(runner, session);
 }
 
 /**
@@ -88,8 +87,20 @@ export async function startSession(
  */
 export async function startShellSession(runner: Runner, session: string, cwd: string) {
   await tmux(runner, ["new-session", "-d", "-s", session, "-c", cwd]);
-  // keep the pane around if the shell exits so the user can read the result
+  await ensureSessionOptions(runner, session);
+}
+
+/**
+ * Normalize the tmux options Switchyard relies on for its web terminal. User/global
+ * tmux config differs across machines; in particular `mouse off` makes trackpad
+ * wheel gestures fall through as Up/Down keys in Codex, which flips prompt history
+ * instead of scrolling. Set these on every dispatcher-owned session and again when
+ * attaching an older session.
+ */
+export async function ensureSessionOptions(runner: Runner, session: string) {
+  // keep the pane around if the agent/shell exits so the user can read the result
   await tmux(runner, ["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});
+  await tmux(runner, ["set-option", "-t", session, "mouse", "on"]).catch(() => {});
 }
 
 export async function hasSession(runner: Runner, session: string): Promise<boolean> {

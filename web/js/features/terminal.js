@@ -54,7 +54,7 @@ export function reconnectActive() {
 // measured, so its column count is stale until we re-fit against the now-visible box.
 // Entering 实时 always lands on the newest output (the bottom is where prompts sit);
 // a scrollback position left over from a previous visit must not stick. Pure client-
-// side view move — no bytes reach the session, so it's safe under any running app.
+// side view move; no bytes reach the session, so it's safe under any running app.
 export function fitActiveNow() {
   const p = activeId != null ? panes.get(activeId) : null;
   if (p) { try { p.fit.fit(); sendResize(p); p.term.scrollToBottom(); p.term.refresh(0, p.term.rows - 1); } catch {} }
@@ -167,16 +167,16 @@ function sendResize(p) {
 //
 // 实时 is the INTERACTION surface — 阅读 is where you read — so the bridge is tuned
 // for taps first, scrolling second: a wide direction-lock slop keeps a jittery tap a
-// tap (it reaches xterm as a tap, e.g. onto a claude prompt) instead of becoming a
-// one-row scroll; drag maps to scroll at half speed, deliberate rather than flicky;
-// and lift-off stops the motion dead — no inertia, so the screen never coasts past
-// the prompt you switched over to answer.
+// tap (it reaches xterm as a tap, e.g. onto a prompt) instead of becoming a one-row
+// scroll. Once locked, drag maps 1:1 into wheel pixels. Halving the delta made
+// Codex's live screen feel sticky because many small touch moves never crossed
+// xterm/tmux's row threshold, so visible movement arrived in uneven bursts.
 export function mountTouchScroll(pane) {
   const sink = pane.querySelector(".xterm-screen") || pane;
   const emit = (dy) => sink.dispatchEvent(new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }));
   const EDGE = 28;                           // px: bezel-origin touches belong to the browser's nav swipe
   const LOCK = 12;                           // px of travel before a mid-screen touch direction-locks
-  const DAMP = 0.5;                          // drag→scroll ratio: deliberate, tap-first feel
+  const DAMP = 1.0;                          // drag->wheel ratio: close to native scroll distance
   // gesture ownership: 0 idle · 1 undecided · 2 ours (vertical scroll) · 3 browser's
   let mode = 0;
   let startX = 0, startY = 0, lastY = 0;
