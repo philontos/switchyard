@@ -11,13 +11,13 @@ import { parsePreviewHost, handlePreviewUpgrade } from "../preview/preview.js";
 import { resolvePreviewUpstream } from "./preview.js";
 import { db, Task, Host } from "../core/db.js";
 import { runnerFor, localRunner, type Runner } from "../fleet/runner.js";
-import { cancelCopyMode, pasteSubmit } from "../session/tmux.js";
+import { cancelCopyMode, ensureSessionOptions, pasteSubmit } from "../session/tmux.js";
 import { tr, langFromQuery } from "../core/i18n.js";
 import { taskHost, getHost, SSH_BIN, MOSH_BIN, TMUX_BIN, SESSION_RE } from "./context.js";
 
 const wss = new WebSocketServer({ noServer: true });
 
-wss.on("connection", (ws, req) => {
+wss.on("connection", async (ws, req) => {
   const url = new URL(req.url || "", "http://localhost");
   const session = url.searchParams.get("session");
   const lang = langFromQuery(url.searchParams.get("lang"));
@@ -59,9 +59,9 @@ wss.on("connection", (ws, req) => {
     return;
   }
 
-  // best-effort, fire-and-forget: nudge the pane out of copy/scroll mode so this
-  // attach shows the live prompt. NOT awaited — the listeners below must register
-  // synchronously, before the client's first resize arrives, or it gets dropped.
+  // Normalize this session before attaching, then nudge the pane out of copy/scroll
+  // mode so this client lands on the live prompt.
+  await ensureSessionOptions(cancelRunner, cancelSession);
   if (cancelRunner) cancelCopyMode(cancelRunner, cancelSession);
 
   term.onData((data) => {
@@ -71,7 +71,7 @@ wss.on("connection", (ws, req) => {
     if (ws.readyState === ws.OPEN) ws.close();
   });
 
-  ws.on("message", (raw) => {
+  ws.on("message", async (raw) => {
     const msg = raw.toString();
     if (msg.startsWith("\x00resize:")) {
       const [, dims] = msg.split(":");

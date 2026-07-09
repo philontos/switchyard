@@ -162,15 +162,20 @@ async function locateCodex(runner: Runner, home: string, cwd: string, taskId: nu
   const cached = codexPathCache.get(taskId);
   if (cached && (await runner.exists(cached).catch(() => false))) return cached;
   const dir = `${home}/.codex/sessions`;
-  const needle = `"cwd":"${cwd}"`;
-  // newest-first (the ISO date lives in the path), stop at the first whose head matches.
+  const needle = `"cwd"[[:space:]]*:[[:space:]]*${ere(JSON.stringify(cwd))}`;
+  // newest-first (the ISO date lives in the path), stop at the first rollout whose
+  // session_meta line names this worktree. Use an ERE instead of a literal
+  // `"cwd":"..."` substring because Codex JSONL formatting can include spaces after
+  // colons; missing that file leaves mobile stuck in the live xterm instead of the
+  // native-scrolling reading view.
   const cmd = `find ${sh(dir)} -name 'rollout-*.jsonl' 2>/dev/null | sort -r | while IFS= read -r f; do `
-    + `head -c 4096 "$f" | grep -qF ${sh(needle)} && { printf '%s' "$f"; break; }; done`;
+    + `head -c 4096 "$f" | grep -Eq ${sh(needle)} && { printf '%s' "$f"; break; }; done`;
   const found = (await runner.exec("sh", ["-c", cmd]).catch(() => "")).trim();
   if (found) codexPathCache.set(taskId, found);
   return found || null;
 }
 const sh = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+const ere = (s: string) => s.replace(/[.[\]{}()*+?^$|\\]/g, "\\$&");
 
 // ---- tail ----
 
