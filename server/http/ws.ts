@@ -59,11 +59,10 @@ wss.on("connection", async (ws, req) => {
     return;
   }
 
-  // Normalize this session before attaching, then nudge the pane out of copy/scroll
-  // mode so this client lands on the live prompt.
-  await ensureSessionOptions(cancelRunner, cancelSession);
-  if (cancelRunner) cancelCopyMode(cancelRunner, cancelSession);
-
+  // Register every relay listener synchronously, before the first await below.
+  // The browser sends its initial \0resize as soon as the WebSocket opens; if we
+  // await tmux setup first, that message can arrive with no listener and the PTY
+  // stays at its 120x32 bootstrap size until the browser is resized again.
   term.onData((data) => {
     if (ws.readyState === ws.OPEN) ws.send(data);
   });
@@ -71,7 +70,7 @@ wss.on("connection", async (ws, req) => {
     if (ws.readyState === ws.OPEN) ws.close();
   });
 
-  ws.on("message", async (raw) => {
+  ws.on("message", (raw) => {
     const msg = raw.toString();
     if (msg.startsWith("\x00resize:")) {
       const [, dims] = msg.split(":");
@@ -93,6 +92,11 @@ wss.on("connection", async (ws, req) => {
     // reliable here; killing the attach client process is enough.
     term.kill();
   });
+
+  // Normalize the session after the relay is live, then nudge the pane out of
+  // copy/scroll mode so this client lands on the current prompt.
+  await ensureSessionOptions(cancelRunner, cancelSession);
+  if (cancelRunner) cancelCopyMode(cancelRunner, cancelSession);
 });
 
 export function attachWs(server: Server) {
