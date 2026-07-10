@@ -1,6 +1,10 @@
 import path from "node:path";
 import { Runner } from "../fleet/runner.js";
 
+export function canonicalGitUrl(value: string): string {
+  return String(value || "").trim().replace(/\/+$/, "").replace(/\.git$/i, "");
+}
+
 // Run a git command through the given machine's Runner. The env keeps git from
 // hanging on an interactive SSH/host-key/credential prompt — fail fast instead.
 async function git(runner: Runner, cwd: string | null, args: string[]): Promise<string> {

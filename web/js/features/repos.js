@@ -88,6 +88,7 @@ export function repoGroupHead(r, online, collapsed, tasks = []) {
   return `<div class="grp-head${r.status === "error" ? " err" : ""}" onclick="toggleRepo(${r.id})">
     ${dot}
     <span class="grp-name">${esc(r.name)}</span>
+    <span class="grp-repo-id">#${Number(r.id)}</span>
     ${statusText ? `<span class="grp-status ${r.status === "error" ? "error" : ""}">${esc(statusText)}</span>` : ""}
     ${summary}
     ${r.error ? `<span class="grp-err" title="${esc(r.error)}">!</span>` : ""}
@@ -150,7 +151,8 @@ export async function addRepo() {
     ["r-name","r-url","r-token","r-default"].forEach(i => $(i).value = "");
     setRepoSubmitState(false);
     $("repo-modal").style.display = "none";
-    toast(t("toast.repoRegistered"), "success", 5000);
+    const key = created.existing && !created.retrying ? "toast.repoExists" : "toast.repoRegistered";
+    toast(t(key, { id: created.id }), "success", 5000);
     await loadRepos();
     watchRepoRegistration(created.id);
   } catch (e) {
