@@ -77,7 +77,7 @@ export function connect(id) {
   if (hid != null) state.lastTaskByHost[hid] = id;
   paintSelection();
   openPty(`session=${encodeURIComponent(t.session)}`,
-    `#${t.id} ${t.title}`, "tmux attach -t " + t.session, t.id, t.claude_session || "");
+    `#${t.id} ${t.title}`, "tmux attach -t " + t.session, t.id, t.claude_session || "", t.agent);
 }
 
 // The agent picker (Claude Code | Codex). Persists the last pick so the next

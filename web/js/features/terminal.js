@@ -9,8 +9,9 @@
 // Terminal/FitAddon are the globals from the vendored xterm scripts.
 import { $ } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
+import { createCodexUserMarkerHighlighter } from "./codex-terminal-markers.js";
 
-// taskId -> { id, pane, term, fit, ws, query, title, attach, resizeKey }
+// taskId -> { id, pane, term, fit, ws, query, agent, title, attach, resizeKey }
 const panes = new Map();
 let activeId = null;   // the task whose pane is currently visible (null = none)
 
@@ -210,7 +211,7 @@ export function mountTouchScroll(pane) {
 // Build a fresh terminal pane for a task: its own xterm + FitAddon + copy/paste
 // /keystroke wiring, mounted (hidden) into the #term stack. The socket is opened
 // separately by ensureSocket(); show happens via showPane().
-function createPane(id, query) {
+function createPane(id, query, agent) {
   const pane = document.createElement("div");
   pane.className = "term-pane";
   pane.style.display = "none";
@@ -244,7 +245,7 @@ function createPane(id, query) {
   // instead of navigating the browser to the user's OWN (empty) localhost.
   try { term.registerLinkProvider(localhostLinks(term, id)); } catch {}
 
-  const p = { id, pane, term, fit, ws: null, query, title: "", desc: "", attach: "", claude: "", resizeKey: "" };
+  const p = { id, pane, term, fit, ws: null, query, agent, title: "", desc: "", attach: "", claude: "", resizeKey: "" };
 
   // claude TUI 开了鼠标上报,普通拖拽会被转发给应用; Shift/Option 拖拽走本地选区,松手即复制
   term.element.addEventListener("mouseup", () => {
@@ -287,11 +288,22 @@ function ensureSocket(p) {
   if (p.ws && (p.ws.readyState === 0 || p.ws.readyState === 1)) return;   // CONNECTING/OPEN
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = p.ws = new WebSocket(`${proto}://${location.host}/pty?${p.query}&lang=${I18N.lang}`);
+  // Per-attach state: tmux repaints a fresh terminal on every connection, so
+  // line-position and split-ANSI tracking must start fresh with that repaint.
+  // The transform is used only for a known Codex task; every other PTY remains
+  // byte-for-byte passthrough.
+  const codexMarkers = createCodexUserMarkerHighlighter();
   p.resizeKey = "";       // a new pty needs one initial size even if dimensions match the old socket
   ws.onopen = () => { if (activeId === p.id) { try { p.fit.fit(); } catch {} } sendResize(p); };
-  ws.onmessage = (e) => p.term.write(typeof e.data === "string" ? e.data : "");
+  ws.onmessage = (e) => {
+    const data = typeof e.data === "string" ? e.data : "";
+    p.term.write(p.agent === "codex" ? codexMarkers.push(data) : data);
+  };
   ws.onclose = () => {
-    if (p.ws === ws) p.term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
+    if (p.ws === ws) {
+      if (p.agent === "codex") p.term.write(codexMarkers.flush());
+      p.term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
+    }
   };
 }
 
@@ -551,12 +563,13 @@ function goPreviewPort() {
 // Attach the dock to a task's session: reuse its live pane if we have one (just
 // show it — instant, no reconnect), else build a new pane. Either way refresh the
 // dock bar (title may have changed, e.g. after a rename) and ensure a socket.
-export function openPty(query, title, attach, taskId = null, claude = "") {
+export function openPty(query, title, attach, taskId = null, claude = "", agent = "claude") {
   if (taskId == null) return;
+  const normalizedAgent = agent === "codex" ? "codex" : "claude";
   let p = panes.get(taskId);
-  if (!p) p = createPane(taskId, query);
+  if (!p) p = createPane(taskId, query, normalizedAgent);
   else p.query = query;                  // session normally unchanged; keep it fresh
-  p.title = title; p.attach = attach || ""; p.claude = claude || "";
+  p.agent = normalizedAgent; p.title = title; p.attach = attach || ""; p.claude = claude || "";
   showPane(p);
   ensureSocket(p);
 }
