@@ -403,6 +403,14 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    Put the same visual inset where FitAddon expects it so its cols/rows match the
    pixels xterm can actually paint. Global border-box keeps the padded root inside. */
 .term-pane > .xterm { padding: 6px; }
+/* Codex user-turn markers live above xterm's canvases because tmux keeps the
+   outer terminal in the alternate buffer, where xterm line decorations are not
+   painted. The overlay covers exactly the existing `› ` cells and never handles
+   input, so terminal geometry and interaction remain untouched. */
+.codex-user-marker-layer { position: absolute; inset: 0; z-index: 8; pointer-events: none; overflow: hidden; }
+.codex-user-marker { position: absolute; left: 0; border-radius: 2px;
+  background: color-mix(in srgb, var(--codex-accent) 24%, transparent);
+  box-shadow: inset 3px 0 var(--codex-accent), inset 0 0 0 1px color-mix(in srgb, var(--codex-accent) 62%, transparent); }
 .term-empty { position: absolute; inset: 38px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--faint-2); pointer-events: none; }
 .term-empty.hidden { display: none; }
 .term-empty .te-ic { font-size: 34px; opacity: .6; }

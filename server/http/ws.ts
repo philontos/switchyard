@@ -75,7 +75,13 @@ wss.on("connection", async (ws, req) => {
     if (msg.startsWith("\x00resize:")) {
       const [, dims] = msg.split(":");
       const [cols, rows] = dims.split("x").map(Number);
-      if (cols && rows) term.resize(cols, rows);
+      if (cols && rows) {
+        term.resize(cols, rows);
+        // Binary keeps this backward-compatible: older web clients already
+        // ignore non-string frames, while updated clients use the ACK to avoid
+        // an unnecessary fallback resize/repaint.
+        if (ws.readyState === ws.OPEN) ws.send(Buffer.from(`\x00resized:${cols}x${rows}`));
+      }
       return;
     }
     if (msg.startsWith("\x00submit:")) {
