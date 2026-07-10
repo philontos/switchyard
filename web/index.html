@@ -168,14 +168,27 @@
 <div id="repo-modal" class="modal-bg" style="display:none">
   <div class="modal">
     <h2 style="margin-bottom:10px"><span data-i18n="repo.modalTitle"></span> · <span data-i18n="host.onMachine"></span> <span id="rm-host" style="color:#e09a7d"></span></h2>
-    <input id="r-name" data-i18n-ph="repo.namePh" />
-    <input id="r-url" data-i18n-ph="repo.urlPh" />
-    <input id="r-token" data-i18n-ph="repo.tokenPh" />
-    <input id="r-default" data-i18n-ph="repo.defaultPh" />
+    <label class="repo-field">
+      <span data-i18n="repo.nameLabel"></span>
+      <input id="r-name" data-i18n-ph="repo.namePh" aria-required="true" />
+    </label>
+    <label class="repo-field">
+      <span data-i18n="repo.urlLabel"></span>
+      <input id="r-url" data-i18n-ph="repo.urlPh" aria-required="true" />
+    </label>
+    <label class="repo-field">
+      <span data-i18n="repo.tokenLabel"></span>
+      <input id="r-token" data-i18n-ph="repo.tokenPh" />
+    </label>
+    <label class="repo-field">
+      <span data-i18n="repo.defaultLabel"></span>
+      <input id="r-default" data-i18n-ph="repo.defaultPh" />
+    </label>
     <div class="dlg-actions">
       <button class="sec" data-i18n="dialog.cancel" onclick="closeRepoModal()"></button>
-      <button class="primary" data-i18n="repo.submit" onclick="addRepo()"></button>
+      <button id="r-submit" class="primary" data-i18n="repo.submit" onclick="addRepo()"></button>
     </div>
+    <div id="r-status" class="repo-modal-status" aria-live="polite"></div>
     <div class="hint" style="margin-top:10px" data-i18n="repo.hint"></div>
   </div>
 </div>
