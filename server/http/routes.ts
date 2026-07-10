@@ -21,7 +21,11 @@ import { readTranscript } from "../session/transcript.js";
 import { syncReposManifest } from "../repo/manifest.js";
 import { removeTaskManifest } from "../task/taskmanifest.js";
 import { localRunner, runnerFor, SSH_BASE_ARGS, type Runner } from "../fleet/runner.js";
-import { aggregateNodes } from "../task/cli.js";
+import {
+  aggregateNodes,
+  ARCHIVED_TASK_LIFECYCLE_CAPABILITY,
+  isUnknownTdspCommand,
+} from "../task/cli.js";
 import { fleetTargets, tasksForHost, type FleetTarget } from "../fleet/fleet.js";
 import { bootstrapMachine, nodeLadderScript } from "../fleet/bootstrap.js";
 import { resolveCwd } from "../fleet/local.js";
@@ -581,7 +585,19 @@ app.get("/api/fleet", async (_req, res) => {
     const base = { node: { id: h.id, name: h.name }, kind: h.kind };
     if (h.kind === "local") return { ...base, ok: true, tasks: tasksForHost(db, h.id) };
     const agg = byId.get(h.id);
-    if (agg) return { ...base, ok: agg.ok, reason: agg.reason, tasks: agg.tasks ?? [], repos: agg.repos ?? [] };
+    if (agg) {
+      const capabilities = agg.capabilities ?? [];
+      return {
+        ...base,
+        ok: agg.ok,
+        reason: agg.reason,
+        schema_version: agg.schema_version,
+        capabilities,
+        needsUpdate: agg.ok && !capabilities.includes(ARCHIVED_TASK_LIFECYCLE_CAPABILITY),
+        tasks: agg.tasks ?? [],
+        repos: agg.repos ?? [],
+      };
+    }
     return { ...base, ok: false, reason: "notBootstrapped" as const };
   });
   res.json({ schema_version: 1, nodes });
@@ -707,7 +723,15 @@ async function relayNodeTaskAction(req: Request, res: Response, verb: "stop" | "
   if (!Number.isInteger(taskId)) return res.status(400).json({ error: "invalid task id" });
   const out = await runTdsp(host, [verb, String(taskId)]);
   const result = parseNodeResult(out.stdout);
-  if (!result) return res.status(502).json({ error: `node ${verb} failed: ${(out.stderr || "no result").slice(0, 300)}` });
+  if (!result) {
+    if (isUnknownTdspCommand(`${out.stderr}\n${out.stdout}`, verb)) {
+      return res.status(409).json({
+        code: "nodeUpdateRequired",
+        error: tr(lang, "host.nodeUpdateRequired"),
+      });
+    }
+    return res.status(502).json({ error: `node ${verb} failed: ${(out.stderr || "no result").slice(0, 300)}` });
+  }
   if (result.ok) return res.json(result);
 
   const known: Record<string, string> = {
@@ -869,7 +893,9 @@ app.post("/api/hosts/:id/update", async (req, res) => {
   const script =
     `export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH\n${nodeLadderScript()}\n` +
     `cd ${JSON.stringify(src)} || { echo "no src at ${src}"; exit 1; }\n` +
-    `git pull --ff-only 2>&1 && npm install --no-audit --no-fund >/dev/null 2>&1; echo "---DONE---"`;
+    `git pull --ff-only 2>&1 || exit 1\n` +
+    `npm install --no-audit --no-fund >/dev/null 2>&1 || { echo "npm install failed"; exit 1; }\n` +
+    `echo "---DONE---"`;
   const out = await sshRun(host.target)(script);
   const log = out.stdout.split("---DONE---")[0].trim();
   if (!out.ok || /no src at/.test(out.stdout)) return res.status(500).json({ error: log || "update failed" });

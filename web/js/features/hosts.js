@@ -74,6 +74,15 @@ export async function loadFleet() {
   renderList();
 }
 
+// An older node can still list its tasks, but it does not understand the newer
+// archived-task verbs. Put the recovery action directly in view when the server
+// reports that mismatch instead of leaving the raw CLI usage text as a toast.
+function revealNodeUpdate(hostId, error) {
+  if (error?.body?.code !== "nodeUpdateRequired") return;
+  menuHostId = hostId;
+  renderList();
+}
+
 // Open a remote node's task terminal: attach to its tmux session over ssh (the
 // server resolves the node from ?host=). The session/title are read from the
 // fleet snapshot, so the card's onclick only carries safe numeric ids.
@@ -99,6 +108,7 @@ export async function stopNodeTask(hostId, taskId) {
     await api(`/api/nodes/${hostId}/tasks/${taskId}/stop`, { method: "POST" });
     await loadFleet();
   } catch (e) {
+    revealNodeUpdate(hostId, e);
     toast(String(e?.message || e), "error");
   }
 }
@@ -112,6 +122,7 @@ export async function removeNodeWt(hostId, taskId) {
     toast(t("toast.worktreeRemoved"), "success");
     await loadFleet();
   } catch (e) {
+    revealNodeUpdate(hostId, e);
     toast(String(e?.message || e), "error");
   }
 }
@@ -124,6 +135,7 @@ export async function resumeNodeTask(hostId, taskId) {
     await loadFleet();
     connectNode(hostId, taskId);
   } catch (e) {
+    revealNodeUpdate(hostId, e);
     toast(t("toast.resumeFailed", { error: String(e?.message || e) }), "error", 6000);
   } finally {
     hideLoading();
@@ -135,6 +147,7 @@ export async function deleteNodeTask(hostId, taskId) {
     await api(`/api/nodes/${hostId}/tasks/${taskId}`, { method: "DELETE" });
     await loadFleet();
   } catch (e) {
+    revealNodeUpdate(hostId, e);
     toast(String(e?.message || e), "error");
   }
 }
@@ -357,6 +370,8 @@ function renderListHtml() {
   if (!isLocal) {
     if (bootstrappingHosts.has(h.id)) {
       fleetRow = `<div class="mh-fleet">⏳ ${t("host.installing")}</div>`;
+    } else if (fl?.ok && fl.needsUpdate) {
+      fleetRow = `<div class="mh-fleet off">⚠ ${t("host.outdated")}</div>`;
     } else if (fl?.ok) {
       fleetRow = `<div class="mh-fleet">🛰 ${t("host.liveTasks", { n: fl.tasks?.length ?? 0 })}</div>`;
     } else if (fl?.reason === "notBootstrapped") {
