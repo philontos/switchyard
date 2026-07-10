@@ -9,7 +9,7 @@
 // Terminal/FitAddon are the globals from the vendored xterm scripts.
 import { $ } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
-import { createCodexUserMarkerHighlighter } from "./codex-terminal-markers.js";
+import { createCodexUserMarkerOverlay } from "./codex-terminal-markers.js";
 
 // taskId -> { id, pane, term, fit, ws, query, agent, title, attach, resizeKey }
 const panes = new Map();
@@ -58,7 +58,15 @@ export function reconnectActive() {
 // side view move; no bytes reach the session, so it's safe under any running app.
 export function fitActiveNow() {
   const p = activeId != null ? panes.get(activeId) : null;
-  if (p) { try { p.fit.fit(); sendResize(p); p.term.scrollToBottom(); p.term.refresh(0, p.term.rows - 1); } catch {} }
+  if (p) {
+    try {
+      p.fit.fit();
+      sendResize(p);
+      p.term.scrollToBottom();
+      p.term.refresh(0, p.term.rows - 1);
+      p.codexMarkers?.scan();
+    } catch {}
+  }
 }
 
 // xterm paints to a canvas from a JS theme object, so it can't read the CSS
@@ -87,7 +95,13 @@ function fitActive() {
   requestAnimationFrame(() => {
     fitQueued = false;
     const p = activeId != null ? panes.get(activeId) : null;
-    if (p) { try { p.fit.fit(); sendResize(p); } catch {} }
+    if (p) {
+      try {
+        p.fit.fit();
+        sendResize(p);
+        p.codexMarkers?.scan();
+      } catch {}
+    }
   });
 }
 
@@ -126,15 +140,42 @@ export function initTerm() {
   });
 }
 
-function sendResize(p) {
+const RESIZE_RETRY_MS = 200;
+
+function clearResizeRetry(p) {
+  if (p.resizeRetry) { clearTimeout(p.resizeRetry); p.resizeRetry = null; }
+}
+
+function sendResize(p, force = false) {
   if (!p.ws || p.ws.readyState !== 1) return;
   const key = p.term.cols + "x" + p.term.rows;
   // iOS Safari can emit several resize/visualViewport/ResizeObserver events while
   // the terminal overlay settles. Re-sending the same dimensions makes tmux/TUIs
   // repaint whole screens with no layout benefit, which reads as terminal flicker.
-  if (p.resizeKey === key) return;
+  if (!force && p.resizeKey === key) return;
   p.resizeKey = key;
   p.ws.send("\x00resize:" + key);
+  if (force) return;
+
+  // A controller that has not restarted onto the initial-resize race fix can
+  // lose the very first frame while it awaits tmux setup. New controllers ACK
+  // immediately; with an old one, retry once after both server setup and browser
+  // layout have settled. This keeps updated static clients usable before restart.
+  p.resizeAck = "";
+  const ws = p.ws;
+  clearResizeRetry(p);
+  p.resizeRetry = setTimeout(() => {
+    p.resizeRetry = null;
+    if (p.ws !== ws || ws.readyState !== 1 || p.resizeAck === p.resizeKey) return;
+    if (activeId === p.id) { try { p.fit.fit(); } catch {} }
+    sendResize(p, true);
+  }, RESIZE_RETRY_MS);
+}
+
+function resizeAck(data) {
+  if (!(data instanceof ArrayBuffer)) return "";
+  const message = new TextDecoder().decode(data);
+  return message.startsWith("\x00resized:") ? message.slice("\x00resized:".length) : "";
 }
 
 // Mobile: let a one-finger vertical drag over the terminal SCROLL it. xterm only
@@ -245,7 +286,12 @@ function createPane(id, query, agent) {
   // instead of navigating the browser to the user's OWN (empty) localhost.
   try { term.registerLinkProvider(localhostLinks(term, id)); } catch {}
 
-  const p = { id, pane, term, fit, ws: null, query, agent, title: "", desc: "", attach: "", claude: "", resizeKey: "" };
+  const p = {
+    id, pane, term, fit, ws: null, query, agent,
+    title: "", desc: "", attach: "", claude: "",
+    resizeKey: "", resizeAck: "", resizeRetry: null,
+    codexMarkers: agent === "codex" ? createCodexUserMarkerOverlay(term) : null,
+  };
 
   // claude TUI 开了鼠标上报,普通拖拽会被转发给应用; Shift/Option 拖拽走本地选区,松手即复制
   term.element.addEventListener("mouseup", () => {
@@ -288,20 +334,27 @@ function ensureSocket(p) {
   if (p.ws && (p.ws.readyState === 0 || p.ws.readyState === 1)) return;   // CONNECTING/OPEN
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = p.ws = new WebSocket(`${proto}://${location.host}/pty?${p.query}&lang=${I18N.lang}`);
-  // Per-attach state: tmux repaints a fresh terminal on every connection, so
-  // line-position and split-ANSI tracking must start fresh with that repaint.
-  // The transform is used only for a known Codex task; every other PTY remains
-  // byte-for-byte passthrough.
-  const codexMarkers = createCodexUserMarkerHighlighter();
+  ws.binaryType = "arraybuffer"; // binary frames are server→client control ACKs; PTY data stays text
   p.resizeKey = "";       // a new pty needs one initial size even if dimensions match the old socket
+  p.resizeAck = "";
+  clearResizeRetry(p);
   ws.onopen = () => { if (activeId === p.id) { try { p.fit.fit(); } catch {} } sendResize(p); };
   ws.onmessage = (e) => {
-    const data = typeof e.data === "string" ? e.data : "";
-    p.term.write(p.agent === "codex" ? codexMarkers.push(data) : data);
+    const ack = resizeAck(e.data);
+    if (ack) {
+      if (ack === p.resizeKey) { p.resizeAck = ack; clearResizeRetry(p); }
+      return;
+    }
+    if (typeof e.data !== "string") return;
+    if (p.agent === "codex") {
+      p.term.write(e.data, () => { if (p.agent === "codex") p.codexMarkers?.scan(); });
+    } else {
+      p.term.write(e.data);
+    }
   };
   ws.onclose = () => {
     if (p.ws === ws) {
-      if (p.agent === "codex") p.term.write(codexMarkers.flush());
+      clearResizeRetry(p);
       p.term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
     }
   };
@@ -322,6 +375,7 @@ function showPane(p) {
   try { p.fit.fit(); } catch {}
   try { p.term.scrollToBottom(); } catch {}              // attach lands at the newest output
   try { p.term.refresh(0, p.term.rows - 1); } catch {}   // canvas can blank while hidden
+  try { p.codexMarkers?.scan(); } catch {}
   sendResize(p);
   // on mobile the keyboard is driven by the quick-input field, not the terminal —
   // don't focus the (readOnly) xterm textarea, which would just fight for focus.
@@ -568,7 +622,13 @@ export function openPty(query, title, attach, taskId = null, claude = "", agent 
   const normalizedAgent = agent === "codex" ? "codex" : "claude";
   let p = panes.get(taskId);
   if (!p) p = createPane(taskId, query, normalizedAgent);
-  else p.query = query;                  // session normally unchanged; keep it fresh
+  else {
+    p.query = query;                     // session normally unchanged; keep it fresh
+    if (p.agent !== normalizedAgent) {
+      p.codexMarkers?.dispose();
+      p.codexMarkers = normalizedAgent === "codex" ? createCodexUserMarkerOverlay(p.term) : null;
+    }
+  }
   p.agent = normalizedAgent; p.title = title; p.attach = attach || ""; p.claude = claude || "";
   showPane(p);
   ensureSocket(p);
@@ -581,7 +641,9 @@ export function disposePty(id) {
   const p = panes.get(id);
   if (!p) return;
   panes.delete(id);
+  clearResizeRetry(p);
   try { if (p.ws) { p.ws.onclose = null; p.ws.onmessage = null; p.ws.close(); } } catch {}
+  try { p.codexMarkers?.dispose(); } catch {}
   try { p.term.dispose(); } catch {}
   p.pane.remove();
   if (activeId === id) { activeId = null; showTermEmpty(); }

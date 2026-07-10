@@ -1,173 +1,89 @@
-// Codex's PTY stream has no semantic "role" metadata.  Its submitted user
-// messages do, however, have a deliberately narrow terminal signature:
+// tmux does not forward Codex's original ANSI bytes verbatim. It repaints the
+// pane with equivalent cursor/style commands, so matching the source escape
+// sequence is inherently brittle. Inspect xterm's rendered cells instead:
 //
-//   historical  \x1b[1;2m› \x1b[0m<message>
-//   current     \x1b[1m› \x1b[0m<message>
+//   historical user row: bold+dim `›`, then a bold/dim blank cell
+//   current user row:    bold `›`, then a bold blank cell
+//   live composer:       bold `›`, then a NORMAL blank cell
 //
-// The live composer is close but importantly different (the space is outside
-// the bold span), and assistant rows use a dim bullet instead.  Match only the
-// two complete signatures at a logical line start.  If Codex changes them, the
-// enhancer fails closed and the original bytes pass through untouched.
-//
-// Reversing the existing two cells makes the turn boundary easy to spot without
-// inserting a printable character, changing wrapping, or desynchronizing xterm
-// from tmux.  This module is a streaming transform because WebSocket frames may
-// split an ANSI sequence at any byte.
+// Requiring the arrow, a blank second cell, normal non-empty message text, and
+// either the historical dim bit or the submitted-row bold gap keeps this
+// intentionally fail-closed. A Codex rendering change simply removes the
+// enhancement; Claude, shells, tool output, and the composer are untouched.
 
-const HISTORICAL_USER_MARKER = "\x1b[1;2m› \x1b[0m";
-const CURRENT_USER_MARKER = "\x1b[1m› \x1b[0m";
-const EMPHASIZED_USER_MARKER = "\x1b[1;7m› \x1b[0m";
-const USER_MARKERS = [HISTORICAL_USER_MARKER, CURRENT_USER_MARKER];
+function chars(cell) { return cell?.getChars?.() ?? ""; }
+function bold(cell) { return !!cell?.isBold?.(); }
+function dim(cell) { return !!cell?.isDim?.(); }
 
-function movementAmount(raw, fallback = 1) {
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+export function isCodexUserMessageLine(line) {
+  if (!line) return false;
+  const arrow = line.getCell(0);
+  const gap = line.getCell(1);
+  const body = line.getCell(2);
+  if (chars(arrow) !== "›" || !bold(arrow)) return false;
+  if (chars(gap).trim() !== "") return false;
+  if (!chars(body) || dim(body)) return false;
+  return dim(arrow) || bold(gap);
 }
 
-function csiParams(sequence) {
-  const body = sequence.slice(2, -1).replace(/^[?=>!]+/, "");
-  return body.split(";");
-}
+// tmux itself puts the outer terminal in xterm's alternate buffer, where xterm
+// line decorations are not painted. Use a pointer-transparent DOM overlay on
+// the rendered screen instead. It follows viewport rows on every scan and still
+// changes no terminal cell or byte.
+export function createCodexUserMarkerOverlay(term) {
+  let layer = null;
+  const markers = new Map(); // visible row -> overlay element
 
-// Return one complete ANSI escape sequence, or null when the frame ended in
-// the middle of it.  CSI is enough for cursor/SGR tracking; OSC/DCS strings are
-// consumed too so their payload can never be mistaken for terminal text.
-function escapeLength(input, start) {
-  if (start + 1 >= input.length) return null;
-  const kind = input[start + 1];
-  if (kind === "[") {
-    for (let i = start + 2; i < input.length; i++) {
-      const code = input.charCodeAt(i);
-      if (code >= 0x40 && code <= 0x7e) return i - start + 1;
-    }
-    return null;
-  }
-  if ("]P_X^".includes(kind)) {
-    for (let i = start + 2; i < input.length; i++) {
-      if (input.charCodeAt(i) === 0x07) return i - start + 1;
-      if (input[i] === "\x1b" && input[i + 1] === "\\") return i - start + 2;
-    }
-    return null;
-  }
-  // ESC intermediates (for example charset selection) end at the first final
-  // byte.  The common two-byte ESC 7/8/D/E forms naturally end immediately.
-  for (let i = start + 1; i < input.length; i++) {
-    const code = input.charCodeAt(i);
-    if (code >= 0x30 && code <= 0x7e) return i - start + 1;
-  }
-  return null;
-}
-
-function isWide(code) {
-  return code >= 0x1100 && (
-    code <= 0x115f || code === 0x2329 || code === 0x232a ||
-    (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
-    (code >= 0xac00 && code <= 0xd7a3) ||
-    (code >= 0xf900 && code <= 0xfaff) ||
-    (code >= 0xfe10 && code <= 0xfe19) ||
-    (code >= 0xfe30 && code <= 0xfe6f) ||
-    (code >= 0xff00 && code <= 0xff60) ||
-    (code >= 0xffe0 && code <= 0xffe6) ||
-    (code >= 0x1f300 && code <= 0x1faff) ||
-    (code >= 0x20000 && code <= 0x3fffd)
-  );
-}
-
-function printableWidth(code) {
-  // Combining marks, variation selectors, and the zero-width joiner do not
-  // advance the cursor.  Exact grapheme width is unnecessary here; this keeps
-  // line-start tracking sound across the scripts commonly present in prompts.
-  if (code === 0x200d || (code >= 0xfe00 && code <= 0xfe0f) ||
-      (code >= 0x300 && code <= 0x36f) || (code >= 0x1ab0 && code <= 0x1aff) ||
-      (code >= 0x1dc0 && code <= 0x1dff) || (code >= 0x20d0 && code <= 0x20ff) ||
-      (code >= 0xfe20 && code <= 0xfe2f)) return 0;
-  return isWide(code) ? 2 : 1;
-}
-
-export function createCodexUserMarkerHighlighter() {
-  let pending = "";
-  let column = 0;
-  let savedColumn = 0;
-
-  function trackEscape(sequence) {
-    if (sequence[1] === "[") {
-      const final = sequence.at(-1);
-      const params = csiParams(sequence);
-      const first = movementAmount(params[0]);
-      if (final === "H" || final === "f") column = Math.max(0, movementAmount(params[1]) - 1);
-      else if (final === "G" || final === "`") column = Math.max(0, first - 1);
-      else if (final === "C" || final === "a") column += first;
-      else if (final === "D") column = Math.max(0, column - first);
-      else if (final === "E" || final === "F") column = 0;
-      else if (final === "I") column = (Math.floor(column / 8) + first) * 8;
-      else if (final === "Z") column = Math.max(0, column - first * 8);
-      else if (final === "s") savedColumn = column;
-      else if (final === "u") column = savedColumn;
-      return;
-    }
-    if (sequence === "\x1b7") savedColumn = column;
-    else if (sequence === "\x1b8") column = savedColumn;
-    else if (sequence === "\x1bE" || sequence === "\x1bc") column = 0;
+  function ensureLayer() {
+    const screen = term.element?.querySelector?.(".xterm-screen");
+    if (!screen) return null;
+    if (layer?.parentNode === screen) return { screen, layer };
+    layer?.remove?.();
+    markers.clear();
+    layer = screen.ownerDocument.createElement("div");
+    layer.className = "codex-user-marker-layer";
+    screen.appendChild(layer);
+    return { screen, layer };
   }
 
-  function transform(chunk, final) {
-    const input = pending + String(chunk ?? "");
-    pending = "";
-    let output = "";
-    let i = 0;
+  function scan() {
+    const mounted = ensureLayer();
+    const buffer = term.buffer?.active;
+    if (!mounted || !buffer || !term.rows || !term.cols) return;
+    const rect = mounted.screen.getBoundingClientRect();
+    if (!rect.width || !rect.height) return; // hidden pane; showPane scans again
+    const cellWidth = rect.width / term.cols;
+    const cellHeight = rect.height / term.rows;
+    const viewportY = Number.isFinite(buffer.viewportY) ? buffer.viewportY : 0;
+    const wanted = new Set();
 
-    while (i < input.length) {
-      if (column === 0) {
-        const marker = USER_MARKERS.find((candidate) => input.startsWith(candidate, i));
-        if (marker) {
-          output += EMPHASIZED_USER_MARKER;
-          column = 2; // the replacement has exactly the same two printable cells: `› `
-          i += marker.length;
-          continue;
-        }
-        const rest = input.slice(i);
-        if (!final && USER_MARKERS.some((candidate) => candidate.startsWith(rest))) {
-          pending = rest;
-          break;
-        }
+    for (let row = 0; row < term.rows; row++) {
+      if (!isCodexUserMessageLine(buffer.getLine(viewportY + row))) continue;
+      wanted.add(row);
+      let marker = markers.get(row);
+      if (!marker) {
+        marker = mounted.screen.ownerDocument.createElement("div");
+        marker.className = "codex-user-marker";
+        mounted.layer.appendChild(marker);
+        markers.set(row, marker);
       }
-
-      const ch = input[i];
-      if (ch === "\x1b") {
-        const length = escapeLength(input, i);
-        if (length == null) {
-          if (!final) { pending = input.slice(i); break; }
-          output += input.slice(i);
-          break;
-        }
-        const sequence = input.slice(i, i + length);
-        output += sequence;
-        trackEscape(sequence);
-        i += length;
-        continue;
-      }
-
-      const code = input.codePointAt(i);
-      const width = code > 0xffff ? 2 : 1;
-      const text = input.slice(i, i + width);
-      output += text;
-      if (ch === "\r" || ch === "\n") column = 0;
-      else if (ch === "\b") column = Math.max(0, column - 1);
-      else if (ch === "\t") column = (Math.floor(column / 8) + 1) * 8;
-      else if (code >= 0x20 && code !== 0x7f) column += printableWidth(code);
-      i += width;
+      marker.style.top = `${row * cellHeight}px`;
+      marker.style.width = `${2 * cellWidth}px`;
+      marker.style.height = `${cellHeight}px`;
     }
-    return output;
+
+    for (const [row, marker] of [...markers]) {
+      if (wanted.has(row)) continue;
+      marker.remove();
+      markers.delete(row);
+    }
   }
 
-  return {
-    push(chunk) { return transform(chunk, false); },
-    flush() { return transform("", true); },
-  };
-}
+  function dispose() {
+    markers.clear();
+    layer?.remove?.();
+    layer = null;
+  }
 
-export const CODEX_USER_MARKER_FOR_TEST = {
-  historical: HISTORICAL_USER_MARKER,
-  current: CURRENT_USER_MARKER,
-  emphasized: EMPHASIZED_USER_MARKER,
-};
+  return { scan, dispose };
+}

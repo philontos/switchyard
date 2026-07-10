@@ -1,65 +1,92 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  CODEX_USER_MARKER_FOR_TEST as marker,
-  createCodexUserMarkerHighlighter,
+  createCodexUserMarkerOverlay,
+  isCodexUserMessageLine,
 } from "./codex-terminal-markers.js";
 
-function render(...chunks) {
-  const h = createCodexUserMarkerHighlighter();
-  return chunks.map((chunk) => h.push(chunk)).join("") + h.flush();
+function cell(text = "", { bold = false, dim = false } = {}) {
+  return { getChars: () => text, isBold: () => bold, isDim: () => dim };
+}
+function line(...cells) { return { getCell: (x) => cells[x] ?? cell() }; }
+
+const historical = () => line(
+  cell("›", { bold: true, dim: true }), cell("", { bold: true, dim: true }), cell("旧"),
+);
+const current = () => line(
+  cell("›", { bold: true }), cell("", { bold: true }), cell("新"),
+);
+const composer = () => line(
+  cell("›", { bold: true }), cell(""), cell("U", { dim: true }),
+);
+
+test("recognizes rendered current and historical Codex user rows", () => {
+  assert.equal(isCodexUserMessageLine(historical()), true);
+  assert.equal(isCodexUserMessageLine(current()), true);
+  // tmux may omit the visually irrelevant style of a blank cell on repaint;
+  // the dim historical arrow remains sufficient and semantic.
+  assert.equal(isCodexUserMessageLine(line(
+    cell("›", { bold: true, dim: true }), cell(""), cell("旧"),
+  )), true);
+});
+
+test("rejects composer, assistant, literal arrows, and malformed near misses", () => {
+  const misses = [
+    composer(),
+    line(cell("•", { dim: true }), cell(""), cell("a")),
+    line(cell("›"), cell(""), cell("literal")),
+    line(cell("›", { bold: true }), cell("x", { bold: true }), cell("body")),
+    line(cell("›", { bold: true }), cell("", { bold: true }), cell("U", { dim: true })),
+  ];
+  for (const candidate of misses) assert.equal(isCodexUserMessageLine(candidate), false);
+});
+
+function fakeElement(ownerDocument) {
+  return {
+    ownerDocument, className: "", style: {}, children: [], parentNode: null,
+    appendChild(child) { child.parentNode = this; this.children.push(child); },
+    remove() {
+      if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+      this.parentNode = null;
+    },
+  };
 }
 
-test("strictly emphasizes current and historical Codex user markers", () => {
-  assert.equal(render(marker.historical + "older"), marker.emphasized + "older");
-  assert.equal(render(marker.current + "current"), marker.emphasized + "current");
-  assert.equal(
-    render(marker.current + "one\r\n" + marker.historical + "two"),
-    marker.emphasized + "one\r\n" + marker.emphasized + "two",
-  );
-});
+function fakeTerminal(lines) {
+  const document = { createElement: () => fakeElement(document) };
+  const screen = fakeElement(document);
+  screen.getBoundingClientRect = () => ({ width: 800, height: 60 });
+  const buffer = { viewportY: 0, length: lines.length, getLine: (y) => lines[y] };
+  const term = {
+    rows: lines.length, cols: 80,
+    buffer: { active: buffer },
+    element: { querySelector: (selector) => selector === ".xterm-screen" ? screen : null },
+  };
+  return { term, buffer, screen };
+}
 
-test("does not generalize to composer, assistant, generic dim, or literal arrows", () => {
-  const nearMisses = [
-    "\x1b[1m›\x1b[0m \x1b[2mUse /skills\x1b[0m", // live composer: space is outside bold
-    "\x1b[2m• \x1b[0massistant",                  // assistant row
-    "\x1b[1;2mdim but not a user marker\x1b[0m",
-    "plain › user-authored text",
-    "\x1b[2;1m› \x1b[0mreordered SGR parameters",
-    "\x1b[1m› missing-reset",
-  ];
-  for (const input of nearMisses) assert.equal(render(input), input);
-});
+test("overlays only user markers, deduplicates scans, and removes stale rows", () => {
+  const lines = [historical(), composer(), current()];
+  const { term, screen } = fakeTerminal(lines);
+  const overlay = createCodexUserMarkerOverlay(term);
 
-test("requires the exact marker to begin at a logical line start", () => {
-  const embedded = "prefix " + marker.current + "not-a-boundary";
-  assert.equal(render(embedded), embedded);
+  overlay.scan();
+  const layer = screen.children[0];
+  assert.equal(layer.className, "codex-user-marker-layer");
+  assert.equal(layer.children.length, 2);
+  assert.deepEqual(layer.children.map((el) => ({ top: el.style.top, width: el.style.width, height: el.style.height })), [
+    { top: "0px", width: "20px", height: "20px" },
+    { top: "40px", width: "20px", height: "20px" },
+  ]);
 
-  assert.equal(
-    render("prefix\r\n" + marker.current + "real-boundary"),
-    "prefix\r\n" + marker.emphasized + "real-boundary",
-  );
-  assert.equal(
-    render("prefix\x1b[4;1H" + marker.historical + "cursor-home"),
-    "prefix\x1b[4;1H" + marker.emphasized + "cursor-home",
-  );
+  overlay.scan();
+  assert.equal(layer.children.length, 2, "repeat scans do not stack overlays");
 
-  const columnTwo = "prefix\x1b[4;2H" + marker.current + "still-embedded";
-  assert.equal(render(columnTwo), columnTwo);
-});
+  lines[0] = composer();
+  overlay.scan();
+  assert.equal(layer.children.length, 1, "an overwritten live row loses its overlay");
+  assert.equal(layer.children[0].style.top, "40px");
 
-test("recognizes a marker across every possible WebSocket frame split", () => {
-  const input = "\x1b[2J\x1b[H" + marker.historical + "你好\r\nnext";
-  const expected = "\x1b[2J\x1b[H" + marker.emphasized + "你好\r\nnext";
-
-  for (let i = 1; i < input.length; i++) {
-    assert.equal(render(input.slice(0, i), input.slice(i)), expected, `split at ${i}`);
-  }
-
-  assert.equal(render(...input.split("")), expected, "one UTF-16 code unit per frame");
-});
-
-test("flush passes an unfinished possible marker through unchanged", () => {
-  const incomplete = "\x1b[1;2m› ";
-  assert.equal(render(incomplete), incomplete);
+  overlay.dispose();
+  assert.equal(screen.children.length, 0);
 });
