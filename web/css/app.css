@@ -223,7 +223,11 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .grp-head:not(.static):hover { background: var(--surface-2); }
 .grp-head.err { background: #f8514912; }   /* clone / connectivity check failed — faint red wash */
 .grp-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grp-status { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--amber); font-size: 11px; }
+.grp-status.error { color: var(--red-text); }
 .grp-err { color: var(--red-text); font-weight: 700; cursor: help; flex: none; }
+.grp-error-detail { margin: 0 32px 6px 12px; color: var(--red-text-2); font-size: 11px; line-height: 1.45;
+  overflow-wrap: anywhere; font-family: Menlo, Consolas, monospace; }
 /* dispatch ＋ : an icon-only square with a low-saturation accent fill, pinned to
    the right edge — the repo's one persistent primary action. */
 .grp-act { flex: none; width: 24px; height: 24px; margin: 0; padding: 0; font-size: 15px; line-height: 1;
@@ -429,6 +433,13 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .term-claude:hover { color: var(--text); border-color: var(--accent); }
 a { color: var(--accent-bar); }
 .hint { font-size: 11px; color: var(--faint); }
+.repo-field { display: block; margin-top: 10px; color: var(--muted); font-size: 11px; }
+.repo-field input { margin-top: 5px; margin-bottom: 0; }
+.repo-field input[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px #f8514933; }
+.repo-modal-status { display: none; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--muted); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.repo-modal-status.on { display: block; }
+.repo-modal-status.error { border-color: var(--red); color: var(--red-text); background: #f8514912; }
 .modal-bg { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal { width: 420px; max-width: 92vw; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
 .modal h2 { margin-top: 0; }

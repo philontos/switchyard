@@ -9,6 +9,45 @@ import { state } from "../core/state.js";
 import { rerender } from "./hosts.js";
 
 let repoHostId = null;   // which machine the register-repo modal targets
+let repoSubmitting = false;
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[ch]));
+}
+
+function setRepoSubmitState(active, message = "", error = false) {
+  repoSubmitting = active;
+  const btn = $("r-submit");
+  const status = $("r-status");
+  if (btn) {
+    btn.disabled = active;
+    btn.textContent = active ? t("repo.submitting") : t("repo.submit");
+  }
+  if (status) {
+    status.textContent = message;
+    status.classList.toggle("on", !!message);
+    status.classList.toggle("error", !!message && error);
+  }
+}
+
+function repoStatusText(r) {
+  if (r.status === "cloning") return t("repo.statusChecking");
+  if (r.status === "error") return t("repo.statusError");
+  return "";
+}
+
+function watchRepoRegistration(id, tries = 12) {
+  let left = tries;
+  const tick = async () => {
+    await loadRepos();
+    const repo = state.repos.find((r) => Number(r.id) === Number(id));
+    if (!repo || repo.status !== "cloning" || --left <= 0) return;
+    setTimeout(tick, 1500);
+  };
+  setTimeout(tick, 500);
+}
 
 export async function loadRepos() {
   const r = await api("/api/repos").catch(() => null);
@@ -37,7 +76,8 @@ export async function loadRepos() {
 // the cards' own classes, so the colors read identically). `cloning` shows a
 // breathing amber dot; `error` washes the head faint red + shows a "!".
 export function repoGroupHead(r, online, collapsed, tasks = []) {
-  const dot = r.status === "cloning" ? `<span class="sdot cloning" title="${r.status}"></span>` : "";
+  const statusText = repoStatusText(r);
+  const dot = r.status === "cloning" ? `<span class="sdot cloning" title="${esc(statusText)}"></span>` : "";
   const disp = r.status === "ready"
     ? `<button class="grp-act" title="${t("task.dispatch")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskModal(${r.id})">＋</button>` : "";
   const summary = collapsed && tasks.length
@@ -47,12 +87,13 @@ export function repoGroupHead(r, online, collapsed, tasks = []) {
     : "";
   return `<div class="grp-head${r.status === "error" ? " err" : ""}" onclick="toggleRepo(${r.id})">
     ${dot}
-    <span class="grp-name">${r.name}</span>
+    <span class="grp-name">${esc(r.name)}</span>
+    ${statusText ? `<span class="grp-status ${r.status === "error" ? "error" : ""}">${esc(statusText)}</span>` : ""}
     ${summary}
-    ${r.error ? `<span class="grp-err" title="${r.error}">!</span>` : ""}
+    ${r.error ? `<span class="grp-err" title="${esc(r.error)}">!</span>` : ""}
     <button class="grp-del" title="${t("repo.delTitle")}" onclick="event.stopPropagation();delRepo(${r.id})">🗑</button>
     ${disp}
-  </div>`;
+  </div>${r.status === "error" && r.error ? `<div class="grp-error-detail">${esc(r.error)}</div>` : ""}`;
 }
 // Plain delete refuses (409) if the repo still has running tasks — then we offer
 // a force delete that tears them (sessions + worktrees) down with the repo.
@@ -74,22 +115,46 @@ export function openRepoModal(hostId) {
   repoHostId = hostId ?? null;   // which machine this repo registers on
   const h = state.hostsById[hostId];
   $("rm-host").textContent = h ? (h.kind === "local" ? t("host.local") : h.name) : "";
+  ["r-name", "r-url"].forEach((id) => $(id).removeAttribute("aria-invalid"));
+  setRepoSubmitState(false);
   $("repo-modal").style.display = "flex";
   setTimeout(() => $("r-name").focus(), 30);
 }
-export function closeRepoModal() { $("repo-modal").style.display = "none"; }
+export function closeRepoModal() {
+  if (repoSubmitting) return;
+  $("repo-modal").style.display = "none";
+  setRepoSubmitState(false);
+}
+
+function showRepoValidation(id, message) {
+  ["r-name", "r-url"].forEach((fieldId) => $(fieldId).removeAttribute("aria-invalid"));
+  $(id).setAttribute("aria-invalid", "true");
+  setRepoSubmitState(false, message, true);
+  $(id).focus();
+}
 
 export async function addRepo() {
+  if (repoSubmitting) return;
   const body = {
     name: $("r-name").value.trim(), git_url: $("r-url").value.trim(),
     token: $("r-token").value.trim(),
     default_branch: $("r-default").value.trim() || "main",
     host_id: repoHostId,
   };
-  if (!body.name || !body.git_url) return toast(t("toast.repoFieldsRequired"), "error");
-  await api("/api/repos", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
-  ["r-name","r-url","r-token","r-default"].forEach(i => $(i).value = "");
-  closeRepoModal();
-  toast(t("toast.repoRegistered"), "success");
-  loadRepos();
+  if (!body.name) return showRepoValidation("r-name", t("repo.nameRequired"));
+  if (!body.git_url) return showRepoValidation("r-url", t("repo.urlRequired"));
+  ["r-name", "r-url"].forEach((id) => $(id).removeAttribute("aria-invalid"));
+  setRepoSubmitState(true, t("repo.submittingHint"));
+  try {
+    const created = await api("/api/repos", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
+    ["r-name","r-url","r-token","r-default"].forEach(i => $(i).value = "");
+    setRepoSubmitState(false);
+    $("repo-modal").style.display = "none";
+    toast(t("toast.repoRegistered"), "success", 5000);
+    await loadRepos();
+    watchRepoRegistration(created.id);
+  } catch (e) {
+    setRepoSubmitState(false, t("repo.submitFailed", { error: e.message }), true);
+    toast(e.message, "error", 6000);
+  }
 }
