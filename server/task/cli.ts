@@ -45,7 +45,11 @@ type DB = Database.Database;
 // on the node, so a controller can light the remote breathing/needs-you dot the
 // same way it does for local tasks. Additive — an un-updated v1 node just omits
 // them and the controller degrades to a status-based guess.
-export const TASK_LIST_VERSION = 2;
+// v3: the envelope advertises node capabilities. This lets a newer controller
+// spot a node that predates a one-shot CLI verb before offering a broken action.
+export const TASK_LIST_VERSION = 3;
+export const ARCHIVED_TASK_LIFECYCLE_CAPABILITY = "archived-task-lifecycle-v1";
+export const TASK_CAPABILITIES = [ARCHIVED_TASK_LIFECYCLE_CAPABILITY] as const;
 
 // A repo as a node exposes it to controllers — enough to group the node's tasks
 // by repo (name) and to dispatch a new task here using the node's OWN mirror (no
@@ -75,6 +79,7 @@ export interface LiveTask extends Task, TaskLive {}
 
 export interface TaskListPayload {
   schema_version: number;
+  capabilities: string[];
   tasks: LiveTask[];
   repos: NodeRepo[];
 }
@@ -97,7 +102,12 @@ export async function taskListPayload(db: DB, liveness: TaskLiveness): Promise<T
     const l = live.get(t.id);
     return { ...t, alive: l?.alive ?? false, hasWorktree: l?.hasWorktree ?? false, waiting: l?.waiting ?? false };
   });
-  return { schema_version: TASK_LIST_VERSION, tasks: enriched, repos: reposForList(db) };
+  return {
+    schema_version: TASK_LIST_VERSION,
+    capabilities: [...TASK_CAPABILITIES],
+    tasks: enriched,
+    repos: reposForList(db),
+  };
 }
 
 // ---- cross-node aggregation: the "see other nodes' tasks" half of 打通 ----
@@ -115,6 +125,7 @@ export interface NodeTasks<T extends NodeRef = NodeRef> {
   ok: boolean;
   reason?: "unreachable" | "version" | "error"; // why ok=false
   schema_version?: number;
+  capabilities?: string[];
   tasks?: Task[];
   repos?: NodeRepo[];
 }
@@ -151,9 +162,25 @@ export async function aggregateNodes<T extends NodeRef>(
       if (typeof payload?.schema_version !== "number" || payload.schema_version > TASK_LIST_VERSION) {
         return { node, ok: false, reason: "version", schema_version: payload?.schema_version };
       }
-      return { node, ok: true, schema_version: payload.schema_version, tasks: payload.tasks ?? [], repos: payload.repos ?? [] };
+      const capabilities = Array.isArray(payload.capabilities)
+        ? payload.capabilities.filter((cap): cap is string => typeof cap === "string")
+        : [];
+      return {
+        node,
+        ok: true,
+        schema_version: payload.schema_version,
+        capabilities,
+        tasks: payload.tasks ?? [],
+        repos: payload.repos ?? [],
+      };
     }),
   );
+}
+
+/** Recognize the stable error emitted by an older tdsp for a verb it predates. */
+export function isUnknownTdspCommand(output: string, command: string): boolean {
+  const expected = `unknown command: ${command}`.toLowerCase();
+  return output.toLowerCase().includes(expected);
 }
 
 // IO the dispatch layer needs, injected so runCli is testable without opening the

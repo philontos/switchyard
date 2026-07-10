@@ -2,7 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { initSchema } from "../core/schema.ts";
-import { taskListPayload, runCli, aggregateNodes, type TaskLiveness } from "./cli.ts";
+import {
+  taskListPayload,
+  runCli,
+  aggregateNodes,
+  ARCHIVED_TASK_LIFECYCLE_CAPABILITY,
+  isUnknownTdspCommand,
+  type TaskLiveness,
+} from "./cli.ts";
 import type { CreateLocalResult } from "./createtask.ts";
 
 // a probe that reports every task fully dead — for the existing tests that only
@@ -25,7 +32,8 @@ function seed() {
 test("taskListPayload wraps the local tasks in a versioned envelope", async () => {
   const db = seed();
   const payload = await taskListPayload(db, noLive);
-  assert.equal(payload.schema_version, 2);
+  assert.equal(payload.schema_version, 3);
+  assert.deepEqual(payload.capabilities, [ARCHIVED_TASK_LIFECYCLE_CAPABILITY]);
   assert.equal(payload.tasks.length, 1);
   assert.equal(payload.tasks[0].title, "old");
   assert.equal(payload.tasks[0].session, "tdsp-1-r-old");
@@ -183,7 +191,8 @@ test("runCli list --json prints the versioned task envelope and exits 0", async 
   const code = await runCli(["list", "--json"], f.deps);
   assert.equal(code, 0);
   const parsed = JSON.parse(f.out);
-  assert.equal(parsed.schema_version, 2);
+  assert.equal(parsed.schema_version, 3);
+  assert.ok(parsed.capabilities.includes(ARCHIVED_TASK_LIFECYCLE_CAPABILITY));
   assert.equal(parsed.tasks[0].title, "old");
 });
 
@@ -208,6 +217,12 @@ test("runCli rejects an unknown command with a usage hint on stderr and exits 1"
   assert.equal(code, 1);
   assert.match(f.err, /Usage|unknown/i);
   assert.equal(f.served, false);
+});
+
+test("isUnknownTdspCommand recognizes an older node's missing lifecycle verb", () => {
+  const stderr = "Usage: tdsp <serve|list|stop>\nunknown command: cleanup\n";
+  assert.equal(isUnknownTdspCommand(stderr, "cleanup"), true);
+  assert.equal(isUnknownTdspCommand(stderr, "resume"), false);
 });
 
 // create-local is the control-sink verb: A drives B by `ssh B tdsp create-local`,
@@ -387,6 +402,18 @@ test("aggregateNodes returns each node's tasks on a successful fetch", async () 
   assert.equal(r.ok, true);
   assert.equal(r.node.name, "B");
   assert.equal(r.tasks?.[0].title, "x");
+});
+
+test("aggregateNodes carries capabilities and treats an old node's missing field as empty", async () => {
+  const nodes = [{ id: 2, name: "old" }, { id: 3, name: "new" }];
+  const fetch = async (node: { name: string }) => JSON.stringify({
+    schema_version: node.name === "old" ? 2 : 3,
+    capabilities: node.name === "old" ? undefined : [ARCHIVED_TASK_LIFECYCLE_CAPABILITY],
+    tasks: [],
+  });
+  const [oldNode, newNode] = await aggregateNodes(nodes, fetch);
+  assert.deepEqual(oldNode.capabilities, []);
+  assert.deepEqual(newNode.capabilities, [ARCHIVED_TASK_LIFECYCLE_CAPABILITY]);
 });
 
 test("aggregateNodes marks a node unreachable when the fetch fails (offline/timeout)", async () => {
