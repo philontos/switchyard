@@ -2,7 +2,7 @@
 // validate the request, call into a domain module (repo/task/fleet/…), shape the
 // response. Bodies are lifted verbatim from index.ts; only this header + the
 // registerRoutes() wrapper are new.
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response } from "express";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -694,10 +694,10 @@ app.delete("/api/nodes/:hostId/providers/:id", async (req, res) => {
   res.status(400).json({ error: result?.error || "node provider delete failed" });
 });
 
-// Stop a task that lives ON a remote node (a fleet task this controller doesn't
-// own): drive the node's own tdsp to stop it. The node kills the session, marks
-// the task cleaned, and re-manifests — the controller just relays the request.
-app.post("/api/nodes/:hostId/tasks/:taskId/stop", async (req, res) => {
+// Relay a lifecycle verb to the node that owns the task. The controller never
+// mutates fleet task rows itself: the node owns their DB, sessions, worktrees,
+// provider configuration and manifests.
+async function relayNodeTaskAction(req: Request, res: Response, verb: "stop" | "resume" | "cleanup" | "delete-task") {
   const lang = langFromReq(req);
   const host = getHost.get(req.params.hostId) as Host | undefined;
   if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
@@ -705,11 +705,39 @@ app.post("/api/nodes/:hostId/tasks/:taskId/stop", async (req, res) => {
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
   const taskId = Number(req.params.taskId);
   if (!Number.isInteger(taskId)) return res.status(400).json({ error: "invalid task id" });
-  const out = await runTdsp(host, ["stop", String(taskId)]);
+  const out = await runTdsp(host, [verb, String(taskId)]);
   const result = parseNodeResult(out.stdout);
-  if (!result) return res.status(502).json({ error: `node stop failed: ${(out.stderr || "no result").slice(0, 300)}` });
-  if (result.ok) return res.json({ ok: true });
-  return res.status(500).json({ error: result.error || "stop failed" });
+  if (!result) return res.status(502).json({ error: `node ${verb} failed: ${(out.stderr || "no result").slice(0, 300)}` });
+  if (result.ok) return res.json(result);
+
+  const known: Record<string, string> = {
+    notFound: tr(lang, "notFound"),
+    notResumable: tr(lang, "task.notResumable"),
+    worktreeGone: tr(lang, "task.worktreeGone"),
+    worktreeExists: tr(lang, "task.worktreeExists"),
+  };
+  const status = result.error === "notFound" ? 404
+    : ["notResumable", "worktreeGone", "worktreeExists"].includes(result.error) ? 409
+    : 500;
+  return res.status(status).json({ error: result.message || known[result.error] || result.error || `${verb} failed` });
+}
+
+// Stop a live task, keeping its worktree in the node's archived list.
+app.post("/api/nodes/:hostId/tasks/:taskId/stop", (req, res) => {
+  return relayNodeTaskAction(req, res, "stop");
+});
+
+// Archived-task operations, symmetric with the controller-local task routes.
+app.post("/api/nodes/:hostId/tasks/:taskId/resume", (req, res) => {
+  return relayNodeTaskAction(req, res, "resume");
+});
+
+app.post("/api/nodes/:hostId/tasks/:taskId/cleanup", (req, res) => {
+  return relayNodeTaskAction(req, res, "cleanup");
+});
+
+app.delete("/api/nodes/:hostId/tasks/:taskId", (req, res) => {
+  return relayNodeTaskAction(req, res, "delete-task");
 });
 
 // ---------- sessions (raw tmux, incl. orphans) ----------
