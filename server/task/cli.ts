@@ -5,6 +5,7 @@
 import type Database from "better-sqlite3";
 import type { Provider, Task } from "../core/db.js";
 import type { CreateLocalOpts, CreateLocalResult, CreateRepoResult, StopResult } from "./createtask.js";
+import type { LifecycleResult } from "./lifecycle.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
 // prompt and skill list survive intact). The node registers the repo by `mirror`
@@ -167,6 +168,9 @@ export interface CliDeps {
   createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
   createRepo: (spec: CreateRepoSpec) => Promise<CreateRepoResult>;
   stop: (id: number) => Promise<StopResult>;
+  resume: (id: number) => Promise<LifecycleResult>;
+  cleanup: (id: number) => Promise<LifecycleResult>;
+  deleteTask: (id: number) => Promise<LifecycleResult>;
   providersList: () => Provider[];
   providersTest: (body: ProviderInput) => Promise<{ ok: true } | { ok: false; error: string }>;
   providersCreate: (body: ProviderInput) => Promise<{ ok: true; id: number } | { ok: false; error: string }>;
@@ -292,6 +296,19 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(r));
       return r.ok ? 0 : 1;
     }
+    case "resume":
+    case "cleanup":
+    case "delete-task": {
+      const id = Number(argv[1]);
+      if (!Number.isInteger(id)) {
+        deps.out(JSON.stringify({ ok: false, error: "invalid id" }));
+        return 1;
+      }
+      const action = cmd === "resume" ? deps.resume : cmd === "cleanup" ? deps.cleanup : deps.deleteTask;
+      const r = await action(id);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
     case "branches": {
       const mirror = argv[1];
       if (!mirror) {
@@ -323,7 +340,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|branches|providers-list|providers-test|providers-create|providers-delete|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|resume|cleanup|delete-task|branches|providers-list|providers-test|providers-create|providers-delete|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

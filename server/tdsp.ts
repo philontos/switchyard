@@ -9,16 +9,17 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { runCli } from "./task/cli.js";
-import { db, type Task } from "./core/db.js";
+import { db, type Provider, type Task } from "./core/db.js";
 import { NS, DATA_DIR, ROOT } from "./core/paths.js";
 import { applyInstall } from "./fleet/bootstrap.js";
 import { localRunner } from "./fleet/runner.js";
-import { startShellSession, killSession, listSessions } from "./session/tmux.js";
+import { startSession, startShellSession, hasSession, killSession, listSessions } from "./session/tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./task/createtask.js";
+import { cleanupTask, deleteTaskRecord, resumeTask } from "./task/lifecycle.js";
 import { asAgentKind } from "./session/agent.js";
-import { listBranches } from "./repo/git.js";
+import { listBranches, removeWorktree } from "./repo/git.js";
 import { buildRepoTaskEnv, repoFindOrCreate } from "./repo/repoenv.js";
-import { writeTaskManifest } from "./task/taskmanifest.js";
+import { removeTaskManifest, writeTaskManifest } from "./task/taskmanifest.js";
 import { checkProvider, insertCheckedProvider, listProviders, providerEnv } from "./provider/providers.js";
 
 // Ensure child processes (tmux/git/claude) find Homebrew binaries regardless of
@@ -149,6 +150,48 @@ process.exitCode = await runCli(process.argv.slice(2), {
         db,
         killSession: (session) => killSession(localRunner, session),
         writeManifest: (tid) => writeTaskManifest(DATA_DIR, db.prepare("SELECT * FROM tasks WHERE id=?").get(tid) as Task),
+      },
+      id,
+    ),
+  // archived-task actions run on the owning node for the same reason as stop:
+  // its DB, worktree and provider configuration are all node-local truth.
+  resume: (id) =>
+    resumeTask(
+      {
+        db,
+        exists: (target) => localRunner.exists(target),
+        hasSession: (session) => hasSession(localRunner, session),
+        startSession: async (task) => {
+          const provider = task.provider_id
+            ? (db.prepare("SELECT * FROM providers WHERE id=?").get(task.provider_id) as Provider | undefined)
+            : undefined;
+          await startSession(localRunner, task.session, task.worktree_path, null, {
+            continue: true,
+            env: providerEnv(provider),
+            agent: asAgentKind(task.agent),
+            model: task.agent_model,
+          });
+        },
+        writeManifest: (tid) => writeTaskManifest(DATA_DIR, db.prepare("SELECT * FROM tasks WHERE id=?").get(tid) as Task),
+      },
+      id,
+    ),
+  cleanup: (id) =>
+    cleanupTask(
+      {
+        db,
+        killSession: (session) => killSession(localRunner, session),
+        removeWorktree: (mirror, worktree, workBranch) => removeWorktree(localRunner, mirror, worktree, workBranch),
+        writeManifest: (tid) => writeTaskManifest(DATA_DIR, db.prepare("SELECT * FROM tasks WHERE id=?").get(tid) as Task),
+      },
+      id,
+    ),
+  deleteTask: (id) =>
+    deleteTaskRecord(
+      {
+        db,
+        exists: (target) => localRunner.exists(target),
+        removeManifest: (tid) => removeTaskManifest(DATA_DIR, tid),
       },
       id,
     ),

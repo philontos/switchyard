@@ -95,6 +95,7 @@ function fakeDeps(db: Database.Database) {
   const createCalls: { cwd?: string | null; title?: string | null }[] = [];
   const repoCalls: any[] = [];
   const stopCalls: number[] = [];
+  const lifecycleCalls: Array<[string, number]> = [];
   const branchCalls: string[] = [];
   const providerCalls: any[] = [];
   return {
@@ -123,6 +124,18 @@ function fakeDeps(db: Database.Database) {
         stopCalls.push(id);
         return { ok: true as const };
       },
+      resume: async (id: number) => {
+        lifecycleCalls.push(["resume", id]);
+        return { ok: true as const, alreadyAlive: false };
+      },
+      cleanup: async (id: number) => {
+        lifecycleCalls.push(["cleanup", id]);
+        return { ok: true as const };
+      },
+      deleteTask: async (id: number) => {
+        lifecycleCalls.push(["delete-task", id]);
+        return { ok: true as const };
+      },
       providersList: () => [{ id: 2, name: "GLM", base_url: "https://open.bigmodel.cn/api/anthropic", auth_token: "tok", model: "glm-5.2", small_fast_model: null, created_at: "now" }],
       providersTest: async (body: any) => {
         providerCalls.push(["test", body]);
@@ -146,6 +159,7 @@ function fakeDeps(db: Database.Database) {
     createCalls,
     repoCalls,
     stopCalls,
+    lifecycleCalls,
     branchCalls,
     providerCalls,
     get out() {
@@ -293,6 +307,21 @@ test("runCli stop rejects a non-numeric id with exit 1", async () => {
   assert.equal(code, 1);
   assert.match(f.out, /invalid id/);
   assert.deepEqual(f.stopCalls, []);
+});
+
+test("runCli dispatches the remote archived-task lifecycle verbs", async () => {
+  const f = fakeDeps(seed());
+  assert.equal(await runCli(["resume", "7"], f.deps), 0);
+  assert.equal(await runCli(["cleanup", "7"], f.deps), 0);
+  assert.equal(await runCli(["delete-task", "7"], f.deps), 0);
+  assert.deepEqual(f.lifecycleCalls, [["resume", 7], ["cleanup", 7], ["delete-task", 7]]);
+});
+
+test("runCli rejects an invalid archived-task lifecycle id", async () => {
+  const f = fakeDeps(seed());
+  assert.equal(await runCli(["resume", "nope"], f.deps), 1);
+  assert.match(f.out, /invalid id/);
+  assert.deepEqual(f.lifecycleCalls, []);
 });
 
 test("runCli branches lists a mirror's branches as JSON, exits 0", async () => {

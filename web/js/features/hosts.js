@@ -4,10 +4,11 @@
 // modal, and delete. Shells (local + remote) live in the per-machine Shells group
 // (rendered here, created via addLocalTask in tasks.js).
 import { $, api } from "../core/dom.js";
-import { toast } from "../core/feedback.js";
+import { hideLoading, showLoading, toast } from "../core/feedback.js";
 import { confirmDialog } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
 import { controllerOnlyRepos } from "../core/repos.js";
+import { taskLifecycle } from "../core/task-lifecycle.js";
 import { state } from "../core/state.js";
 import { repoGroupHead } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask, connect,
@@ -69,7 +70,7 @@ export async function loadFleet() {
   // drop any open node-task terminal whose session is no longer live on its node
   const keep = new Set();
   for (const n of f.nodes) for (const tk of n.tasks || []) if (tk.status !== "cleaned") keep.add(`n${n.node.id}:${tk.id}`);
-  pruneNodePanes(keep);
+  if (pruneNodePanes(keep).includes(state.selectedTaskId)) state.selectedTaskId = null;
   renderList();
 }
 
@@ -102,6 +103,42 @@ export async function stopNodeTask(hostId, taskId) {
   }
 }
 
+// The archived-task lifecycle mirrors tasks.js, but the controller relays each
+// operation to the node that owns the task instead of touching its own DB.
+export async function removeNodeWt(hostId, taskId) {
+  if (!(await confirmDialog(t("task.removeWtConfirm"), { title: t("task.removeWorktree"), okText: t("common.delete"), danger: true }))) return;
+  try {
+    await api(`/api/nodes/${hostId}/tasks/${taskId}/cleanup`, { method: "POST" });
+    toast(t("toast.worktreeRemoved"), "success");
+    await loadFleet();
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  }
+}
+
+export async function resumeNodeTask(hostId, taskId) {
+  showLoading(t("loading.default"));
+  try {
+    await api(`/api/nodes/${hostId}/tasks/${taskId}/resume`, { method: "POST" });
+    toast(t("toast.resumed"), "success");
+    await loadFleet();
+    connectNode(hostId, taskId);
+  } catch (e) {
+    toast(t("toast.resumeFailed", { error: String(e?.message || e) }), "error", 6000);
+  } finally {
+    hideLoading();
+  }
+}
+
+export async function deleteNodeTask(hostId, taskId) {
+  try {
+    await api(`/api/nodes/${hostId}/tasks/${taskId}`, { method: "DELETE" });
+    await loadFleet();
+  } catch (e) {
+    toast(String(e?.message || e), "error");
+  }
+}
+
 // The status dot for a remote node's task — mirrors taskCard's local dot so the
 // remote breathing light reads identically: a live session breathes green, one
 // blocked on a permission prompt is steady amber ("needs you"), otherwise the dot
@@ -122,10 +159,9 @@ function fleetDot(tk) {
   return `<span class="sdot ${tk.status}" title="${tk.status}"></span>`;
 }
 
-// A card for a task running ON a remote node (from the fleet snapshot). Connect
-// attaches over ssh; the corner ⏹ stops it via the node. data-pane keys it for
-// paintSelection (so its selected state survives a refresh instead of flickering
-// off), and fleetDot gives it the same breathing/needs-you light a local card has.
+// A card for a task owned by a remote node (from the fleet snapshot). Its actions
+// mirror taskCard: stop while active; resume/remove-worktree/delete-record once
+// archived. Only a live active session is connectable.
 function fleetCard(hostId, tk) {
   const paneId = `n${hostId}:${tk.id}`;
   // selection is painted post-render by paintSelection, not baked into the markup
@@ -138,10 +174,25 @@ function fleetCard(hostId, tk) {
   const meta = tk.kind === "local"
     ? `<div class="muted">📂 <code>${tk.cwd || "~"}</code> <span class="tag-local">${t("local.tag")}</span></div>`
     : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;
-  return `<div class="card task task-${agent} clickable" data-pane="${paneId}" onclick="connectNode(${hostId},${tk.id})">
-      <button class="card-x stop" title="${t("task.stopTitle")}" aria-label="${t("task.stopTitle")}" onclick="event.stopPropagation();stopNodeTask(${hostId},${tk.id})"><span class="stop-ico" aria-hidden="true"></span></button>
+  const lifecycle = taskLifecycle(tk);
+  let icon, note = "";
+  if (lifecycle.action === "stop") {
+    icon = { glyph: `<span class="stop-ico" aria-hidden="true"></span>`, cls: " stop", title: t("task.stopTitle"), fn: `stopNodeTask(${hostId},${tk.id})` };
+  } else if (lifecycle.action === "removeWorktree") {
+    icon = { glyph: "🗑", cls: "", title: t("task.removeWorktree"), fn: `removeNodeWt(${hostId},${tk.id})` };
+    note = `<div class="muted">${t("task.worktreeKept")}</div>`;
+  } else {
+    icon = { glyph: "🗑", cls: "", title: t("task.deleteRecord"), fn: `deleteNodeTask(${hostId},${tk.id})` };
+  }
+  const resumeBtn = lifecycle.resumable
+    ? `<button class="t-resume" title="${t("task.resumeTitle")}" onclick="event.stopPropagation();resumeNodeTask(${hostId},${tk.id})">⟳ ${t("task.resume")}</button>`
+    : "";
+  const open = lifecycle.connectable ? ` clickable" onclick="connectNode(${hostId},${tk.id})` : "";
+  return `<div class="card task task-${agent}${open}" data-pane="${paneId}">
+      <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
       <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname">${tk.title}</span></div>
       ${meta}
+      ${note}${resumeBtn}
     </div>`;
 }
 

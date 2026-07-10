@@ -14,7 +14,7 @@ import { initMobile, isOn as isMobile, autoFollowing, enterTerminal, enterList, 
 import { initReading, reflectWaiting } from "./features/reading.js";
 import { state } from "./core/state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./features/repos.js";
-import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, updateHost } from "./features/hosts.js";
+import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, removeNodeWt, resumeNodeTask, deleteNodeTask, updateHost } from "./features/hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, cancelTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, addNodeShell, allTasks } from "./features/tasks.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./features/skills.js";
 import { initReorder } from "./features/reorder.js";
@@ -57,7 +57,8 @@ Object.assign(window, {
   delRepo, openRepoModal, closeRepoModal, addRepo,
   // hosts
   selectHost, openHostModal, closeHostModal, addHost, delHost,
-  toggleRepo, toggleArchived, toggleHostMenu, bootstrapHost, connectNode, stopNodeTask, addNodeShell, updateHost,
+  toggleRepo, toggleArchived, toggleHostMenu, bootstrapHost, connectNode, stopNodeTask,
+  removeNodeWt, resumeNodeTask, deleteNodeTask, addNodeShell, updateHost,
   // local controller
   updateSelf,
   // skills (official-plugin install)
