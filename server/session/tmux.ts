@@ -94,13 +94,21 @@ export async function startShellSession(runner: Runner, session: string, cwd: st
  * Normalize the tmux options Switchyard relies on for its web terminal. User/global
  * tmux config differs across machines; in particular `mouse off` makes trackpad
  * wheel gestures fall through as Up/Down keys in Codex, which flips prompt history
- * instead of scrolling. Set these on every dispatcher-owned session and again when
- * attaching an older session.
+ * instead of scrolling. A second problem is tmux's `window-size latest`: when a
+ * browser and a direct SSH attach have different dimensions, merely typing in the
+ * other client resizes the shared window. Codex then redraws at alternating widths,
+ * so its right border disappears and the whole TUI visibly squeezes back and forth.
+ * `smallest` keeps the shared pane inside every attached client; when a narrow client
+ * detaches, tmux automatically grows to the next-smallest one.
+ *
+ * Set these on every dispatcher-owned session and again when attaching an older
+ * session. Each command stays best-effort for older tmux versions.
  */
 export async function ensureSessionOptions(runner: Runner, session: string) {
   // keep the pane around if the agent/shell exits so the user can read the result
   await tmux(runner, ["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});
   await tmux(runner, ["set-option", "-t", session, "mouse", "on"]).catch(() => {});
+  await tmux(runner, ["set-window-option", "-t", session, "window-size", "smallest"]).catch(() => {});
 }
 
 export async function hasSession(runner: Runner, session: string): Promise<boolean> {
