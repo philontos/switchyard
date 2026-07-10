@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 import { db, Repo, Task, Host, Provider } from "../core/db.js";
 import { renameTask } from "../task/tasks.js";
 import { initMirror, fetchMirror, listBranches, removeWorktree, mirrorPath } from "../repo/git.js";
+import { findRepoByGitUrl } from "../repo/catalog.js";
 import { scanSkills, defaultSources } from "../skills/skills.js";
 import { extForMime, pasteTargetBase, pastedDest, pasteFilename } from "../task/paste.js";
 import { listAvailable, installPlugin } from "../skills/plugins.js";
@@ -111,7 +112,9 @@ app.get("/api/repos", (_req, res) => {
 app.post("/api/repos", (req, res) => {
   const { name, git_url, token, default_branch, project_path, host_id } = req.body ?? {};
   const lang = langFromReq(req);
-  if (!name || !git_url) return res.status(400).json({ error: tr(lang, "repo.fieldsRequired") });
+  const repoName = String(name || "").trim();
+  const gitUrl = String(git_url || "").trim();
+  if (!repoName || !gitUrl) return res.status(400).json({ error: tr(lang, "repo.fieldsRequired") });
   // a repo lives ON a machine — default to local, reject offline remotes
   const host = (host_id
     ? getHost.get(host_id)
@@ -119,25 +122,40 @@ app.post("/api/repos", (req, res) => {
   if (!host) return res.status(404).json({ error: tr(lang, "notFound") });
   if (host.kind !== "local" && host.status !== "online") return res.status(409).json({ error: tr(lang, "host.offline") });
   const runner = runnerFor(host);
-  const info = db.prepare(
-    "INSERT INTO repos (host_id, name, git_url, token, default_branch, project_path, status) VALUES (?,?,?,?,?,?,?)"
-  ).run(host.id, name, git_url, token || null, default_branch || "main", project_path || null, "cloning");
-  const id = Number(info.lastInsertRowid);
-  const dest = mirrorPath(runner.dataDir, id, name);
-  db.prepare("UPDATE repos SET mirror_path = ? WHERE id = ?").run(dest, id);
+  const existing = findRepoByGitUrl(db, host.id, gitUrl);
+  if (existing && existing.status !== "error") {
+    return res.json({ id: existing.id, existing: true, status: existing.status });
+  }
+
+  let id: number;
+  let dest: string;
+  if (existing) {
+    id = existing.id;
+    dest = existing.mirror_path || mirrorPath(runner.dataDir, id, repoName);
+    db.prepare(
+      "UPDATE repos SET name=?,git_url=?,token=?,default_branch=?,project_path=?,mirror_path=?,status='cloning',error=NULL WHERE id=?"
+    ).run(repoName, gitUrl, token || null, default_branch || "main", project_path || null, dest, id);
+  } else {
+    const info = db.prepare(
+      "INSERT INTO repos (host_id, name, git_url, token, default_branch, project_path, status) VALUES (?,?,?,?,?,?,?)"
+    ).run(host.id, repoName, gitUrl, token || null, default_branch || "main", project_path || null, "cloning");
+    id = Number(info.lastInsertRowid);
+    dest = mirrorPath(runner.dataDir, id, repoName);
+    db.prepare("UPDATE repos SET mirror_path = ? WHERE id = ?").run(dest, id);
+  }
   syncReposManifest();
 
   // register in background: init bare repo + validate connectivity (no download)
   (async () => {
     try {
-      await initMirror(runner, git_url, token || null, dest);
+      await initMirror(runner, gitUrl, token || null, dest);
       db.prepare("UPDATE repos SET status='ready', error=NULL WHERE id=?").run(id);
     } catch (e: any) {
       db.prepare("UPDATE repos SET status='error', error=? WHERE id=?").run(String(e.message || e), id);
     }
   })();
 
-  res.json({ id });
+  res.json({ id, existing: !!existing, retrying: !!existing, status: "cloning" });
 });
 
 app.post("/api/repos/:id/fetch", async (req, res) => {

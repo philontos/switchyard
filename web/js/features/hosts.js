@@ -7,6 +7,7 @@ import { $, api } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 import { confirmDialog } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
+import { controllerOnlyRepos } from "../core/repos.js";
 import { state } from "../core/state.js";
 import { repoGroupHead } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask, connect,
@@ -327,8 +328,10 @@ function renderListHtml() {
     </div>` : "";
   const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${newRepo}${menu}</div>`;
 
+  const isFleetView = !isLocal && state.fleet[h.id]?.ok;
   const repos = state.repos.filter(r => Number(r.host_id) === h.id);
-  const repoBlocks = repos.map(r => {
+  const visibleRepos = isFleetView ? controllerOnlyRepos(repos, state.fleet[h.id]?.repos || []) : repos;
+  const repoBlocks = visibleRepos.map(r => {
     // an in-flight create expands its own group (addTask), so pending cards are never
     // hidden by a collapsed body; still render them when collapsed, just in case.
     const collapsed = collapsedRepos.has(r.id);
@@ -410,13 +413,12 @@ function renderListHtml() {
       <span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
       ${archivedOpen ? (archived.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
 
-  // A bootstrapped, reachable remote shows ONE coherent view — the node's own live
-  // truth (nodeBlock). The legacy A's-db sections (repoBlocks/shellBlock/archBlock)
-  // belong to the old model and would double up with the fleet, so they're hidden.
-  // The local machine and not-yet-bootstrapped remotes keep the classic layout.
-  const isFleetView = !isLocal && state.fleet[h.id]?.ok;
+  // A reachable remote primarily shows the node's own live truth. Repositories
+  // registered by this controller use the controller's namespace, though, so they
+  // are not present in the node snapshot; prepend only those controller-only repos.
+  // controllerOnlyRepos also collapses historical duplicate registrations by URL.
   const html = isFleetView
-    ? header + nodeBlock + nodeArchBlock
+    ? header + repoBlocks + nodeBlock + nodeArchBlock
     : header + repoBlocks + shellBlock + nodeBlock + archBlock;
   // Buffer: nothing changed since the last write → leave the DOM alone. The markup
   // is a pure function of the render state (host, tasks, fleet, selection, collapse/

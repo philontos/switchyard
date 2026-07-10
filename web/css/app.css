@@ -223,6 +223,7 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .grp-head:not(.static):hover { background: var(--surface-2); }
 .grp-head.err { background: #f8514912; }   /* clone / connectivity check failed — faint red wash */
 .grp-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grp-repo-id { flex: none; color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
 .grp-status { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--amber); font-size: 11px; }
 .grp-status.error { color: var(--red-text); }
 .grp-err { color: var(--red-text); font-weight: 700; cursor: help; flex: none; }
