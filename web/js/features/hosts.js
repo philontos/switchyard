@@ -97,7 +97,7 @@ export function connectNode(hostId, taskId) {
   state.lastTaskByHost[hostId] = paneId;
   const host = state.hostsById[hostId];
   const attach = host ? `ssh ${host.target} tmux attach -t ${tk.session}` : `tmux attach -t ${tk.session}`;
-  openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, attach, paneId, "");
+  openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, attach, paneId, "", tk.agent);
   renderList();
 }
 

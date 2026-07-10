@@ -396,7 +396,13 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 /* manual preview-port box in the term bar (opens t<task>-<port>.localhost in a new tab) */
 .prev-port { width: 64px; flex: none; margin: 0; padding: 2px 7px; font-size: 12px; }
 .prev-btn { flex: none; width: auto; margin: 0; padding: 2px 9px; font-size: 13px; line-height: 1.2; }
-.term-pane { position: absolute; inset: 0; padding: 6px; }
+.term-pane { position: absolute; inset: 0; }
+/* FitAddon measures .term-pane, but only subtracts padding read from the xterm
+   element itself. Keeping the inset on the parent made it over-count the usable
+   width by 12px (usually 1–2 columns), which #term then clipped on the right.
+   Put the same visual inset where FitAddon expects it so its cols/rows match the
+   pixels xterm can actually paint. Global border-box keeps the padded root inside. */
+.term-pane > .xterm { padding: 6px; }
 .term-empty { position: absolute; inset: 38px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--faint-2); pointer-events: none; }
 .term-empty.hidden { display: none; }
 .term-empty .te-ic { font-size: 34px; opacity: .6; }
@@ -525,7 +531,7 @@ a { color: var(--accent-bar); }
     display: flex; position: fixed; left: 0; right: 0; z-index: 45;
     top: var(--vvt, 0px); height: var(--vvh, 100dvh);
     /* opaque: as a fixed overlay the column must fully hide the list beneath it
-       (xterm's 6px pane padding + the strip above the input bar are otherwise
+       (xterm's 6px inset + the strip above the input bar are otherwise
        transparent and the list bleeds through) */
     background: var(--bg);
   }
