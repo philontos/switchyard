@@ -10,6 +10,7 @@
 import { $ } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 import { createCodexUserMarkerOverlay } from "./codex-terminal-markers.js";
+import { activateCodexUnicode } from "./terminal-unicode.js";
 
 // taskId -> { id, pane, term, fit, ws, query, agent, title, attach, resizeKey }
 const panes = new Map();
@@ -140,42 +141,15 @@ export function initTerm() {
   });
 }
 
-const RESIZE_RETRY_MS = 200;
-
-function clearResizeRetry(p) {
-  if (p.resizeRetry) { clearTimeout(p.resizeRetry); p.resizeRetry = null; }
-}
-
-function sendResize(p, force = false) {
+function sendResize(p) {
   if (!p.ws || p.ws.readyState !== 1) return;
   const key = p.term.cols + "x" + p.term.rows;
   // iOS Safari can emit several resize/visualViewport/ResizeObserver events while
   // the terminal overlay settles. Re-sending the same dimensions makes tmux/TUIs
   // repaint whole screens with no layout benefit, which reads as terminal flicker.
-  if (!force && p.resizeKey === key) return;
+  if (p.resizeKey === key) return;
   p.resizeKey = key;
   p.ws.send("\x00resize:" + key);
-  if (force) return;
-
-  // A controller that has not restarted onto the initial-resize race fix can
-  // lose the very first frame while it awaits tmux setup. New controllers ACK
-  // immediately; with an old one, retry once after both server setup and browser
-  // layout have settled. This keeps updated static clients usable before restart.
-  p.resizeAck = "";
-  const ws = p.ws;
-  clearResizeRetry(p);
-  p.resizeRetry = setTimeout(() => {
-    p.resizeRetry = null;
-    if (p.ws !== ws || ws.readyState !== 1 || p.resizeAck === p.resizeKey) return;
-    if (activeId === p.id) { try { p.fit.fit(); } catch {} }
-    sendResize(p, true);
-  }, RESIZE_RETRY_MS);
-}
-
-function resizeAck(data) {
-  if (!(data instanceof ArrayBuffer)) return "";
-  const message = new TextDecoder().decode(data);
-  return message.startsWith("\x00resized:") ? message.slice("\x00resized:".length) : "";
 }
 
 // Mobile: let a one-finger vertical drag over the terminal SCROLL it. xterm only
@@ -262,11 +236,23 @@ function createPane(id, query, agent) {
   const term = new Terminal({
     fontSize: 13, fontFamily: "Menlo, monospace", cursorBlink: true,
     theme: termTheme(),
+    // xterm's built-in table is Unicode 6 (2010), while current TUIs calculate
+    // widths from much newer data. Codex is the path where a one-cell mismatch
+    // at the right edge is especially visible, so enable xterm's stable Unicode
+    // 11 provider there. The proposed flag is required by xterm 5.5's API.
+    allowProposedApi: agent === "codex",
     macOptionClickForcesSelection: true,   // mac: Option+拖拽 强制本地选区(绕开 TUI 鼠标模式)
     rightClickSelectsWord: true,
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
+  if (agent === "codex") {
+    try {
+      if (!activateCodexUnicode(term, agent)) throw new Error("addon script did not load");
+    } catch (e) {
+      console.warn("xterm Unicode 11 provider unavailable; using built-in widths", e);
+    }
+  }
   term.open(pane);
 
   // mobile: all input goes through the on-screen quick-input bar, so make xterm's
@@ -289,7 +275,7 @@ function createPane(id, query, agent) {
   const p = {
     id, pane, term, fit, ws: null, query, agent,
     title: "", desc: "", attach: "", claude: "",
-    resizeKey: "", resizeAck: "", resizeRetry: null,
+    resizeKey: "",
     codexMarkers: agent === "codex" ? createCodexUserMarkerOverlay(term) : null,
   };
 
@@ -334,17 +320,9 @@ function ensureSocket(p) {
   if (p.ws && (p.ws.readyState === 0 || p.ws.readyState === 1)) return;   // CONNECTING/OPEN
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = p.ws = new WebSocket(`${proto}://${location.host}/pty?${p.query}&lang=${I18N.lang}`);
-  ws.binaryType = "arraybuffer"; // binary frames are server→client control ACKs; PTY data stays text
   p.resizeKey = "";       // a new pty needs one initial size even if dimensions match the old socket
-  p.resizeAck = "";
-  clearResizeRetry(p);
   ws.onopen = () => { if (activeId === p.id) { try { p.fit.fit(); } catch {} } sendResize(p); };
   ws.onmessage = (e) => {
-    const ack = resizeAck(e.data);
-    if (ack) {
-      if (ack === p.resizeKey) { p.resizeAck = ack; clearResizeRetry(p); }
-      return;
-    }
     if (typeof e.data !== "string") return;
     if (p.agent === "codex") {
       p.term.write(e.data, () => { if (p.agent === "codex") p.codexMarkers?.scan(); });
@@ -354,7 +332,6 @@ function ensureSocket(p) {
   };
   ws.onclose = () => {
     if (p.ws === ws) {
-      clearResizeRetry(p);
       p.term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
     }
   };
@@ -641,7 +618,6 @@ export function disposePty(id) {
   const p = panes.get(id);
   if (!p) return;
   panes.delete(id);
-  clearResizeRetry(p);
   try { if (p.ws) { p.ws.onclose = null; p.ws.onmessage = null; p.ws.close(); } } catch {}
   try { p.codexMarkers?.dispose(); } catch {}
   try { p.term.dispose(); } catch {}

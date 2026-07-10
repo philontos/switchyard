@@ -39,12 +39,13 @@ test("cancelCopyMode swallows runner errors (not-in-copy-mode is a harmless no-o
   await cancelCopyMode(runner, "tdsp-1-x"); // must not throw
 });
 
-test("ensureSessionOptions keeps exited panes readable and enables tmux mouse scroll", async () => {
+test("ensureSessionOptions keeps panes readable, enables mouse, and stabilizes multi-client width", async () => {
   const { runner, calls } = fakeRunner();
   await ensureSessionOptions(runner, "tdsp-1-x");
   assert.deepEqual(calls, [
     { file: "tmux", args: ["set-option", "-t", "tdsp-1-x", "remain-on-exit", "on"] },
     { file: "tmux", args: ["set-option", "-t", "tdsp-1-x", "mouse", "on"] },
+    { file: "tmux", args: ["set-window-option", "-t", "tdsp-1-x", "window-size", "smallest"] },
   ]);
 });
 
@@ -156,7 +157,7 @@ test("startSession(agent='codex') launches codex full-access with the prompt", a
   // push / run gh / reach the network; the git metadata dirs are still passed as
   // extra writable roots (a no-op with the sandbox off, kept for uniformity).
   await startSession(runner, "tdsp-1-x", "/wt", "do it", { agent: "codex" });
-  assert.deepEqual(calls.at(-3), { file: "tmux", args: [
+  assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
     "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "do it",
@@ -168,7 +169,7 @@ test("startSession(agent='codex', continue) resumes with `codex resume --last`",
   // codex resumes the most-recent conversation in this cwd — the opening prompt
   // is NOT re-sent, mirroring claude --continue.
   await startSession(runner, "tdsp-1-x", "/wt", "the original prompt", { agent: "codex", continue: true });
-  assert.deepEqual(calls.at(-3), { file: "tmux", args: [
+  assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
     "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "resume", "--last",
@@ -178,7 +179,7 @@ test("startSession(agent='codex', continue) resumes with `codex resume --last`",
 test("startSession(agent='codex', model) passes -m <model> before the prompt", async () => {
   const { runner, calls } = fakeRunner();
   await startSession(runner, "tdsp-1-x", "/wt", "go", { agent: "codex", model: "gpt-5.4" });
-  assert.deepEqual(calls.at(-3), { file: "tmux", args: [
+  assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
     "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "-m", "gpt-5.4", "go",
