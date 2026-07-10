@@ -87,7 +87,7 @@ export function repoGroupHead(r, online, collapsed, tasks = []) {
     : "";
   return `<div class="grp-head${r.status === "error" ? " err" : ""}" onclick="toggleRepo(${r.id})">
     ${dot}
-    <span class="grp-name">${esc(r.name)}</span>
+    <span class="grp-name"><span aria-hidden="true">📦</span> ${esc(r.name)}</span>
     <span class="grp-repo-id">#${Number(r.id)}</span>
     ${statusText ? `<span class="grp-status ${r.status === "error" ? "error" : ""}">${esc(statusText)}</span>` : ""}
     ${summary}
