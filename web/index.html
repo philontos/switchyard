@@ -25,8 +25,8 @@
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
   <div id="m-list" class="list"></div>
-  <div id="termcol" class="termcol">
-    <div id="termbar" class="termbar">
+  <div class="termcol">
+    <div class="termbar">
       <!-- mobile master-detail: back to the machine/repo list. Hidden on desktop
            (the list is always visible there). -->
       <button id="term-back" class="sec" onclick="mobileBack()" data-i18n-title="m.back" aria-label="Back">‹</button>
@@ -52,7 +52,6 @@
     <!-- mobile-only reading pane: the agent conversation as a scrollable chat (reading.js).
          Hidden on desktop and in 实时 mode. -->
     <div id="term-read" class="term-read"></div>
-    <button id="read-jump" class="read-jump" type="button"><span aria-hidden="true">↓</span><span class="read-jump-label" data-i18n="read.latest"></span></button>
     <div id="term"></div>
     <div id="term-empty" class="term-empty"><div class="te-ic">🖥</div><div data-i18n="term.empty"></div></div>
     <!-- mobile-only quick-input bar (hidden on desktop via CSS). A whole line is
@@ -62,9 +61,9 @@
          ↑↓↵ drive any other menu, ⌃C/Esc interrupt. All input on mobile routes
          through here — see js/features/mobile.js. -->
     <div id="term-input" class="term-input">
-      <!-- quick-key popover: toggled by the draggable floating button, and auto-opened while the dock task is
+      <!-- quick-key popover: toggled by the fixed keyboard button, and auto-opened while the dock task is
            blocked on a permission prompt (mobile.js reflectKeysWaiting). Sticky —
-           tapping a key sends but does NOT close it; only the floating button closes it. Absolute-
+           tapping a key sends but does NOT close it; only the keyboard button closes it. Absolute-
            positioned, so opening it overlays the terminal instead of resizing/
            refitting it. Key order: answer digits in the thumb zone, interrupt keys
            (⌃C/Esc) far right so a stray thumb can't reach them by accident. -->
@@ -84,11 +83,11 @@
         <textarea id="ti-field" rows="1" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-i18n-ph="m.inputPh"></textarea>
         <button id="ti-send" class="primary" type="button" data-i18n="m.send"></button>
       </div>
+      <!-- Fixed mobile overlay controls: keyboard at bottom-left, latest at bottom-right.
+           Both rise with this composer and with the open quick-key row. -->
+      <button id="ti-float" class="ti-float" type="button" aria-label="Keys" aria-controls="ti-keys" aria-expanded="false" data-i18n-title="m.fnKeys"><span class="ti-float-icon" aria-hidden="true"></span></button>
+      <button id="read-jump" class="read-jump" type="button"><span aria-hidden="true">↓</span><span class="read-jump-label" data-i18n="read.latest"></span></button>
     </div>
-    <!-- Mobile-only draggable special-key control. It floats over terminal content,
-         snaps to either screen edge, and is constrained away from navigation,
-         composer, and the expanded quick-key row. -->
-    <button id="ti-float" class="ti-float" type="button" aria-label="Keys" aria-controls="ti-keys" aria-expanded="false" data-i18n-title="m.fnKeys"><span class="ti-float-icon" aria-hidden="true"></span></button>
   </div>
 </div>
 

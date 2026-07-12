@@ -626,24 +626,17 @@ a { color: var(--accent-bar); }
     border: none; border-radius: 6px; background: var(--amber); color: #1a1613; white-space: nowrap; }
 
   /* Compact jump-to-latest arrow (shown by reading.js when scrolled up). JS publishes
-     the actual bottom occlusion, including a multiline composer and open quick keys.
-     Its 34px visual circle has a 44px hit target and defaults to the bottom-right. */
+     its visibility; anchoring it inside the composer makes multiline input and open
+     quick keys move it vertically without changing its fixed right edge. */
   #read-jump.show { display: inline-flex; align-items: center; justify-content: center; position: absolute;
-    right: 10px; bottom: calc(var(--term-bottom-occlusion, 59px) + 17px); z-index: 5;
+    right: 10px; bottom: calc(100% + var(--ti-keys-offset) + 17px); z-index: 5;
     width: 34px; height: 34px; min-height: 0; padding: 0; font-size: 16px; font-weight: 600;
     line-height: 1; border: none; border-radius: 50%;
     background: var(--accent-strong); color: #fff; box-shadow: 0 4px 12px var(--shadow); }
   #read-jump::after { content: ""; position: absolute; inset: -5px; }
   .read-jump-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-  /* A user may drag the keyboard control to the right edge. Keep Latest one lane to
-     its left in that case; the default keyboard-left layout leaves Latest at right. */
-  #termcol.float-edge-right #read-jump.show { right: 76px; }
   body.mode-live #read-jump { display: none; }
-  /* If a landscape keyboard leaves no content lane at all, the higher-priority key
-     control docks into reserved header space and Latest yields until room returns. */
-  #termcol.float-cramped #term-title { padding-right: 56px; }
-  #termcol.float-cramped #read-jump.show { display: none; }
 
   /* message stream */
   .rd-state { color: var(--faint); font-size: 13px; text-align: center; padding: 40px 16px; }
@@ -681,15 +674,17 @@ a { color: var(--accent-bar); }
     color: var(--muted); white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; }
 
   /* --- quick-input bar (wired in mobile.js): auto-growing compose field + Send, with
-     a floating-control-toggled special-key popover --- */
+     a fixed-control-toggled special-key popover --- */
   .term-input {
     position: relative;   /* anchor the floating .ti-keys popover */
+    --ti-keys-offset: 0px;
     z-index: 4; display: flex; flex: none; flex-direction: column;
     padding: 7px 10px max(7px, env(safe-area-inset-bottom));
     border-top: 1px solid var(--border); background: var(--surface);
   }
+  .term-input.keys-open { --ti-keys-offset: 61px; } /* 44px key + 16px padding + 1px border */
   /* quick keys: a popover floating just above the input row, shown while .keys-open
-     (floating toggle, or auto-opened on a waiting permission prompt). Absolute so toggling
+     (fixed toggle, or auto-opened on a waiting permission prompt). Absolute so toggling
      it never resizes the terminal (no refit churn). One row, keys share the width
      evenly — every key is a 44px-tall thumb target, no precision needed. */
   .ti-keys {
@@ -716,26 +711,20 @@ a { color: var(--accent-bar); }
     resize: none; overflow-y: auto; }
   #ti-send { flex: none; width: auto; height: 44px; margin: 0; padding: 0 18px; font-size: 14px; }
 
-  /* Draggable special-key "orb": mobile terminal only. JS owns left/top after the
-     first layout; the left/bottom values are a no-flash fallback for that first frame.
-     It stays above ordinary content but below global dialogs/toasts. */
+  /* Fixed special-key control: bottom-left, paired with Latest at bottom-right. */
   .ti-float {
     display: inline-flex; position: absolute; z-index: 6;
-    left: 10px; bottom: calc(var(--term-bottom-occlusion, 59px) + 10px);
+    left: 10px; bottom: calc(100% + var(--ti-keys-offset) + 10px);
     width: 48px; height: 48px; min-height: 0; margin: 0; padding: 0;
-    align-items: center; justify-content: center; touch-action: none;
+    align-items: center; justify-content: center;
     color: var(--muted); background: color-mix(in srgb, var(--surface-2) 92%, transparent);
     border: 1px solid var(--border-hover); border-radius: 50%;
     box-shadow: 0 5px 18px var(--shadow);
-    opacity: .9; cursor: grab; user-select: none; -webkit-user-select: none;
-    transition: left .18s ease-out, top .18s ease-out, transform .12s, opacity .12s,
-      background .12s, border-color .12s, color .12s;
+    opacity: .9; user-select: none; -webkit-user-select: none;
+    transition: transform .12s, opacity .12s, background .12s, border-color .12s, color .12s;
   }
   .ti-float:hover, .ti-float:active { opacity: 1; background: var(--surface-3); }
   .ti-float:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .ti-float.dragging { transition: none; cursor: grabbing; opacity: 1; transform: scale(1.06); }
-  .ti-float.no-motion { transition: none; }
-  .term-input.keys-open + .ti-float,
   .ti-float[aria-expanded="true"] { color: var(--accent-text); background: #d9775730; border-color: #d9775799; }
   /* Monochrome CSS keyboard icon — avoids platform-dependent emoji rendering. */
   .ti-float-icon { position: relative; display: block; width: 23px; height: 17px;
