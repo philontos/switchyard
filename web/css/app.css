@@ -625,13 +625,17 @@ a { color: var(--accent-bar); }
   #read-banner button { margin: 0 0 0 auto; padding: 5px 12px; font-size: 12.5px; font-weight: 600;
     border: none; border-radius: 6px; background: var(--amber); color: #1a1613; white-space: nowrap; }
 
-  /* jump-to-latest pill (shown by reading.js when scrolled up). JS publishes the
-     actual bottom occlusion, including a multiline composer and open quick keys.
-     The right gap leaves the floating key control its own edge lane. */
-  #read-jump.show { display: inline-flex; align-items: center; gap: 5px; position: absolute;
-    right: 76px; bottom: calc(var(--term-bottom-occlusion, 59px) + 10px); z-index: 5;
-    padding: 8px 14px; font-size: 13px; font-weight: 600; border: none; border-radius: 999px;
-    background: var(--accent-strong); color: #fff; box-shadow: 0 6px 20px var(--shadow); }
+  /* Compact jump-to-latest arrow (shown by reading.js when scrolled up). JS publishes
+     the actual bottom occlusion, including a multiline composer and open quick keys.
+     Its 34px visual circle has a 44px hit target and stays centered beside the orb. */
+  #read-jump.show { display: inline-flex; align-items: center; justify-content: center; position: absolute;
+    right: 76px; bottom: calc(var(--term-bottom-occlusion, 59px) + 17px); z-index: 5;
+    width: 34px; height: 34px; min-height: 0; padding: 0; font-size: 16px; font-weight: 600;
+    line-height: 1; border: none; border-radius: 50%;
+    background: var(--accent-strong); color: #fff; box-shadow: 0 4px 12px var(--shadow); }
+  #read-jump::after { content: ""; position: absolute; inset: -5px; }
+  .read-jump-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   body.mode-live #read-jump { display: none; }
   /* If a landscape keyboard leaves no content lane at all, the higher-priority key
      control docks into reserved header space and Latest yields until room returns. */
