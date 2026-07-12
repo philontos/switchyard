@@ -28,7 +28,7 @@ function makeClassList() {
 function makeEl() {
   return {
     style: {}, value: "", textContent: "", classList: makeClassList(),
-    addEventListener() {}, focus() {}, blur() {}, contains: () => false,
+    addEventListener() {}, setAttribute() {}, focus() {}, blur() {}, contains: () => false,
   };
 }
 const els = new Map();
