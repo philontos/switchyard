@@ -31,9 +31,9 @@ test("preference keeps an edge and proportional height across viewport changes",
   assert.deepEqual(positionFromPreference(keyboardOpen, preference), { x: 332, y: 184 });
 });
 
-test("default placement is bottom-right and malformed preferences stay safe", () => {
+test("default placement is bottom-left and malformed preferences stay safe", () => {
   const bounds = floatingBounds({ width: 320, top: 80, bottom: 260 });
-  assert.deepEqual(positionFromPreference(bounds), { x: 262, y: 202 });
+  assert.deepEqual(positionFromPreference(bounds), { x: 10, y: 202 });
   assert.deepEqual(positionFromPreference(bounds, { edge: "left", yRatio: 8 }), { x: 10, y: 202 });
 });
 

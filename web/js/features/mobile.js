@@ -273,7 +273,7 @@ function sendLine() {
 // height while keeping it off top chrome and input controls. In the rare landscape
 // case with no content lane at all, it docks into a reserved right side of the header.
 const FLOAT_PREF_KEY = "switchyard.mobile-key-float.v1";
-let floatPreference = { edge: "right", yRatio: 1 };
+let floatPreference = { edge: "left", yRatio: 1 };
 let floatReady = false;
 let floatDrag = null;
 let lastFloatBounds = null;
@@ -286,11 +286,15 @@ function loadFloatPreference() {
       return { edge: p.edge, yRatio: Math.min(1, Math.max(0, Number(p.yRatio))) };
     }
   } catch {}
-  return { edge: "right", yRatio: 1 };
+  return { edge: "left", yRatio: 1 };
 }
 
 function saveFloatPreference() {
   try { window.localStorage?.setItem(FLOAT_PREF_KEY, JSON.stringify(floatPreference)); } catch {}
+}
+
+function reflectFloatEdge() {
+  $("termcol").classList.toggle("float-edge-right", floatPreference.edge === "right");
 }
 
 // Measure one bottom blocker: the composer itself while closed, or the top of the
@@ -366,6 +370,7 @@ function requestOverlayLayout() {
 function initFloatingKeyControl() {
   const button = $("ti-float");
   floatPreference = loadFloatPreference();
+  reflectFloatEdge();
   floatReady = true;
 
   button.addEventListener("pointerdown", (e) => {
@@ -424,6 +429,7 @@ function initFloatingKeyControl() {
     const measured = measureOverlayLayout();
     if (measured) lastFloatBounds = measured.bounds;
     floatPreference = preferenceFromPosition(lastFloatBounds, drag.position);
+    reflectFloatEdge();
     saveFloatPreference();
     // Repainting from the free drag coordinate to its preferred edge uses the normal
     // left/top transition, giving a short, predictable magnetic snap.
