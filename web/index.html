@@ -25,8 +25,8 @@
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
   <div id="m-list" class="list"></div>
-  <div class="termcol">
-    <div class="termbar">
+  <div id="termcol" class="termcol">
+    <div id="termbar" class="termbar">
       <!-- mobile master-detail: back to the machine/repo list. Hidden on desktop
            (the list is always visible there). -->
       <button id="term-back" class="sec" onclick="mobileBack()" data-i18n-title="m.back" aria-label="Back">‹</button>
@@ -62,13 +62,13 @@
          ↑↓↵ drive any other menu, ⌃C/Esc interrupt. All input on mobile routes
          through here — see js/features/mobile.js. -->
     <div id="term-input" class="term-input">
-      <!-- quick-key popover: toggled by Fn, and auto-opened while the dock task is
+      <!-- quick-key popover: toggled by the draggable floating button, and auto-opened while the dock task is
            blocked on a permission prompt (mobile.js reflectKeysWaiting). Sticky —
-           tapping a key sends but does NOT close it; only Fn closes it. Absolute-
+           tapping a key sends but does NOT close it; only the floating button closes it. Absolute-
            positioned, so opening it overlays the terminal instead of resizing/
            refitting it. Key order: answer digits in the thumb zone, interrupt keys
            (⌃C/Esc) far right so a stray thumb can't reach them by accident. -->
-      <div class="ti-keys">
+      <div id="ti-keys" class="ti-keys">
         <button class="ti-key tk-num" data-k="1" type="button">1</button>
         <button class="ti-key tk-num" data-k="2" type="button">2</button>
         <button class="ti-key tk-num" data-k="3" type="button">3</button>
@@ -82,10 +82,13 @@
         <!-- auto-growing compose field (mobile.js). Enter inserts a newline; 发送 sends
              (a multiline value goes as one bracketed paste + Enter). -->
         <textarea id="ti-field" rows="1" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-i18n-ph="m.inputPh"></textarea>
-        <button id="ti-fn" class="ti-fn sec" type="button" aria-label="Keys" data-i18n-title="m.fnKeys">⌃</button>
         <button id="ti-send" class="primary" type="button" data-i18n="m.send"></button>
       </div>
     </div>
+    <!-- Mobile-only draggable special-key control. It floats over terminal content,
+         snaps to either screen edge, and is constrained away from navigation,
+         composer, and the expanded quick-key row. -->
+    <button id="ti-float" class="ti-float" type="button" aria-label="Keys" aria-controls="ti-keys" aria-expanded="false" data-i18n-title="m.fnKeys"><span class="ti-float-icon" aria-hidden="true"></span></button>
   </div>
 </div>
 

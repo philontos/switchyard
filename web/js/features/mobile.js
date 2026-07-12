@@ -13,6 +13,13 @@ import { toast } from "../core/feedback.js";
 import { state } from "../core/state.js";
 import { sendToActive, submitToActive, fitActiveNow } from "./terminal.js";
 import { openReading, closeReading, scrollReadingToBottom, echoUser } from "./reading.js";
+import {
+  FLOAT_SIZE,
+  clampFloatingPosition,
+  floatingBounds,
+  positionFromPreference,
+  preferenceFromPosition,
+} from "./mobile-floating.js";
 
 const MQ = window.matchMedia("(max-width: 760px)");
 export function isOn() { return MQ.matches; }
@@ -84,9 +91,10 @@ function showTermView() {
   // has no conversation yet); a shell / pending / node task opens straight in 实时.
   setMode(curCanRead ? "read" : "live");
   syncViewport();               // fix --vvh/--vvt before the fixed termcol paints
+  syncOverlayLayout({ instant: true });   // apply a saved float position before the first visible frame
   // the term column was display:none in list view, so its pane couldn't be
   // measured — refit once it's laid out (next frame).
-  requestAnimationFrame(fitActiveNow);
+  requestAnimationFrame(() => { fitActiveNow(); syncOverlayLayout({ instant: true }); });
 }
 
 export function enterTerminal(id, canRead = typeof id === "number") {
@@ -167,6 +175,18 @@ let keysAutoOpened = false;   // we opened the row (so we also close it when the
 let keysSuppressed = false;   // user closed it during this prompt — don't re-open until the next one
 let lastWaiting = false;
 function resetKeysEpisode() { keysAutoOpened = false; keysSuppressed = false; lastWaiting = false; }
+function setKeysOpen(open) {
+  $("term-input").classList.toggle("keys-open", open);
+  $("ti-float").setAttribute("aria-expanded", String(open));
+  syncOverlayLayout({ instant: true });
+  return open;
+}
+
+function toggleKeysManually() {
+  const open = setKeysOpen(!$("term-input").classList.contains("keys-open"));
+  keysAutoOpened = false;
+  keysSuppressed = !open && lastWaiting;
+}
 
 // Whether the dock task is blocked on a permission prompt. Local tasks come from the
 // polled list (numeric id); a remote node's pane id looks like "n<host>:<task>" and
@@ -187,8 +207,8 @@ export function reflectKeysWaiting(tasks) {
   bar.classList.toggle("keys-urgent", waiting);
   if (waiting && !lastWaiting) keysSuppressed = false;   // a fresh prompt lifts the old suppression
   const open = bar.classList.contains("keys-open");
-  if (waiting && !open && !keysSuppressed) { bar.classList.add("keys-open"); keysAutoOpened = true; }
-  else if (!waiting && open && keysAutoOpened) { bar.classList.remove("keys-open"); keysAutoOpened = false; }
+  if (waiting && !open && !keysSuppressed) { setKeysOpen(true); keysAutoOpened = true; }
+  else if (!waiting && open && keysAutoOpened) { setKeysOpen(false); keysAutoOpened = false; }
   lastWaiting = waiting;
 }
 
@@ -204,6 +224,7 @@ function syncViewport() {
   const s = document.documentElement.style;
   s.setProperty("--vvh", vv.height + "px");
   s.setProperty("--vvt", vv.offsetTop + "px");
+  requestOverlayLayout();
 }
 
 // single raw keystrokes for the quick-key row — sent as-is to the pty, exactly like
@@ -221,6 +242,7 @@ const TI_MAX = 160;
 function autoGrow(f) {
   f.style.height = "auto";
   f.style.height = Math.min(TI_MAX, f.scrollHeight) + "px";
+  syncOverlayLayout({ instant: true });
 }
 
 // Send the composed text, then Enter, and keep the field focused so the keyboard stays
@@ -244,12 +266,193 @@ function sendLine() {
   f.focus();
 }
 
+// ---- draggable special-key control + bottom-overlay geometry ----
+// Keep the control's preference as {edge, yRatio}, not pixels: the visual viewport,
+// soft keyboard, multiline composer, permission-key row, and reading banner all change
+// the safe rectangle during normal use. Re-projecting a ratio keeps the user's chosen
+// height while keeping it off top chrome and input controls. In the rare landscape
+// case with no content lane at all, it docks into a reserved right side of the header.
+const FLOAT_PREF_KEY = "switchyard.mobile-key-float.v1";
+let floatPreference = { edge: "right", yRatio: 1 };
+let floatReady = false;
+let floatDrag = null;
+let lastFloatBounds = null;
+let overlayLayoutQueued = false;
+
+function loadFloatPreference() {
+  try {
+    const p = JSON.parse(window.localStorage?.getItem(FLOAT_PREF_KEY) || "null");
+    if (p && (p.edge === "left" || p.edge === "right") && Number.isFinite(Number(p.yRatio))) {
+      return { edge: p.edge, yRatio: Math.min(1, Math.max(0, Number(p.yRatio))) };
+    }
+  } catch {}
+  return { edge: "right", yRatio: 1 };
+}
+
+function saveFloatPreference() {
+  try { window.localStorage?.setItem(FLOAT_PREF_KEY, JSON.stringify(floatPreference)); } catch {}
+}
+
+// Measure one bottom blocker: the composer itself while closed, or the top of the
+// absolutely-positioned quick-key row while open. The same measurement drives both
+// the orb's drag bounds and Latest's CSS offset, so those controls cannot drift into
+// the input panel independently.
+function measureOverlayLayout() {
+  if (!floatReady) return null;
+  const col = $("termcol");
+  const input = $("term-input");
+  const keys = $("ti-keys");
+  const button = $("ti-float");
+  if (![col, input, keys, button].every((el) => typeof el?.getBoundingClientRect === "function")) return null;
+
+  const colRect = col.getBoundingClientRect();
+  const inputRect = input.getBoundingClientRect();
+  if (colRect.width <= 0 || colRect.height <= 0 || inputRect.height <= 0) return null;
+
+  const keysOpen = input.classList.contains("keys-open");
+  const blockerRect = keysOpen ? keys.getBoundingClientRect() : inputRect;
+  const termbarRect = $("termbar").getBoundingClientRect();
+  const banner = $("read-banner");
+  const bannerRect = banner.classList.contains("show") ? banner.getBoundingClientRect() : null;
+  const topChromeBottom = Math.max(termbarRect.bottom, bannerRect?.bottom || termbarRect.bottom) - colRect.top;
+  const bottomBlockerTop = blockerRect.top - colRect.top;
+  const size = button.getBoundingClientRect().width || FLOAT_SIZE;
+
+  col.style.setProperty(
+    "--term-bottom-occlusion",
+    Math.max(0, colRect.bottom - blockerRect.top) + "px",
+  );
+  let bounds = floatingBounds({
+    width: colRect.width,
+    top: topChromeBottom,
+    bottom: bottomBlockerTop,
+    size,
+  });
+  const cramped = bounds.cramped;
+  col.classList.toggle("float-cramped", cramped);
+  if (cramped) {
+    const headerY = Math.max(4, termbarRect.top - colRect.top + (termbarRect.height - size) / 2);
+    bounds = { ...bounds, minX: bounds.maxX, minY: headerY, maxY: headerY };
+  }
+  return { colRect, bounds, cramped };
+}
+
+function paintFloatingPosition(position, { instant = false } = {}) {
+  const button = $("ti-float");
+  if (instant) button.classList.add("no-motion");
+  button.style.right = "auto";
+  button.style.bottom = "auto";
+  button.style.left = Math.round(position.x) + "px";
+  button.style.top = Math.round(position.y) + "px";
+  if (instant) requestAnimationFrame(() => button.classList.remove("no-motion"));
+}
+
+function syncOverlayLayout({ instant = true } = {}) {
+  const measured = measureOverlayLayout();
+  if (!measured) return;
+  lastFloatBounds = measured.bounds;
+  if (!floatDrag) paintFloatingPosition(positionFromPreference(lastFloatBounds, floatPreference), { instant });
+}
+
+function requestOverlayLayout() {
+  if (!floatReady || overlayLayoutQueued) return;
+  overlayLayoutQueued = true;
+  requestAnimationFrame(() => {
+    overlayLayoutQueued = false;
+    syncOverlayLayout({ instant: true });
+  });
+}
+
+function initFloatingKeyControl() {
+  const button = $("ti-float");
+  floatPreference = loadFloatPreference();
+  floatReady = true;
+
+  button.addEventListener("pointerdown", (e) => {
+    if (e.isPrimary === false || (e.button != null && e.button !== 0)) return;
+    e.preventDefault();   // preserve textarea focus / soft keyboard while tapping or dragging
+    syncOverlayLayout({ instant: true });
+    const measured = measureOverlayLayout();
+    if (!measured) return;
+    const r = button.getBoundingClientRect();
+    floatDrag = {
+      pointerId: e.pointerId,
+      pointerX: e.clientX,
+      pointerY: e.clientY,
+      startX: r.left - measured.colRect.left,
+      startY: r.top - measured.colRect.top,
+      position: { x: r.left - measured.colRect.left, y: r.top - measured.colRect.top },
+      moved: false,
+      locked: measured.cramped,
+      cancelTap: false,
+    };
+    lastFloatBounds = measured.bounds;
+    try { button.setPointerCapture?.(e.pointerId); } catch {}
+  });
+
+  button.addEventListener("pointermove", (e) => {
+    if (!floatDrag || e.pointerId !== floatDrag.pointerId) return;
+    const dx = e.clientX - floatDrag.pointerX;
+    const dy = e.clientY - floatDrag.pointerY;
+    if (floatDrag.locked) {
+      if (Math.hypot(dx, dy) >= 6) floatDrag.cancelTap = true;
+      return;
+    }
+    if (!floatDrag.moved && Math.hypot(dx, dy) < 6) return;   // tap jitter is not a drag
+    e.preventDefault();
+    if (!floatDrag.moved) { floatDrag.moved = true; button.classList.add("dragging"); }
+    const measured = measureOverlayLayout();
+    if (measured) lastFloatBounds = measured.bounds;
+    floatDrag.position = clampFloatingPosition(lastFloatBounds, {
+      x: floatDrag.startX + dx,
+      y: floatDrag.startY + dy,
+    });
+    paintFloatingPosition(floatDrag.position);
+  });
+
+  const finishDrag = (e, cancelled = false) => {
+    if (!floatDrag || e.pointerId !== floatDrag.pointerId) return;
+    e.preventDefault();
+    const drag = floatDrag;
+    floatDrag = null;
+    try { button.releasePointerCapture?.(e.pointerId); } catch {}
+    button.classList.remove("dragging");
+    if (!drag.moved) {
+      if (!cancelled && !drag.cancelTap) toggleKeysManually();
+      return;
+    }
+    const measured = measureOverlayLayout();
+    if (measured) lastFloatBounds = measured.bounds;
+    floatPreference = preferenceFromPosition(lastFloatBounds, drag.position);
+    saveFloatPreference();
+    // Repainting from the free drag coordinate to its preferred edge uses the normal
+    // left/top transition, giving a short, predictable magnetic snap.
+    paintFloatingPosition(positionFromPreference(lastFloatBounds, floatPreference));
+  };
+  button.addEventListener("pointerup", (e) => finishDrag(e));
+  button.addEventListener("pointercancel", (e) => finishDrag(e, true));
+  button.addEventListener("lostpointercapture", (e) => finishDrag(e, true));
+  // Native keyboard/switch-control activation has no pointer sequence (detail=0).
+  button.addEventListener("click", (e) => { if (e.detail === 0) toggleKeysManually(); });
+
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(requestOverlayLayout);
+    observer.observe($("termcol"));
+    observer.observe($("termbar"));
+    observer.observe($("read-banner"));
+    observer.observe($("term-input"));
+  }
+  window.addEventListener("resize", requestOverlayLayout);
+  requestOverlayLayout();
+}
+
 export function initMobile({ closeSheet } = {}) {
   onSheetClose = closeSheet || null;
   document.body.classList.toggle("mobile", isOn());
   MQ.addEventListener("change", () => {
     document.body.classList.toggle("mobile", isOn());
     if (!isOn()) enterList();   // crossing back to desktop: drop the view flag
+    else requestOverlayLayout();
   });
 
   // Platform back gesture ⇄ view stack (see navEntry above). The base entry is stamped
@@ -275,22 +478,13 @@ export function initMobile({ closeSheet } = {}) {
   const vv = window.visualViewport;
   if (vv) { vv.addEventListener("resize", syncViewport); vv.addEventListener("scroll", syncViewport); }
   syncViewport();
+  initFloatingKeyControl();
 
   // quick-input bar: Send fires the composed text; the field grows as you type (Enter
   // just inserts a newline now — Send, not Enter, submits).
   const field = $("ti-field");
   $("ti-send").addEventListener("click", sendLine);
   field.addEventListener("input", () => autoGrow(field));
-  // Fn: toggle the quick-key popover. pointerdown + preventDefault keeps the field
-  // focused (keyboard stays up); it's sticky — stays open until Fn is tapped again.
-  // A manual toggle takes ownership from the auto-expand: closing it while a prompt
-  // is still waiting suppresses re-opening for that prompt.
-  $("ti-fn").addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    const open = $("term-input").classList.toggle("keys-open");
-    keysAutoOpened = false;
-    keysSuppressed = !open && lastWaiting;
-  });
   // quick keys: fire on pointerdown + preventDefault so tapping a key does NOT
   // blur the text field — the keyboard stays up across taps.
   document.querySelectorAll("#term-input .ti-key").forEach((b) => {

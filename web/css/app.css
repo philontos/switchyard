@@ -509,7 +509,7 @@ a { color: var(--accent-bar); }
    16px inputs (anything smaller makes iOS auto-zoom the page on focus).
    ============================================================================ */
 /* mobile-only chrome — inert/hidden on desktop */
-#term-back, .term-input, #term-mode, #read-banner, #term-read, #read-jump { display: none; }
+#term-back, .term-input, .ti-float, #term-mode, #read-banner, #term-read, #read-jump { display: none; }
 
 @media (max-width: 760px) {
   body { font-size: 14px; line-height: 1.5; }
@@ -625,12 +625,18 @@ a { color: var(--accent-bar); }
   #read-banner button { margin: 0 0 0 auto; padding: 5px 12px; font-size: 12.5px; font-weight: 600;
     border: none; border-radius: 6px; background: var(--amber); color: #1a1613; white-space: nowrap; }
 
-  /* jump-to-latest pill (shown by reading.js when scrolled up) */
-  #read-jump.show { display: inline-flex; align-items: center; gap: 5px; position: fixed;
-    right: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 46;
+  /* jump-to-latest pill (shown by reading.js when scrolled up). JS publishes the
+     actual bottom occlusion, including a multiline composer and open quick keys.
+     The right gap leaves the floating key control its own edge lane. */
+  #read-jump.show { display: inline-flex; align-items: center; gap: 5px; position: absolute;
+    right: 76px; bottom: calc(var(--term-bottom-occlusion, 59px) + 10px); z-index: 5;
     padding: 8px 14px; font-size: 13px; font-weight: 600; border: none; border-radius: 999px;
     background: var(--accent-strong); color: #fff; box-shadow: 0 6px 20px var(--shadow); }
   body.mode-live #read-jump { display: none; }
+  /* If a landscape keyboard leaves no content lane at all, the higher-priority key
+     control docks into reserved header space and Latest yields until room returns. */
+  #termcol.float-cramped #term-title { padding-right: 56px; }
+  #termcol.float-cramped #read-jump.show { display: none; }
 
   /* message stream */
   .rd-state { color: var(--faint); font-size: 13px; text-align: center; padding: 40px 16px; }
@@ -668,15 +674,15 @@ a { color: var(--accent-bar); }
     color: var(--muted); white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; }
 
   /* --- quick-input bar (wired in mobile.js): auto-growing compose field + Send, with
-     a Fn-toggled control-key popover --- */
+     a floating-control-toggled special-key popover --- */
   .term-input {
     position: relative;   /* anchor the floating .ti-keys popover */
-    display: flex; flex: none; flex-direction: column;
+    z-index: 4; display: flex; flex: none; flex-direction: column;
     padding: 7px 10px max(7px, env(safe-area-inset-bottom));
     border-top: 1px solid var(--border); background: var(--surface);
   }
   /* quick keys: a popover floating just above the input row, shown while .keys-open
-     (Fn toggle, or auto-opened on a waiting permission prompt). Absolute so toggling
+     (floating toggle, or auto-opened on a waiting permission prompt). Absolute so toggling
      it never resizes the terminal (no refit churn). One row, keys share the width
      evenly — every key is a 44px-tall thumb target, no precision needed. */
   .ti-keys {
@@ -694,21 +700,44 @@ a { color: var(--accent-bar); }
   /* the dock task is blocked on a permission prompt (mobile.js adds .keys-urgent from
      the same amber-light signal as the task cards): tint the answer digits amber */
   .term-input.keys-urgent .tk-num { border-color: #d9775799; background: #d977571f; color: var(--accent-text); }
-  /* buttons pin to the row's BOTTOM so they hold still as the field grows upward */
+  /* Send pins to the row's BOTTOM so it holds still as the field grows upward. */
   .ti-row { display: flex; gap: 8px; align-items: flex-end; }
   /* compose field: one row (44px) tall, auto-grows with content up to a cap (mobile.js
-     sets the height), then scrolls. min-width:0 lets flex shrink it past its intrinsic
-     textarea width so the Fn/Send buttons keep their place. Enter inserts a newline;
-     Send fires it. */
+     sets the height), then scrolls. Enter inserts a newline; Send fires it. */
   #ti-field { flex: 1; min-width: 0; margin: 0; font-size: 16px; line-height: 1.4;
     min-height: 44px; height: 44px; max-height: 160px; padding: 10px 9px;
     resize: none; overflow-y: auto; }
-  /* Fn: a compact icon button (a chevron). Rotates 180° + tints accent when its
-     control-key popover is open, so the one glyph reads as both expand and close. */
-  .ti-fn { flex: none; width: 44px; height: 44px; margin: 0; padding: 0; font-size: 15px;
-    display: inline-flex; align-items: center; justify-content: center; transition: transform .18s ease, background .12s, border-color .12s, color .12s; }
-  .term-input.keys-open .ti-fn { transform: rotate(180deg); background: #d977571f; border-color: #d9775799; color: var(--accent-text); }
   #ti-send { flex: none; width: auto; height: 44px; margin: 0; padding: 0 18px; font-size: 14px; }
+
+  /* Draggable special-key "orb": mobile terminal only. JS owns left/top after the
+     first layout; the right/bottom values are a no-flash fallback for that first frame.
+     It stays above ordinary content but below global dialogs/toasts. */
+  .ti-float {
+    display: inline-flex; position: absolute; z-index: 6;
+    right: 10px; bottom: calc(var(--term-bottom-occlusion, 59px) + 10px);
+    width: 48px; height: 48px; min-height: 0; margin: 0; padding: 0;
+    align-items: center; justify-content: center; touch-action: none;
+    color: var(--muted); background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+    border: 1px solid var(--border-hover); border-radius: 50%;
+    box-shadow: 0 5px 18px var(--shadow);
+    opacity: .9; cursor: grab; user-select: none; -webkit-user-select: none;
+    transition: left .18s ease-out, top .18s ease-out, transform .12s, opacity .12s,
+      background .12s, border-color .12s, color .12s;
+  }
+  .ti-float:hover, .ti-float:active { opacity: 1; background: var(--surface-3); }
+  .ti-float:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ti-float.dragging { transition: none; cursor: grabbing; opacity: 1; transform: scale(1.06); }
+  .ti-float.no-motion { transition: none; }
+  .term-input.keys-open + .ti-float,
+  .ti-float[aria-expanded="true"] { color: var(--accent-text); background: #d9775730; border-color: #d9775799; }
+  /* Monochrome CSS keyboard icon — avoids platform-dependent emoji rendering. */
+  .ti-float-icon { position: relative; display: block; width: 23px; height: 17px;
+    border: 1.7px solid currentColor; border-radius: 4px; pointer-events: none; }
+  .ti-float-icon::before { content: ""; position: absolute; left: 3px; top: 3px;
+    width: 3px; height: 3px; border-radius: 1px; background: currentColor;
+    box-shadow: 5px 0 currentColor, 10px 0 currentColor, 15px 0 currentColor; }
+  .ti-float-icon::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 3px;
+    height: 2px; border-radius: 2px; background: currentColor; }
 
   /* 16px keeps iOS from zooming the page when a field takes focus */
   input, textarea { font-size: 16px; min-height: 46px; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; }
