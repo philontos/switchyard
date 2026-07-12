@@ -627,15 +627,18 @@ a { color: var(--accent-bar); }
 
   /* Compact jump-to-latest arrow (shown by reading.js when scrolled up). JS publishes
      the actual bottom occlusion, including a multiline composer and open quick keys.
-     Its 34px visual circle has a 44px hit target and stays centered beside the orb. */
+     Its 34px visual circle has a 44px hit target and defaults to the bottom-right. */
   #read-jump.show { display: inline-flex; align-items: center; justify-content: center; position: absolute;
-    right: 76px; bottom: calc(var(--term-bottom-occlusion, 59px) + 17px); z-index: 5;
+    right: 10px; bottom: calc(var(--term-bottom-occlusion, 59px) + 17px); z-index: 5;
     width: 34px; height: 34px; min-height: 0; padding: 0; font-size: 16px; font-weight: 600;
     line-height: 1; border: none; border-radius: 50%;
     background: var(--accent-strong); color: #fff; box-shadow: 0 4px 12px var(--shadow); }
   #read-jump::after { content: ""; position: absolute; inset: -5px; }
   .read-jump-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  /* A user may drag the keyboard control to the right edge. Keep Latest one lane to
+     its left in that case; the default keyboard-left layout leaves Latest at right. */
+  #termcol.float-edge-right #read-jump.show { right: 76px; }
   body.mode-live #read-jump { display: none; }
   /* If a landscape keyboard leaves no content lane at all, the higher-priority key
      control docks into reserved header space and Latest yields until room returns. */
@@ -714,11 +717,11 @@ a { color: var(--accent-bar); }
   #ti-send { flex: none; width: auto; height: 44px; margin: 0; padding: 0 18px; font-size: 14px; }
 
   /* Draggable special-key "orb": mobile terminal only. JS owns left/top after the
-     first layout; the right/bottom values are a no-flash fallback for that first frame.
+     first layout; the left/bottom values are a no-flash fallback for that first frame.
      It stays above ordinary content but below global dialogs/toasts. */
   .ti-float {
     display: inline-flex; position: absolute; z-index: 6;
-    right: 10px; bottom: calc(var(--term-bottom-occlusion, 59px) + 10px);
+    left: 10px; bottom: calc(var(--term-bottom-occlusion, 59px) + 10px);
     width: 48px; height: 48px; min-height: 0; margin: 0; padding: 0;
     align-items: center; justify-content: center; touch-action: none;
     color: var(--muted); background: color-mix(in srgb, var(--surface-2) 92%, transparent);

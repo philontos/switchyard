@@ -29,7 +29,7 @@ export function clampFloatingPosition(bounds, { x, y }) {
 // Persist an edge plus a relative vertical position, rather than raw pixels. The
 // control then survives rotation, keyboard changes, safe areas, and composer growth.
 export function positionFromPreference(bounds, preference = {}) {
-  const edge = preference.edge === "left" ? "left" : "right";
+  const edge = preference.edge === "right" ? "right" : "left";
   const rawRatio = Number(preference.yRatio);
   const yRatio = Number.isFinite(rawRatio) ? clamp(rawRatio, 0, 1) : 1;
   return {
