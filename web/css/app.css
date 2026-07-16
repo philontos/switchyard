@@ -484,6 +484,7 @@ a { color: var(--accent-bar); }
 #dialog { z-index: 90; }
 .dlg-msg { margin: 6px 0 12px; white-space: pre-wrap; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; }
+#repo-modal .dlg-actions { margin-top: 8px; }
 .dlg-actions button { width: auto; padding: 6px 16px; margin: 0; }
 /* global loading */
 #loading { position: fixed; inset: 0; background: var(--overlay); z-index: 200; display: none;
