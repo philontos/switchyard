@@ -93,7 +93,9 @@ body { margin: 0; font: 13px/1.55 -apple-system, "SF Pro Text", system-ui, "Ping
 header { padding: 12px 18px; background: var(--surface); border-bottom: 1px solid var(--border); font-weight: 600; flex: none; display: flex; align-items: center; gap: 10px; }
 .brand { display: inline-flex; align-items: center; flex: none; height: 28px; text-decoration: none; }
 .brand-logo { display: block; width: auto; height: 27px; object-fit: contain; }
-:root[data-theme="light"] .brand-logo { filter: brightness(0) saturate(100%) invert(14%) sepia(13%) saturate(590%) hue-rotate(348deg) brightness(92%) contrast(88%); }
+.brand-logo-light { display: none; }
+:root[data-theme="light"] .brand-logo-dark { display: none; }
+:root[data-theme="light"] .brand-logo-light { display: block; }
 #lang-toggle, #theme-toggle, #self-update { width: auto; margin: 0; padding: 3px 12px; font-size: 12px; background: var(--surface-2); border-color: var(--border); }
 #theme-toggle { font-size: 14px; line-height: 1.1; padding: 3px 10px; }
 #self-update.icon-btn { width: 32px; height: 32px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
