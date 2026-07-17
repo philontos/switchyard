@@ -397,7 +397,6 @@ async function pasteImageIntoTask(req: Request, res: Response, task: Task, runne
   const base = pasteTargetBase(task);
   if (!base) return res.status(409).json({ error: tr(lang, "paste.noTarget") });
 
-  const runner = taskRunner(task);
   const agent = asAgentKind(task.agent);
   const dest = pastedDest(base, pasteFilename(Date.now(), ext), agent);
   const tmp = path.join(os.tmpdir(), `tdsp-paste-${NS}-${task.id}-${path.basename(dest)}`);
