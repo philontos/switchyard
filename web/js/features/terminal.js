@@ -85,16 +85,37 @@ export function applyTermTheme() {
   for (const p of panes.values()) { try { p.term.options.theme = termTheme(); } catch {} }
 }
 
-const FIT_COL_GUARD = 1;
+// Fit the terminal to its pane from geometry measured DIRECTLY, instead of
+// trusting FitAddon's proposal. xterm's Viewport measures its scrollbar width
+// once, in its constructor — and our panes are display:none at that point, so
+// the measurement reads 0 and xterm's `|| 15` fallback locks in a phantom 15px
+// scrollbar that FitAddon then subtracts forever: a permanent ~2-column dead
+// band on the right (macOS overlay scrollbars take no layout space). Measure
+// the live values instead — pane content box, the xterm element's own padding,
+// the viewport's real scrollbar (0 for overlay), the renderer's cell size —
+// and clamp the result against what actually fits, so the canvas can never
+// overhang the pane's clip edge at any width, zoom, or devicePixelRatio.
 function fitPane(p) {
-  const dims = p.fit.proposeDimensions?.();
-  if (!dims || isNaN(dims.cols) || isNaN(dims.rows)) return;
-  // Scaled Mac displays can round xterm canvas width a few physical pixels wider
-  // than FitAddon's CSS-pixel proposal. Keep one spare column so the right edge is
-  // a gutter, not a clip line.
-  const cols = Math.max(2, dims.cols - FIT_COL_GUARD);
-  const rows = Math.max(1, dims.rows);
-  if (p.term.cols !== cols || p.term.rows !== rows) p.term.resize(cols, rows);
+  const core = p.term._core;
+  const cell = core?._renderService?.dimensions?.css?.cell;
+  const vp = p.pane.querySelector(".xterm-viewport");
+  const sa = p.pane.querySelector(".xterm-scroll-area");
+  if (!cell?.width || !cell?.height || !vp || !sa) return;
+  const cs = getComputedStyle(p.term.element);
+  const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+  const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  const sb = Math.max(0, vp.offsetWidth - sa.offsetWidth);
+  const availW = p.pane.clientWidth - padX - sb;
+  const availH = p.pane.clientHeight - padY;
+  if (availW <= 0 || availH <= 0) return;   // hidden pane; showPane fits on show
+  let cols = Math.max(2, Math.floor(availW / cell.width));
+  let rows = Math.max(1, Math.floor(availH / cell.height));
+  while (cols > 2 && cols * cell.width > availW) cols--;
+  while (rows > 1 && rows * cell.height > availH) rows--;
+  if (p.term.cols !== cols || p.term.rows !== rows) {
+    try { core._renderService.clear(); } catch {}
+    p.term.resize(cols, rows);
+  }
 }
 
 // Re-fit the visible pane (background panes can't be measured while display:none,
