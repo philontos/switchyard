@@ -61,7 +61,7 @@ export function fitActiveNow() {
   const p = activeId != null ? panes.get(activeId) : null;
   if (p) {
     try {
-      p.fit.fit();
+      fitPane(p);
       sendResize(p);
       p.term.scrollToBottom();
       p.term.refresh(0, p.term.rows - 1);
@@ -85,6 +85,18 @@ export function applyTermTheme() {
   for (const p of panes.values()) { try { p.term.options.theme = termTheme(); } catch {} }
 }
 
+const FIT_COL_GUARD = 1;
+function fitPane(p) {
+  const dims = p.fit.proposeDimensions?.();
+  if (!dims || isNaN(dims.cols) || isNaN(dims.rows)) return;
+  // Scaled Mac displays can round xterm canvas width a few physical pixels wider
+  // than FitAddon's CSS-pixel proposal. Keep one spare column so the right edge is
+  // a gutter, not a clip line.
+  const cols = Math.max(2, dims.cols - FIT_COL_GUARD);
+  const rows = Math.max(1, dims.rows);
+  if (p.term.cols !== cols || p.term.rows !== rows) p.term.resize(cols, rows);
+}
+
 // Re-fit the visible pane (background panes can't be measured while display:none,
 // and are re-fit when next shown). Coalesced to one fit per frame: rAF both
 // batches a burst of resize notifications and defers the measurement until after
@@ -98,7 +110,7 @@ function fitActive() {
     const p = activeId != null ? panes.get(activeId) : null;
     if (p) {
       try {
-        p.fit.fit();
+        fitPane(p);
         sendResize(p);
         p.codexMarkers?.scan();
       } catch {}
@@ -321,7 +333,7 @@ function ensureSocket(p) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = p.ws = new WebSocket(`${proto}://${location.host}/pty?${p.query}&lang=${I18N.lang}`);
   p.resizeKey = "";       // a new pty needs one initial size even if dimensions match the old socket
-  ws.onopen = () => { if (activeId === p.id) { try { p.fit.fit(); } catch {} } sendResize(p); };
+  ws.onopen = () => { if (activeId === p.id) { try { fitPane(p); } catch {} } sendResize(p); };
   ws.onmessage = (e) => {
     if (typeof e.data !== "string") return;
     if (p.agent === "codex") {
@@ -342,14 +354,14 @@ function ensureSocket(p) {
 // and grab the keyboard.
 function showPane(p) {
   if (onShow) onShow(p.id);   // mobile: flip to the terminal view BEFORE fitting, so the
-                          // pane's box is visible (measurable) when p.fit.fit() runs
+                          // pane's box is visible (measurable) when fitPane() runs
                           // — and hand over the id so the quick-input swaps to this task's draft
   hidePendingView();   // a real pane takes over the dock → drop any placeholder overlay
   for (const o of panes.values()) o.pane.style.display = o === p ? "block" : "none";
   activeId = p.id;
   hideTermEmpty();
   applyBar(p);
-  try { p.fit.fit(); } catch {}
+  try { fitPane(p); } catch {}
   try { p.term.scrollToBottom(); } catch {}              // attach lands at the newest output
   try { p.term.refresh(0, p.term.rows - 1); } catch {}   // canvas can blank while hidden
   try { p.codexMarkers?.scan(); } catch {}
