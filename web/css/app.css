@@ -405,7 +405,7 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    width by 12px (usually 1–2 columns), which #term then clipped on the right.
    Put the same visual inset where FitAddon expects it so its cols/rows match the
    pixels xterm can actually paint. Global border-box keeps the padded root inside. */
-.term-pane > .xterm { width: 100%; height: 100%; padding: 6px; }
+.term-pane > .xterm { width: 100%; height: 100%; padding: 6px; letter-spacing: 0; }
 /* Codex user-turn markers live above xterm's canvases because tmux keeps the
    outer terminal in the alternate buffer, where xterm line decorations are not
    painted. The overlay spans the submitted message rows (including continuations)
