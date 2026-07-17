@@ -270,6 +270,16 @@ test("runCli create round-trips the agent + model in the spec (symmetric codex d
   assert.equal(f.repoCalls[0].model, "gpt-5.4");
 });
 
+test("runCli create round-trips kimi as an agent in the spec", async () => {
+  const f = fakeDeps(seed());
+  const spec = { mirror: "/d/mirrors/5-sw.git", name: "sw", git_url: "g", base: "main", title: "fix", prompt: "go", skills: [], agent: "kimi", model: "kimi-code/kimi-for-coding" };
+  const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
+  const code = await runCli(["create", b64], f.deps);
+  assert.equal(code, 0);
+  assert.equal(f.repoCalls[0].agent, "kimi", "the node is handed the chosen agent");
+  assert.equal(f.repoCalls[0].model, "kimi-code/kimi-for-coding");
+});
+
 test("runCli create round-trips provider_id in the spec (node-local provider)", async () => {
   const f = fakeDeps(seed());
   const spec = { mirror: "/d/mirrors/5-sw.git", name: "sw", git_url: "g", base: "main", title: "fix", prompt: "go", skills: [], agent: "claude", provider_id: 9 };

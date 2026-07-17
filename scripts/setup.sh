@@ -5,8 +5,8 @@
 #
 # 预检在防什么：dispatcher 用 `zsh -c 'claude …'`（远程走 `ssh host '<cmd>'`）
 # 起每个任务，那是只读 ~/.zshenv 的「非交互、非登录」shell —— PATH 里没有
-# claude/tmux/git 就 `command not found`、pane 直接死（状态 127）。本脚本按
-# dispatcher 实际看到的那种环境去检查这三个命令，把「已装但不在 PATH」的目录
+# claude/kimi/tmux/git 就 `command not found`、pane 直接死（状态 127）。本脚本按
+# dispatcher 实际看到的那种环境去检查这些命令，把「已装但不在 PATH」的目录
 # 幂等写进 ~/.zshenv。
 #
 # 用法:
@@ -32,7 +32,7 @@ MARKER_BEGIN="# >>> task-dispatcher >>>"
 MARKER_END="# <<< task-dispatcher <<<"
 # dispatcher 的非交互 shell 拿到的基线 PATH（约等于 sshd 给 `ssh host cmd` 的那份）。
 BASE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
-CMDS="claude tmux git"
+CMDS="claude kimi tmux git"
 
 if [ -t 1 ]; then
   R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; B=$'\e[1m'; N=$'\e[0m'
@@ -48,7 +48,7 @@ ZSH_BIN="$(command -v zsh || true)"
 # 登录 shell 必须是 zsh —— 整套 ~/.zshenv 机制是 zsh 专属。
 if [ "$(basename "${SHELL:-}")" != "zsh" ] || [ -z "$ZSH_BIN" ]; then
   echo "${Y}你的登录 shell 不是 zsh（SHELL=${SHELL:-未设置}）。${N}"
-  echo "本脚本只配置 ~/.zshenv（zsh 专属）。其它 shell 请手动把 claude/tmux/git 所在"
+  echo "本脚本只配置 ~/.zshenv（zsh 专属）。其它 shell 请手动把 claude/kimi/tmux/git 所在"
   echo "目录加进 dispatcher 用的非交互 shell 启动文件（bash 看 \$BASH_ENV）。"
   exit 1
 fi
@@ -65,11 +65,17 @@ real_dir() {
   p="$(command -v -- "$1" 2>/dev/null || true)"
   case "$p" in
     /*) dirname "$p" ;;
-    *)  return 1 ;;
+    *)
+      case "$1" in
+        kimi)
+          [ -x "$HOME/.kimi-code/bin/kimi" ] && { dirname "$HOME/.kimi-code/bin/kimi"; return 0; }
+          ;;
+      esac
+      return 1 ;;
   esac
 }
 
-echo "${B}检查 dispatcher 的非交互 shell 能否找到 claude / tmux / git …${N}"
+echo "${B}检查 dispatcher 的非交互 shell 能否找到 claude / kimi / tmux / git …${N}"
 
 ADD_DIRS=""      # 需要写进 ~/.zshenv 的目录（空格分隔，后面去重）
 MISSING=""       # 压根没装的命令
@@ -112,6 +118,7 @@ if [ -n "$MISSING" ]; then
       tmux)   echo "  tmux:   brew install tmux" ;;
       git)    echo "  git:    xcode-select --install   或   brew install git" ;;
       claude) echo "  claude: curl -fsSL https://claude.ai/install.sh | bash   （或 npm i -g @anthropic-ai/claude-code）" ;;
+      kimi)   echo "  kimi:   curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash" ;;
     esac
   done
 fi

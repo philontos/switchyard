@@ -33,6 +33,10 @@
   --codex-tint: #6f9f9b12;
   --codex-tint-hover: #6f9f9b1d;
   --codex-tint-selected: #6f9f9b24;
+  --kimi-accent: #b48a3a;
+  --kimi-tint: #b48a3a14;
+  --kimi-tint-hover: #b48a3a21;
+  --kimi-tint-selected: #b48a3a2b;
   /* status */
   --green: #8aaa66;
   --green-2: #6f9249;       /* toast success rail */
@@ -254,7 +258,7 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 /* "local" tag on a repo-less task card */
 .tag-local { font-size: 10px; color: var(--accent-text); background: #d977571f; border: 1px solid #d9775744; border-radius: 999px; padding: 0 6px; margin-left: 4px; vertical-align: 1px; }
 .tm-lbl { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-/* dispatch modal: agent segmented control (Claude Code | Codex) */
+/* dispatch modal: agent segmented control (Claude Code | Codex | Kimi Code) */
 .agent-seg { display: flex; gap: 6px; margin-bottom: 9px; }
 .agent-opt { flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
   background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-family: inherit; }
@@ -262,7 +266,7 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .agent-opt.selected { border-color: var(--accent); color: var(--accent-text); background: #d977571f; }
 /* dispatch modal: extra-skill checkbox list */
 .skills-box { max-height: 132px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; margin-bottom: 7px; }
-/* codex greys out the skills box (no skill mechanism) — non-interactive + dimmed */
+/* non-Claude agents grey out the skills box (no Switchyard skill injection) */
 .skills-box.disabled { opacity: .45; pointer-events: none; }
 .skopt { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: 12.5px; cursor: pointer; }
 .skopt input[type=checkbox] { width: auto; margin: 0; }
@@ -303,16 +307,19 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   border-radius: 8px 0 0 8px; opacity: .85; }
 .task-claude::before { background: var(--accent-bar); }
 .task-codex::before { background: var(--codex-accent); }
+.task-kimi::before { background: var(--kimi-accent); }
 .card.task-claude { background: linear-gradient(90deg, #d977570f 0, var(--surface) 42px); }
 .card.task-codex { background: linear-gradient(90deg, var(--codex-tint) 0, var(--surface) 42px); border-color: color-mix(in srgb, var(--codex-accent) 12%, var(--border)); }
+.card.task-kimi { background: linear-gradient(90deg, var(--kimi-tint) 0, var(--surface) 42px); border-color: color-mix(in srgb, var(--kimi-accent) 12%, var(--border)); }
 /* hover affordances live behind (hover:hover): touch has no real hover, and iOS
    "sticky hover" would otherwise pin these styles to the last-tapped card until the
    next tap — coming back from a task, the card still wore the accent border, which
    read as a stuck selection. Touch feedback is the :active rules instead. */
 @media (hover: hover) {
   .card.task-codex.clickable:hover { border-color: color-mix(in srgb, var(--codex-accent) 55%, var(--border)); background: linear-gradient(90deg, var(--codex-tint-hover) 0, var(--card-hover) 42px); }
+  .card.task-kimi.clickable:hover { border-color: color-mix(in srgb, var(--kimi-accent) 55%, var(--border)); background: linear-gradient(90deg, var(--kimi-tint-hover) 0, var(--card-hover) 42px); }
 }
-/* claude vs codex is shown by colour alone (the ::before accent bar + card tint
+/* agent choice is shown by colour alone (the ::before accent bar + card tint
    above) — no text label, so a long agent name can't wrap and deform the card. */
 /* the editable title text — its own click zone (doesn't open the task); the text
    cursor + dotted underline on hover hint "double-click to rename".
@@ -340,6 +347,8 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   box-shadow: inset 3px 0 0 var(--accent-bar); }
 .card.task-codex.selected, .card.task-codex.clickable.selected:hover { border-color: var(--codex-accent); background: var(--codex-tint-selected);
   box-shadow: inset 3px 0 0 var(--codex-accent); }
+.card.task-kimi.selected, .card.task-kimi.clickable.selected:hover { border-color: var(--kimi-accent); background: var(--kimi-tint-selected);
+  box-shadow: inset 3px 0 0 var(--kimi-accent); }
 .card-x { position: absolute; top: 7px; right: 7px; width: auto; margin: 0; padding: 1px 6px;
   background: none; border: none; color: var(--faint); font-size: 13px; line-height: 1; }
 .card-x:hover { background: #f8514914; color: var(--red); }

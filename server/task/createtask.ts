@@ -141,8 +141,8 @@ export interface RepoTaskEnv {
   }): Promise<void>;
   // Launch the agent in the worktree (opening = freeform prompt + skills line, or
   // null). opts.env injects ANTHROPIC_* vars for claude's alternate model backend;
-  // opts.agent picks the CLI (claude default | codex); opts.model is codex's -m
-  // model. All omitted → the machine's default claude login.
+  // opts.agent picks the CLI (claude default | codex | kimi); opts.model is the
+  // non-Claude -m model. All omitted → the machine's default claude login.
   startSession(
     session: string,
     worktree: string,
@@ -164,8 +164,8 @@ export interface CreateRepoOpts {
   // in-process caller sets these; the CLI/fleet caller leaves them undefined.
   providerId?: number | null;
   env?: Record<string, string>;
-  // Which coding-agent CLI runs the task (claude default | codex) and codex's
-  // optional -m model. Recorded on the task so resume rebuilds the same launch.
+  // Which coding-agent CLI runs the task (claude default | codex | kimi) and the
+  // optional non-Claude -m model. Recorded so resume rebuilds the same launch.
   agent?: AgentKind;
   model?: string | null;
 }

@@ -42,6 +42,7 @@ test("pastedDest defaults to claude's historical .claude/pasted directory", () =
 test("pastedDest uses the agent image-paste adapter directory", () => {
   assert.equal(pastedDest("/wt", "paste-1.png", "claude"), "/wt/.claude/pasted/paste-1.png");
   assert.equal(pastedDest("/wt", "paste-1.png", "codex"), "/wt/.codex/pasted/paste-1.png");
+  assert.equal(pastedDest("/wt", "paste-1.png", "kimi"), "/wt/.kimi-code/pasted/paste-1.png");
 });
 
 test("imagePasteAdapter isolates each agent's injected input text", () => {
@@ -54,6 +55,13 @@ test("imagePasteAdapter isolates each agent's injected input text", () => {
   assert.equal(
     pasteInputText("codex", "/wt/.codex/pasted/paste-1.png"),
     "Use this image as visual context: /wt/.codex/pasted/paste-1.png",
+  );
+
+  assert.equal(imagePasteAdapter("kimi").storageDir, ".kimi-code/pasted");
+  assert.equal(pasteGitExcludePattern("kimi"), ".kimi-code/pasted/");
+  assert.equal(
+    pasteInputText("kimi", "/wt/.kimi-code/pasted/paste-1.png"),
+    "Use this image as visual context: /wt/.kimi-code/pasted/paste-1.png",
   );
 });
 

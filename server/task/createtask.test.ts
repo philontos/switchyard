@@ -328,6 +328,33 @@ test("createRepoTask (codex) records agent+model, ignores skills, and threads ag
   }
 });
 
+test("createRepoTask (kimi) records agent+model, ignores skills, and threads agent into setup/session", async () => {
+  let startOpts: any = null;
+  let setupArgs: any = null;
+  const { env, dir, db, calls } = makeRepoEnv({
+    setupWorktree: async (a) => { setupArgs = a; calls.push("setup"); },
+    startSession: async (_s, _w, opening, o) => { startOpts = o; calls.push(`start:${opening ?? "∅"}`); },
+  });
+  try {
+    const r = await createRepoTask(env, REPO, {
+      baseBranch: "m", title: "t", prompt: "build",
+      agent: "kimi", model: "kimi-code/kimi-for-coding", extraSkills: ["dispatcher:tdd"],
+    });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    const row = db.prepare("SELECT agent, agent_model FROM tasks WHERE id=?").get(r.id) as any;
+    assert.equal(row.agent, "kimi");
+    assert.equal(row.agent_model, "kimi-code/kimi-for-coding");
+    assert.equal(setupArgs.agent, "kimi", "setup is told which agent");
+    assert.equal(setupArgs.skills.length, 0, "kimi delivers no Switchyard skills even when some were requested");
+    assert.ok(calls.includes("start:build"), "opening is just the prompt — no skills line");
+    assert.equal(startOpts.agent, "kimi", "session launches kimi");
+    assert.equal(startOpts.model, "kimi-code/kimi-for-coding");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("createRepoTask cleans up when the session fails to start after the worktree was made", async () => {
   const { env, dir, db, calls } = makeRepoEnv({
     startSession: async () => {

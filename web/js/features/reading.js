@@ -153,9 +153,10 @@ function appendAll(entries) {
 function roleHeader(dr) {
   const d = document.createElement("div");
   d.className = "rd-role " + dr;
+  const agentName = agent === "codex" ? "Codex" : agent === "kimi" ? "Kimi" : "Claude";
   d.innerHTML = dr === "user"
     ? esc(I18N.t("read.you"))
-    : `<span class="rd-dot"></span>${esc(agent === "codex" ? "Codex" : "Claude")}`;
+    : `<span class="rd-dot"></span>${esc(agentName)}`;
   return d;
 }
 

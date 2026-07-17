@@ -1,17 +1,17 @@
 // The "which agent" axis. A task runs under one coding-agent CLI: `claude`
-// (the default, unchanged) or `codex`. Every Claude-specific launch detail is
+// (the default, unchanged), `codex`, or `kimi`. Every Claude-specific launch detail is
 // funnelled through here, so the orchestration code stays agent-agnostic:
 //   - agentArgv:  how to launch / resume the agent (the command + its args)
 //   - agentCaps:  which worktree injections apply (skills, the yellow-light hook)
-// Claude's launch is byte-for-byte what it always was; codex is the new branch.
-export type AgentKind = "claude" | "codex";
+// Claude's launch is byte-for-byte what it always was.
+export type AgentKind = "claude" | "codex" | "kimi";
 
-export const AGENT_KINDS: readonly AgentKind[] = ["claude", "codex"];
+export const AGENT_KINDS: readonly AgentKind[] = ["claude", "codex", "kimi"];
 
-/** Normalize an untrusted value to an AgentKind. Only the exact "codex" opts in;
+/** Normalize an untrusted value to an AgentKind. Only known exact strings opt in;
  *  anything else (missing, blank, garbage) is the default "claude" — never throws. */
 export function asAgentKind(s: unknown): AgentKind {
-  return s === "codex" ? "codex" : "claude";
+  return s === "codex" || s === "kimi" ? s : "claude";
 }
 
 export interface AgentCaps {
@@ -22,25 +22,24 @@ export interface AgentCaps {
   injectHooks: boolean;
 }
 
-// Both injections hang off Claude's .claude/ conventions, which codex doesn't
-// share — so codex opts out of both. codex also has no waiting-hook: with
-// `-a on-request` it can pause for an approval the dispatcher can't see (a known
-// gap), though `-s danger-full-access` makes that pause rare (see agentArgv).
+// Both injections hang off Claude's .claude/ conventions, which other CLIs don't
+// share — so non-Claude agents opt out. They also have no waiting-hook, so an
+// approval pause is invisible to the dispatcher.
 export function agentCaps(agent: AgentKind): AgentCaps {
-  return agent === "codex"
-    ? { injectSkills: false, injectHooks: false }
-    : { injectSkills: true, injectHooks: true };
+  return agent === "claude"
+    ? { injectSkills: true, injectHooks: true }
+    : { injectSkills: false, injectHooks: false };
 }
 
 export interface LaunchOpts {
   /** freeform opening message; blank/whitespace is treated as "no prompt" */
   prompt?: string | null;
-  /** codex: passed as `-m <model>`. claude ignores it (its model rides the
+  /** codex/kimi: passed as `-m <model>`. claude ignores it (its model rides the
    *  provider ANTHROPIC_* env, not a CLI flag). */
   model?: string | null;
   /** resume the prior conversation in this cwd instead of starting fresh */
   resume?: boolean;
-  /** codex: extra writable roots (`--add-dir`), e.g. a linked worktree's gitdir.
+  /** codex/kimi: extra writable roots (`--add-dir`), e.g. a linked worktree's gitdir.
    *  Redundant under `-s danger-full-access` (the sandbox is off) but harmless;
    *  kept so the plumbing survives if the sandbox is ever tightened again. */
   addDirs?: string[];
@@ -59,6 +58,10 @@ const addDirArgs = (dirs?: string[]) => (dirs ?? []).flatMap((d) => hasText(d) ?
  *         rarely pauses (nothing left to escalate) — but note codex has no
  *         waiting-hook, so any pause it does make is invisible to the dispatcher.
  *         Resume is `codex resume --last` (cwd-filtered, most recent).
+ * kimi:   interactive Kimi Code TUI with `--auto` so normal tool approvals are
+ *         handled by the CLI. Initial prompts are submitted after launch by tmux
+ *         (see startSession) because `kimi -p` is documented as non-interactive
+ *         and exits after a single prompt. Resume is `kimi --continue --auto`.
  */
 export function agentArgv(agent: AgentKind, opts: LaunchOpts = {}): string[] {
   if (agent === "codex") {
@@ -67,6 +70,13 @@ export function agentArgv(agent: AgentKind, opts: LaunchOpts = {}): string[] {
     const argv = [...base];
     if (hasText(opts.model)) argv.push("-m", opts.model.trim());
     if (hasText(opts.prompt)) argv.push(opts.prompt);
+    return argv;
+  }
+  if (agent === "kimi") {
+    const base = ["kimi", "--auto", ...addDirArgs(opts.addDirs)];
+    if (opts.resume) return [...base, "--continue"];
+    const argv = [...base];
+    if (hasText(opts.model)) argv.push("-m", opts.model.trim());
     return argv;
   }
   // claude

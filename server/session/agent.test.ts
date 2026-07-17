@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { agentArgv, agentCaps, asAgentKind } from "./agent.ts";
 
-// ---- asAgentKind: only 'codex' opts in; everything else is the default 'claude' ----
-test("asAgentKind returns 'codex' only for the exact 'codex' string", () => {
+// ---- asAgentKind: only known exact strings opt in; everything else defaults to 'claude' ----
+test("asAgentKind returns known agents only for exact strings", () => {
   assert.equal(asAgentKind("codex"), "codex");
+  assert.equal(asAgentKind("kimi"), "kimi");
   assert.equal(asAgentKind("claude"), "claude");
   assert.equal(asAgentKind(""), "claude");
   assert.equal(asAgentKind(undefined), "claude", "a missing agent defaults to claude");
@@ -17,6 +18,9 @@ test("agentCaps: claude injects skills and the waiting-hook", () => {
 });
 test("agentCaps: codex injects neither (no .claude/skills, no hook mechanism)", () => {
   assert.deepEqual(agentCaps("codex"), { injectSkills: false, injectHooks: false });
+});
+test("agentCaps: kimi injects neither (no .claude/skills, no hook mechanism)", () => {
+  assert.deepEqual(agentCaps("kimi"), { injectSkills: false, injectHooks: false });
 });
 
 // ---- agentArgv: claude (unchanged from the historical hardcoded launch) ----
@@ -59,5 +63,25 @@ test("agentArgv codex adds writable git dirs via --add-dir", () => {
 test("agentArgv codex resume keeps the same sandbox policy, ignoring prompt and model", () => {
   assert.deepEqual(agentArgv("codex", { prompt: "opening", model: "gpt-5.4", resume: true }), [
     "codex", "-a", "on-request", "-s", "danger-full-access", "resume", "--last",
+  ]);
+});
+
+// ---- agentArgv: kimi (interactive TUI; start prompt is submitted by tmux after launch) ----
+test("agentArgv kimi starts the interactive TUI in auto mode without passing prompt as -p", () => {
+  assert.deepEqual(agentArgv("kimi", { prompt: "build it" }), ["kimi", "--auto"]);
+});
+test("agentArgv kimi with a model inserts -m <model>", () => {
+  assert.deepEqual(agentArgv("kimi", { prompt: "go", model: "kimi-code/kimi-for-coding" }), [
+    "kimi", "--auto", "-m", "kimi-code/kimi-for-coding",
+  ]);
+});
+test("agentArgv kimi adds extra dirs via --add-dir", () => {
+  assert.deepEqual(agentArgv("kimi", { addDirs: ["/mirror/worktrees/1", "/mirror"] }), [
+    "kimi", "--auto", "--add-dir", "/mirror/worktrees/1", "--add-dir", "/mirror",
+  ]);
+});
+test("agentArgv kimi resume uses --continue and ignores prompt/model", () => {
+  assert.deepEqual(agentArgv("kimi", { prompt: "opening", model: "x", resume: true }), [
+    "kimi", "--auto", "--continue",
   ]);
 });

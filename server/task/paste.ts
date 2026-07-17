@@ -61,6 +61,11 @@ const ADAPTERS: Record<AgentKind, ImagePasteAdapter> = {
     gitExcludePattern: ".codex/pasted/",
     inputText: (imagePath) => `Use this image as visual context: ${imagePath}`,
   },
+  kimi: {
+    storageDir: path.join(".kimi-code", "pasted"),
+    gitExcludePattern: ".kimi-code/pasted/",
+    inputText: (imagePath) => `Use this image as visual context: ${imagePath}`,
+  },
 };
 
 export function imagePasteAdapter(agent: AgentKind): ImagePasteAdapter {

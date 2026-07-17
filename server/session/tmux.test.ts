@@ -185,3 +185,63 @@ test("startSession(agent='codex', model) passes -m <model> before the prompt", a
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "-m", "gpt-5.4", "go",
   ] });
 });
+
+test("startSession(agent='kimi') launches Kimi TUI, then submits the prompt", async () => {
+  const { runner, calls } = fakeRunner();
+  await startSession(runner, "tdsp-1-x", "/wt", "do it", { agent: "kimi" });
+  assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
+    "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
+    "kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror",
+  ] });
+  const launch = calls.find((call) => call.args[0] === "new-session")!;
+  assert.ok(!launch.args.includes("-p") && !launch.args.includes("--prompt"), "Kimi stays interactive");
+  assert.deepEqual(calls.slice(-3), [
+    { file: "tmux", args: ["set-buffer", "-b", "tdsp-paste", "--", "do it"] },
+    { file: "tmux", args: ["paste-buffer", "-t", "tdsp-1-x", "-b", "tdsp-paste", "-p", "-d"] },
+    { file: "tmux", args: ["send-keys", "-t", "tdsp-1-x", "Enter"] },
+  ]);
+});
+
+test("startSession(agent='kimi', continue) resumes with `kimi --auto --continue` and does not resend prompt", async () => {
+  const { runner, calls } = fakeRunner();
+  await startSession(runner, "tdsp-1-x", "/wt", "the original prompt", { agent: "kimi", continue: true });
+  assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
+    "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
+    "kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "--continue",
+  ] });
+  assert.ok(!calls.some((call) => call.args[0] === "set-buffer"), "resume never re-submits the opening prompt");
+});
+
+test("startSession(agent='kimi', model) passes -m <model>", async () => {
+  const { runner, calls } = fakeRunner();
+  await startSession(runner, "tdsp-1-x", "/wt", "go", { agent: "kimi", model: "kimi-code/kimi-for-coding" });
+  assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
+    "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
+    "kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "-m", "kimi-code/kimi-for-coding",
+  ] });
+});
+
+test("startSession(agent='kimi') falls back to ~/.kimi-code/bin/kimi when kimi is not on PATH", async () => {
+  const calls: { file: string; args: string[] }[] = [];
+  const runner = {
+    kind: "local",
+    dataDir: "/tmp",
+    exec: async (file: string, args: string[]) => {
+      calls.push({ file, args });
+      if (file === "sh") return "/home/me/.kimi-code/bin/kimi\n";
+      if (file === "git" && args.includes("--git-dir")) return "/mirror/worktrees/1-49\n";
+      if (file === "git" && args.includes("--git-common-dir")) return "/mirror\n";
+      return "";
+    },
+    async mkdirp() {},
+    async exists() { return false; },
+    async rmrf() {},
+    async putDir() {},
+    ptySpec(file: string, args: string[]) { return { file, args }; },
+  } as unknown as Runner;
+  await startSession(runner, "tdsp-1-x", "/wt", null, { agent: "kimi" });
+  assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
+    "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
+    "/home/me/.kimi-code/bin/kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror",
+  ] });
+});

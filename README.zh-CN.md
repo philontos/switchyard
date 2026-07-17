@@ -64,7 +64,7 @@ git clone <repo-url> switchyard && cd switchyard
 tdsp serve           # 启动 → http://localhost:4500
 ```
 
-> `setup.sh` 依次做三件事：① **环境预检**——用非交互 shell 验证 `claude` / `tmux` / `git` 可达（任务就是用这种只读 `~/.zshenv` 的 shell 启动的，找不到命令任务面板会直接死），缺的把所在目录幂等写进 `~/.zshenv`；② `npm install`（4 个运行时依赖，零构建）；③ 安装全局 `tdsp` 命令（`~/.task-dispatcher/src` 指向这份 clone，启动器链到 `~/.local/bin/tdsp`——敲不到就把 `~/.local/bin` 加进 PATH）。`--check` 只检查、不写不装。
+> `setup.sh` 依次做三件事：① **环境预检**——用非交互 shell 验证 `claude` / `kimi` / `tmux` / `git` 可达（任务就是用这种只读 `~/.zshenv` 的 shell 启动的，找不到命令任务面板会直接死），缺的把所在目录幂等写进 `~/.zshenv`；② `npm install`（4 个运行时依赖，零构建）；③ 安装全局 `tdsp` 命令（`~/.task-dispatcher/src` 指向这份 clone，启动器链到 `~/.local/bin/tdsp`——敲不到就把 `~/.local/bin` 加进 PATH）。`--check` 只检查、不写不装。
 
 装完之后，一切都是 `tdsp`：
 
@@ -139,7 +139,7 @@ web/                   看板 + xterm 终端(原生 ES Modules,零构建)
   js/main.js           入口 —— 接线各模块,桥接内联 onclick
   js/core/             共享底座:dom、state、feedback、dialog、select
   js/features/         hosts、tasks、terminal、repos、providers、skills、reorder、mobile、reading
-scripts/setup.sh       预检:校验 claude/tmux/git,修 ~/.zshenv 的 PATH
+scripts/setup.sh       预检:校验 agent CLI + git/tmux,修 ~/.zshenv 的 PATH
 ~/.task-dispatcher/    每台机器:
   src                  指向本机 clone 的指针(真 clone 或软链)
   bin/tdsp             全局启动器 → src

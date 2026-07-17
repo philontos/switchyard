@@ -619,7 +619,7 @@ function goPreviewPort() {
 // dock bar (title may have changed, e.g. after a rename) and ensure a socket.
 export function openPty(query, title, attach, taskId = null, claude = "", agent = "claude") {
   if (taskId == null) return;
-  const normalizedAgent = agent === "codex" ? "codex" : "claude";
+  const normalizedAgent = agent === "codex" || agent === "kimi" ? agent : "claude";
   let p = panes.get(taskId);
   if (!p) p = createPane(taskId, query, normalizedAgent);
   else {

@@ -5,6 +5,12 @@ async function tmux(runner: Runner, args: string[]): Promise<string> {
   return runner.exec("tmux", args);
 }
 
+async function kimiBinary(runner: Runner): Promise<string> {
+  const script = "command -v kimi 2>/dev/null || { p=\"$HOME/.kimi-code/bin/kimi\"; [ -x \"$p\" ] && printf '%s\\n' \"$p\"; }";
+  const out = (await runner.exec("sh", ["-c", script]).catch(() => "")).trim();
+  return out.split("\n").find(Boolean) || "kimi";
+}
+
 function absGitPath(cwd: string, p: string): string {
   const s = p.trim();
   if (!s || s.startsWith("/")) return s;
@@ -24,8 +30,8 @@ async function gitPath(runner: Runner, cwd: string, flag: "--git-dir" | "--git-c
   }
 }
 
-async function codexWritableGitDirs(runner: Runner, cwd: string, agent: AgentKind): Promise<string[]> {
-  if (agent !== "codex") return [];
+async function extraWritableGitDirs(runner: Runner, cwd: string, agent: AgentKind): Promise<string[]> {
+  if (agent !== "codex" && agent !== "kimi") return [];
   const dirs = await Promise.all([
     gitPath(runner, cwd, "--git-dir"),
     gitPath(runner, cwd, "--git-common-dir"),
@@ -53,10 +59,10 @@ function envPrefix(env?: Record<string, string>): string[] {
 }
 
 /**
- * Start a detached tmux session running the agent (claude by default, or codex)
+ * Start a detached tmux session running the agent (claude by default, or codex/kimi)
  * in the worktree. If a prompt is given it is passed as the agent's initial
  * message; the session stays interactive (TUI). opts.env injects environment for
- * the process (claude's alternate provider). opts.model picks a codex model.
+ * the process (claude's alternate provider). opts.model picks a codex/kimi model.
  * How to launch/resume each agent lives in agentArgv — this stays agent-agnostic.
  */
 export async function startSession(
@@ -66,17 +72,21 @@ export async function startSession(
   prompt?: string | null,
   opts?: { continue?: boolean; env?: Record<string, string>; agent?: AgentKind; model?: string | null },
 ) {
-  // resume reattaches to the prior conversation (both agents key it by cwd:
-  // `claude --continue` / `codex resume --last`). The original opening prompt is
-  // NOT re-sent — the conversation already has it. The env prefix (provider) goes
-  // BEFORE the agent argv so the vars land on the agent process.
+  // resume reattaches to the prior conversation (agents key it by cwd). The
+  // original opening prompt is NOT re-sent — the conversation already has it.
+  // The env prefix (provider) goes BEFORE the agent argv so the vars land on the
+  // agent process.
   const agent = opts?.agent ?? "claude";
   const pre = envPrefix(opts?.env);
-  const addDirs = await codexWritableGitDirs(runner, cwd, agent);
+  const addDirs = await extraWritableGitDirs(runner, cwd, agent);
   const launch = agentArgv(agent, { prompt, model: opts?.model, resume: opts?.continue, addDirs });
+  if (agent === "kimi") launch[0] = await kimiBinary(runner);
   const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...pre, ...launch];
   await tmux(runner, cmd);
   await ensureSessionOptions(runner, session);
+  if (agent === "kimi" && !opts?.continue && prompt?.trim()) {
+    await pasteSubmit(runner, session, prompt);
+  }
 }
 
 /**
