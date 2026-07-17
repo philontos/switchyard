@@ -31,8 +31,8 @@ test("initSchema on a fresh DB has worktree_path and the newer columns", () => {
 });
 
 // The agent axis: every task records which coding-agent CLI it runs (claude by
-// default, or codex) plus an optional codex model. A row inserted without naming
-// an agent must default to 'claude' so existing dispatch code is unchanged.
+// default, or another local agent) plus an optional non-Claude model. A row
+// inserted without naming an agent must default to 'claude'.
 test("initSchema on a fresh DB has the agent columns, defaulting agent to claude", () => {
   const db = new Database(":memory:");
   initSchema(db, opts(false));
@@ -42,7 +42,7 @@ test("initSchema on a fresh DB has the agent columns, defaulting agent to claude
   db.prepare("INSERT INTO tasks (repo_id, base_branch, work_branch, title, worktree_path, session) VALUES (1,'m','f','t','/wt','s')").run();
   const row = db.prepare("SELECT agent, agent_model FROM tasks WHERE id=1").get() as { agent: string; agent_model: string | null };
   assert.equal(row.agent, "claude", "agent defaults to claude");
-  assert.equal(row.agent_model, null, "no codex model by default");
+  assert.equal(row.agent_model, null, "no agent model by default");
 });
 
 // An old tasks table predating the agent column must be backfilled (not throw),

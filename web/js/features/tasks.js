@@ -17,9 +17,12 @@ import { refreshProviders, selectedProviderId, setProviderTarget } from "./provi
 import { sheetOpened, sheetCancelled } from "./mobile.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
-// the dispatch modal's agent pick (Claude Code | Codex), remembered across opens.
+// the dispatch modal's agent pick (Claude Code | Codex | Kimi Code), remembered across opens.
 const LS_AGENT = "tdsp.agent";
 let selectedAgent = "claude";
+function normalizeAgent(kind) {
+  return kind === "codex" || kind === "kimi" ? kind : "claude";
+}
 // whether the modal's current target node has a provider catalog reachable from
 // this UI. Providers belong to the node that will run the task: local catalog for
 // local tasks, remote catalog through tdsp for bootstrapped remote nodes.
@@ -80,11 +83,11 @@ export function connect(id) {
     `#${t.id} ${t.title}`, "tmux attach -t " + t.session, t.id, t.claude_session || "", t.agent);
 }
 
-// The agent picker (Claude Code | Codex). Persists the last pick so the next
+// The agent picker (Claude Code | Codex | Kimi Code). Persists the last pick so the next
 // dispatch defaults to it, repaints the segmented control, and reflects the
 // choice onto the modal's panels via applyAgentUI.
 export function selectAgent(kind) {
-  selectedAgent = kind === "codex" ? "codex" : "claude";
+  selectedAgent = normalizeAgent(kind);
   try { localStorage.setItem(LS_AGENT, selectedAgent); } catch (_) {}
   document.querySelectorAll("#t-agent-seg .agent-opt").forEach(b =>
     b.classList.toggle("selected", b.dataset.agent === selectedAgent));
@@ -92,16 +95,21 @@ export function selectAgent(kind) {
 }
 
 // Reflect the selected agent onto the modal:
-//   codex  → provider picker hidden (codex never sends one), codex model + the
-//            full-access note shown, skills box greyed out (no skill mechanism)
+//   codex/kimi → provider picker hidden, model field + note shown, skills box
+//            greyed out (no Switchyard-side skill injection mechanism)
 //   claude → the reverse; the provider picker is restored when the current
 //            target node has a reachable provider catalog.
 function applyAgentUI() {
-  const codex = selectedAgent === "codex";
-  $("t-codex-sec").style.display = codex ? "" : "none";
-  $("t-skills-codex-note").style.display = codex ? "" : "none";
-  $("t-skills").classList.toggle("disabled", codex);
-  if (codex) {
+  const external = selectedAgent !== "claude";
+  $("t-codex-sec").style.display = external ? "" : "none";
+  $("t-skills-codex-note").style.display = external ? "" : "none";
+  $("t-skills").classList.toggle("disabled", external);
+  const model = $("t-codex-model");
+  model.placeholder = t(selectedAgent === "kimi" ? "agent.kimiModelPh" : "agent.codexModelPh");
+  const note = $("t-agent-auto-note");
+  note.textContent = t(selectedAgent === "kimi" ? "agent.kimiAutoNote" : "agent.codexAutoNote");
+  $("t-skills-codex-note").textContent = t(selectedAgent === "kimi" ? "agent.kimiSkillsNote" : "agent.codexSkillsNote");
+  if (external) {
     $("t-provider-sec").style.display = "none";
     $("prov-panel").style.display = "none";
   } else if (modalProviderAvailable) {
@@ -127,7 +135,7 @@ export function openTaskModal(repoId) {
   // visibility. The last-picked agent is restored either way.
   $("t-agent-sec").style.display = "";
   $("t-codex-model").value = "";
-  selectAgent(localStorage.getItem(LS_AGENT) === "codex" ? "codex" : "claude");
+  selectAgent(normalizeAgent(localStorage.getItem(LS_AGENT)));
   sheetOpened();   // claim the mobile history entry BEFORE the sheet paints (list still on the glass)
   $("task-modal").style.display = "flex";
   loadBranches();
@@ -164,10 +172,10 @@ export function openNodeTaskModal(hostId, repoId) {
   modalProviderAvailable = true;
   setProviderTarget(hostId);
   $("t-provider-sec").style.display = "";
-  // agent still travels to the node, so claude/codex is choosable here too.
+  // agent still travels to the node, so each supported CLI is choosable here too.
   $("t-agent-sec").style.display = "";
   $("t-codex-model").value = "";
-  selectAgent(localStorage.getItem(LS_AGENT) === "codex" ? "codex" : "claude");
+  selectAgent(normalizeAgent(localStorage.getItem(LS_AGENT)));
   sheetOpened();   // claim the mobile history entry BEFORE the sheet paints (list still on the glass)
   $("task-modal").style.display = "flex";
   loadNodeBranches(hostId, repo);
@@ -275,17 +283,17 @@ async function loadBranches() {
 // over ssh can be slow), then settle into the node's live terminal.
 async function addNodeTask() {
   const { hostId, repo } = nodeTask;
-  const codex = selectedAgent === "codex";
+  const external = selectedAgent !== "claude";
   const providerShown = $("t-provider-sec").style.display !== "none";
   const body = {
     mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url,
     base: Selects["t-base"].value, title: $("t-title").value.trim(),
     prompt: $("t-prompt").value,
-    // codex carries a model and no skills; claude keeps its skill selection
-    skills: codex ? [] : selectedExtraSkills(),
+    // non-Claude agents carry a model and no Switchyard-injected skills.
+    skills: external ? [] : selectedExtraSkills(),
     provider_id: providerShown ? selectedProviderId() : null,
     agent: selectedAgent,
-    model: codex ? ($("t-codex-model").value.trim() || null) : null,
+    model: external ? ($("t-codex-model").value.trim() || null) : null,
   };
   if (!body.base || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
   // Same optimistic feedback as a local dispatch (addTask): a dock loading window +
@@ -316,15 +324,15 @@ export async function addTask() {
   // provider_id belongs to the target node's own provider catalog. A hidden picker
   // sends null, which means the target node's default Claude login.
   const providerShown = $("t-provider-sec").style.display !== "none";
-  const codex = selectedAgent === "codex";
+  const external = selectedAgent !== "claude";
   const body = {
     repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
-    // codex has no skills and never takes a provider; it carries a model instead
-    extra_skills: codex ? [] : selectedExtraSkills(),
+    // non-Claude agents have no Switchyard-injected skills and never take a provider.
+    extra_skills: external ? [] : selectedExtraSkills(),
     provider_id: providerShown ? selectedProviderId() : null,   // null == default claude login
     agent: selectedAgent,
-    agent_model: codex ? ($("t-codex-model").value.trim() || null) : null,
+    agent_model: external ? ($("t-codex-model").value.trim() || null) : null,
   };
   if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
   // Spin up BOTH placeholders before clearing the form (so the title can label them):
@@ -425,9 +433,8 @@ export function isShadowedByNodePending(hostId, tk) {
 // forced a full innerHTML rebuild (animation restarts = the visible flash, and a
 // transient old/new double-selection during the swap).
 export function pendingCard(p) {
-  // agent picks the card's colour (task-claude / task-codex accent bar + tint) —
-  // no text label; the colour alone carries the claude-vs-codex distinction.
-  const agent = p.agent === "codex" ? "codex" : "claude";
+  // agent picks the card's colour (task-claude / task-codex / task-kimi accent bar + tint).
+  const agent = normalizeAgent(p.agent);
   return `<div class="card task pending-card task-${agent} clickable" data-pending="${p.tmpId}" onclick="focusPending('${p.tmpId}')">
     <div class="t"><span class="sdot cloning" title="${I18N.t("task.creating")}"></span>
       <span class="tname">${p.title}</span></div>
@@ -472,9 +479,8 @@ function rejectPending(tmpId, message) {
 
 export function taskCard(t, online) {
   const active = t.status !== "cleaned";
-  // agent picks the card's colour (task-claude / task-codex accent bar + tint) —
-  // no text label; the colour alone carries the claude-vs-codex distinction.
-  const agent = t.agent === "codex" ? "codex" : "claude";
+  // agent picks the card's colour (task-claude / task-codex / task-kimi accent bar + tint).
+  const agent = normalizeAgent(t.agent);
   // one corner action per state — stop (active) / cleanup (cleaned)
   // NOTE: the param is `t` (the task), so it shadows the global t() — use I18N.t here.
   // `needsHost` actions run a command ON the machine, so they're disabled while

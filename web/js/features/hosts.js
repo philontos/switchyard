@@ -180,10 +180,9 @@ function fleetCard(hostId, tk) {
   // selection is painted post-render by paintSelection, not baked into the markup
   // (keeps renderList's rebuild cache selection-agnostic — see pendingCard's note).
   // Same agent split as the local taskCard — the node ships `agent` in its
-  // `tdsp list` payload (SELECT *), so a remote Codex task reads identically to a
-  // local one. An un-updated node (no agent column) omits it → defaults to claude.
-  // Colour only (task-claude / task-codex accent bar + tint), no text label.
-  const agent = tk.agent === "codex" ? "codex" : "claude";
+  // `tdsp list` payload (SELECT *). An un-updated node (no agent column) omits it
+  // → defaults to claude. Colour only, no text label.
+  const agent = tk.agent === "codex" || tk.agent === "kimi" ? tk.agent : "claude";
   const meta = tk.kind === "local"
     ? `<div class="muted">📂 <code>${tk.cwd || "~"}</code> <span class="tag-local">${t("local.tag")}</span></div>`
     : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;

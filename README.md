@@ -64,7 +64,7 @@ git clone <repo-url> switchyard && cd switchyard
 tdsp serve           # → http://localhost:4500
 ```
 
-> `setup.sh` does three things in order: ① **preflight** — verifies `claude` / `tmux` / `git` are reachable from a non-interactive shell (tasks are launched by exactly that kind of shell, which reads only `~/.zshenv`; a missing command kills the pane), idempotently writing any missing PATH dirs into `~/.zshenv`; ② `npm install` (4 runtime deps, zero build); ③ installs the global `tdsp` command (`~/.task-dispatcher/src` points at this clone, launcher linked at `~/.local/bin/tdsp` — if `tdsp` isn't found, put `~/.local/bin` on your PATH). `--check` inspects only — writes and installs nothing.
+> `setup.sh` does three things in order: ① **preflight** — verifies `claude` / `kimi` / `tmux` / `git` are reachable from a non-interactive shell (tasks are launched by exactly that kind of shell, which reads only `~/.zshenv`; a missing command kills the pane), idempotently writing any missing PATH dirs into `~/.zshenv`; ② `npm install` (4 runtime deps, zero build); ③ installs the global `tdsp` command (`~/.task-dispatcher/src` points at this clone, launcher linked at `~/.local/bin/tdsp` — if `tdsp` isn't found, put `~/.local/bin` on your PATH). `--check` inspects only — writes and installs nothing.
 
 From here on, everything is `tdsp`:
 
@@ -139,7 +139,7 @@ web/                   board + xterm terminal (native ES Modules, no build)
   js/main.js           entry — wires the modules, bridges inline onclick handlers
   js/core/             shared infra: dom, state, feedback, dialog, select
   js/features/         hosts, tasks, terminal, repos, providers, skills, reorder, mobile, reading
-scripts/setup.sh       one-shot machine setup: preflight (fix ~/.zshenv PATH) + npm install + global tdsp
+scripts/setup.sh       one-shot machine setup: preflight (fix ~/.zshenv PATH for agent CLIs + git/tmux) + npm install + global tdsp
 ~/.task-dispatcher/    per machine:
   src                  pointer to this machine's clone (real clone or symlink)
   bin/tdsp             the global launcher → src

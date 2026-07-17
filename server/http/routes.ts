@@ -635,7 +635,7 @@ app.post("/api/nodes/:hostId/tasks", async (req, res) => {
   if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
   if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
-  const { mirror, name, git_url, base, title, prompt, agent, agent_model, provider_id } = req.body ?? {};
+  const { mirror, name, git_url, base, title, prompt, agent, provider_id } = req.body ?? {};
   if (!mirror || !base || !title) return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
   const skills = Array.isArray(req.body?.skills) ? req.body.skills.map(String) : [];
   const agentKind = asAgentKind(agent);
@@ -648,7 +648,7 @@ app.post("/api/nodes/:hostId/tasks", async (req, res) => {
     prompt: prompt || null,
     skills,
     agent: agentKind,
-    model: agent_model ?? null,
+    model: req.body?.model ?? req.body?.agent_model ?? null,
     provider_id: agentKind === "claude" && provider_id ? Number(provider_id) : null,
   };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");

@@ -18,9 +18,9 @@ export interface CreateRepoSpec {
   title: string;
   prompt?: string | null;
   skills?: string[];
-  // Which coding-agent CLI the node runs (claude default | codex) and codex's
-  // optional -m model. Local and remote dispatch are symmetric — the node runs
-  // the same agent A picked, using the same createRepoTask on its own machine.
+  // Which coding-agent CLI the node runs (claude default | codex | kimi) and the
+  // optional non-Claude -m model. Local and remote dispatch are symmetric — the
+  // node runs the same agent A picked, using createRepoTask on its own machine.
   agent?: string;
   model?: string | null;
   // Target-node local provider id. The controller never interprets this for a

@@ -117,6 +117,7 @@
       <div id="t-agent-seg" class="agent-seg">
         <button type="button" class="agent-opt selected" data-agent="claude" onclick="selectAgent('claude')">Claude Code</button>
         <button type="button" class="agent-opt" data-agent="codex" onclick="selectAgent('codex')">Codex</button>
+        <button type="button" class="agent-opt" data-agent="kimi" onclick="selectAgent('kimi')">Kimi Code</button>
       </div>
     </div>
     <label class="tm-lbl" data-i18n="task.baseLabel"></label>
@@ -125,8 +126,8 @@
     <textarea id="t-prompt" rows="3" data-i18n-ph="task.promptPh"></textarea>
     <label class="tm-lbl" data-i18n="task.extraSkills"></label>
     <div id="t-skills" class="skills-box"></div>
-    <!-- codex has no skill mechanism: the box above is greyed out and this note
-         explains why (shown only when Codex is the selected agent). -->
+    <!-- non-Claude agents have no Switchyard skill injection: the box above is
+         greyed out and this note explains why. -->
     <div id="t-skills-codex-note" class="hint" style="display:none" data-i18n="agent.codexSkillsNote"></div>
     <!-- model backend: only meaningful for in-process dispatch (this controller
          launches claude). Hidden in node mode — a bootstrapped remote owns its
@@ -153,12 +154,12 @@
         <div class="hint" style="margin-top:8px" data-i18n="provider.hint"></div>
       </div>
     </div>
-    <!-- codex-only: an optional model (-m) + the full-access note. Shown in place
-         of the (claude-only) provider picker when Codex is the selected agent. -->
+    <!-- non-Claude agents: an optional model (-m) + the auto-mode note. Shown in
+         place of the (claude-only) provider picker. -->
     <div id="t-codex-sec" style="display:none">
       <label class="tm-lbl" data-i18n="agent.modelLabel"></label>
       <input id="t-codex-model" data-i18n-ph="agent.codexModelPh" />
-      <div class="hint" style="margin-top:2px" data-i18n="agent.codexAutoNote"></div>
+      <div id="t-agent-auto-note" class="hint" style="margin-top:2px" data-i18n="agent.codexAutoNote"></div>
     </div>
     <div class="dlg-actions">
       <button class="sec" data-i18n="dialog.cancel" onclick="cancelTaskModal()"></button>

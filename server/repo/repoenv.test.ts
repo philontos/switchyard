@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { initSchema } from "../core/schema.ts";
 import { repoFindOrCreate, buildRepoTaskEnv } from "./repoenv.ts";
 import type { Runner } from "../fleet/runner.ts";
+import type { AgentKind } from "../session/agent.ts";
 
 const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 
@@ -24,7 +25,7 @@ function recordingRunner() {
   return { runner, putDirs };
 }
 
-function setupWith(agent: "claude" | "codex", putDirs: { src: string; dest: string }[], runner: Runner) {
+function setupWith(agent: AgentKind, putDirs: { src: string; dest: string }[], runner: Runner) {
   const db = new Database(":memory:");
   initSchema(db, opts);
   const env = buildRepoTaskEnv({ db, ns: "ns", runner, writeManifest: () => {} });
@@ -50,6 +51,12 @@ test("setupWorktree (codex) skips skills and hooks — no .claude injection at a
   const { runner, putDirs } = recordingRunner();
   await setupWith("codex", putDirs, runner);
   assert.equal(putDirs.length, 0, "codex delivers no skills and injects no hooks");
+});
+
+test("setupWorktree (kimi) skips skills and hooks — no .claude injection at all", async () => {
+  const { runner, putDirs } = recordingRunner();
+  await setupWith("kimi", putDirs, runner);
+  assert.equal(putDirs.length, 0, "kimi delivers no skills and injects no hooks");
 });
 
 function seed() {

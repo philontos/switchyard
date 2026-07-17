@@ -1,5 +1,5 @@
 // Read a task's agent conversation as a normalized, append-only entry stream — the
-// data behind the mobile "阅读 / Reading" view. Both supported agents persist their
+// data behind the mobile "阅读 / Reading" view. The supported transcript parsers persist their
 // session to disk as JSONL; we locate that file, tail it from a byte cursor, and map
 // each line to agent-agnostic Entry objects the client renders as a chat.
 //
@@ -8,6 +8,7 @@
 //   Codex:   ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl  (no hook, so we
 //            locate it the way `codex resume --last` does: newest rollout whose
 //            session_meta.cwd == the worktree)
+//   Kimi:    launched and live in the terminal, but not parsed into Reading yet.
 //
 // All file access goes through the task's Runner, so a local task reads the fs and a
 // remote one reads over ssh with identical code. Parsing is stateless per line, so
@@ -211,6 +212,7 @@ export async function readTranscript(
   if (!cwd) return { agent, source: null, entries: [], cursor: 0 };
   const home = await resolveHome(runner);
   if (!home) return { agent, source: null, entries: [], cursor: 0 };
+  if (agent === "kimi") return { agent, source: null, entries: [], cursor: 0 };
 
   let file: string | null = null;
   let source: string | null = null;

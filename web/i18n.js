@@ -93,7 +93,7 @@
       "task.branchPh": "选择分支",
       "task.loadingBranches": "加载分支…",
       "task.titlePh": "任务标题",
-      "task.promptPh": "给 claude 的初始指令（可选）",
+      "task.promptPh": "给智能体的初始指令（可选）",
       "task.submit": "建 worktree + 起会话",
 
       // agent axis (which coding-agent CLI runs the task)
@@ -102,6 +102,9 @@
       "agent.codexModelPh": "Codex 模型（可选），留空用默认，如 gpt-5-codex",
       "agent.codexSkillsNote": "Codex 暂不支持附加 skill",
       "agent.codexAutoNote": "🔓 完全放开：Codex 可 push/联网/跑 gh；极少数情况会停下问授权(此时任务静默等待)，使用本机已登录的 Codex 账号",
+      "agent.kimiModelPh": "Kimi 模型（可选），留空用默认，如 kimi-code/kimi-for-coding",
+      "agent.kimiSkillsNote": "Kimi 暂不支持附加 skill",
+      "agent.kimiAutoNote": "Kimi 以 auto 模式启动；普通工具审批由 Kimi Code 自动处理，使用本机已登录的 Kimi 账号",
 
       // shells (bare tmux, per machine — local or remote)
       "local.new": "新建 shell",
@@ -178,7 +181,7 @@
       "toast.worktreeRemoved": "worktree 已删除",
       "toast.resumed": "已恢复会话",
       "toast.resumeFailed": "恢复失败：{error}",
-      "toast.pasteOk": "图片已贴入终端（claude 显示为 [Image #N]）",
+      "toast.pasteOk": "图片已贴入终端",
       "toast.pasteFailed": "贴图失败：{error}",
       "toast.claudeCopied": "已复制 Claude session id",
       "toast.attachCopied": "已复制 attach 命令",
@@ -318,7 +321,7 @@
       "task.branchPh": "Select branch",
       "task.loadingBranches": "Loading branches…",
       "task.titlePh": "Task title",
-      "task.promptPh": "Initial prompt for claude (optional)",
+      "task.promptPh": "Initial prompt for the agent (optional)",
       "task.submit": "Create worktree + start session",
 
       // agent axis (which coding-agent CLI runs the task)
@@ -327,6 +330,9 @@
       "agent.codexModelPh": "Codex model (optional), blank = default, e.g. gpt-5-codex",
       "agent.codexSkillsNote": "Codex doesn't support extra skills yet",
       "agent.codexAutoNote": "🔓 Full access: Codex can push / network / run gh; may rarely pause for approval (task then waits silently); uses this machine's Codex login",
+      "agent.kimiModelPh": "Kimi model (optional), blank = default, e.g. kimi-code/kimi-for-coding",
+      "agent.kimiSkillsNote": "Kimi doesn't support extra skills yet",
+      "agent.kimiAutoNote": "Kimi starts in auto mode; normal tool approvals are handled by Kimi Code and it uses this machine's Kimi login",
 
       // shells (bare tmux, per machine — local or remote)
       "local.new": "New shell",
@@ -397,7 +403,7 @@
       "toast.worktreeRemoved": "worktree removed",
       "toast.resumed": "Session resumed",
       "toast.resumeFailed": "Resume failed: {error}",
-      "toast.pasteOk": "Image pasted into the terminal (shows as [Image #N] in claude)",
+      "toast.pasteOk": "Image pasted into the terminal",
       "toast.pasteFailed": "Paste failed: {error}",
       "toast.claudeCopied": "Copied the Claude session id",
       "toast.attachCopied": "Copied the attach command",
