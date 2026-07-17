@@ -389,15 +389,8 @@ app.post("/api/tasks/local", async (req, res) => {
   }
 });
 
-// paste a screenshot into a task's agent: receive the raw image bytes, land
-// them ON the task's machine (worktree for a repo task, cwd for a local task)
-// via the Runner, then bracketed-paste the adapter's input text into the
-// session. Identical local + remote (Runner).
-app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25mb" }), async (req, res) => {
+async function pasteImageIntoTask(req: Request, res: Response, task: Task, runner: Runner) {
   const lang = langFromReq(req);
-  const task = getTask.get(req.params.id) as Task | undefined;
-  if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
-  if (offline(taskHost(task))) return res.status(409).json({ error: tr(lang, "host.offline") });
   const ext = extForMime(req.headers["content-type"]);
   if (!ext) return res.status(400).json({ error: tr(lang, "paste.badType") });
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: tr(lang, "paste.empty") });
@@ -425,6 +418,18 @@ app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25
   ]).catch(() => {});
   if (task.session) await pasteText(runner, task.session, pasteInputText(agent, dest)).catch(() => {});
   res.json({ ok: true, path: dest });
+}
+
+// paste a screenshot into a task's agent: receive the raw image bytes, land
+// them ON the task's machine (worktree for a repo task, cwd for a local task)
+// via the Runner, then bracketed-paste the adapter's input text into the
+// session. Identical local + remote (Runner).
+app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25mb" }), async (req, res) => {
+  const lang = langFromReq(req);
+  const task = getTask.get(req.params.id) as Task | undefined;
+  if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (offline(taskHost(task))) return res.status(409).json({ error: tr(lang, "host.offline") });
+  return pasteImageIntoTask(req, res, task, taskRunner(task));
 });
 
 // Read a task's agent conversation as normalized entries — the data behind the mobile
@@ -664,6 +669,28 @@ async function runNodeJson(host: Host, args: string[]) {
   const out = await runTdsp(host, args);
   return parseNodeResult(out.stdout);
 }
+
+// Paste into a task owned by a remote node. The pane id in the browser is
+// controller-local ("n<host>:<task>"), so this route first asks the node for its
+// own task row, then reuses the same paste adapter against that node's Runner.
+app.post("/api/nodes/:hostId/tasks/:taskId/paste-image", express.raw({ type: "image/*", limit: "25mb" }), async (req, res) => {
+  const lang = langFromReq(req);
+  const host = getHost.get(req.params.hostId) as Host | undefined;
+  if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+  if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
+  if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+
+  const taskId = Number(req.params.taskId);
+  if (!Number.isInteger(taskId)) return res.status(400).json({ error: "invalid task id" });
+
+  const payload = await runNodeJson(host, ["list", "--json"]);
+  const task = Array.isArray(payload?.tasks)
+    ? payload.tasks.find((t: any) => Number(t?.id) === taskId)
+    : null;
+  if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+
+  return pasteImageIntoTask(req, res, task as Task, runnerFor(host));
+});
 
 // Provider catalog on a remote node. The controller only relays these calls; the
 // provider rows and tokens live in the same DB as the tasks that will use them.
