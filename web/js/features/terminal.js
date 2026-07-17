@@ -303,8 +303,8 @@ function createPane(id, query, agent) {
   });
   // Cmd/Ctrl+V with an image in the clipboard: don't let xterm paste binary as
   // text — upload it to THIS pane's task; the server lands it on that machine and
-  // bracketed-pastes the path into claude, which attaches it as [Image #N]. Text
-  // pastes fall through to xterm untouched.
+  // bracketed-pastes the current agent's adapter text. Text pastes fall through
+  // to xterm untouched.
   term.element.addEventListener("paste", (e) => onPasteImage(e, id), true);
   // keystrokes → this pane's own socket
   term.onData(d => p.ws && p.ws.readyState === 1 && p.ws.send(d));

@@ -145,10 +145,7 @@ export async function cancelCopyMode(runner: Runner, session: string) {
 }
 
 /**
- * Inject text into a session's input as a BRACKETED PASTE (not keystrokes), so
- * Claude Code treats a pasted image path the way it treats a real drag/paste —
- * converting it to an inline [Image #N] attachment (verified: typed keystrokes
- * route through the Read tool instead, a bracketed paste attaches directly). A
+ * Inject text into a session's input as a BRACKETED PASTE (not keystrokes). A
  * named buffer keeps the user's paste buffers untouched; -d removes it after.
  * No trailing newline, so it never auto-submits — the user adds text and Enters.
  */

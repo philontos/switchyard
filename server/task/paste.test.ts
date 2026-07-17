@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extForMime, pasteTargetBase, pastedDest, pasteFilename } from "./paste.ts";
+import {
+  extForMime,
+  imagePasteAdapter,
+  pasteGitExcludePattern,
+  pasteInputText,
+  pasteTargetBase,
+  pastedDest,
+  pasteFilename,
+} from "./paste.ts";
 
 test("extForMime maps known image mimes, strips params, is case-insensitive", () => {
   assert.equal(extForMime("image/png"), "png");
@@ -27,8 +35,26 @@ test("pasteTargetBase prefers worktree_path, falls back to cwd, else null", () =
   assert.equal(pasteTargetBase({ worktree_path: "", cwd: "" }), null);
 });
 
-test("pastedDest lands under <base>/.claude/pasted", () => {
+test("pastedDest defaults to claude's historical .claude/pasted directory", () => {
   assert.equal(pastedDest("/wt", "paste-1.png"), "/wt/.claude/pasted/paste-1.png");
+});
+
+test("pastedDest uses the agent image-paste adapter directory", () => {
+  assert.equal(pastedDest("/wt", "paste-1.png", "claude"), "/wt/.claude/pasted/paste-1.png");
+  assert.equal(pastedDest("/wt", "paste-1.png", "codex"), "/wt/.codex/pasted/paste-1.png");
+});
+
+test("imagePasteAdapter isolates each agent's injected input text", () => {
+  assert.equal(imagePasteAdapter("claude").storageDir, ".claude/pasted");
+  assert.equal(pasteGitExcludePattern("claude"), ".claude/pasted/");
+  assert.equal(pasteInputText("claude", "/wt/.claude/pasted/paste-1.png"), "/wt/.claude/pasted/paste-1.png");
+
+  assert.equal(imagePasteAdapter("codex").storageDir, ".codex/pasted");
+  assert.equal(pasteGitExcludePattern("codex"), ".codex/pasted/");
+  assert.equal(
+    pasteInputText("codex", "/wt/.codex/pasted/paste-1.png"),
+    "Use this image as visual context: /wt/.codex/pasted/paste-1.png",
+  );
 });
 
 test("pasteFilename is paste-<stamp>.<ext>", () => {
