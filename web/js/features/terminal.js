@@ -415,7 +415,9 @@ function onPasteImage(e, taskId) {
 
 async function uploadPasteImage(taskId, blob) {
   try {
-    const res = await fetch(`/api/tasks/${taskId}/paste-image`, {
+    const target = pasteImageUrl(taskId);
+    if (!target) throw new Error("invalid task id");
+    const res = await fetch(target, {
       method: "POST",
       headers: { "content-type": blob.type || "image/png", "X-Lang": I18N.lang },
       body: blob,
@@ -429,6 +431,15 @@ async function uploadPasteImage(taskId, blob) {
   } catch (err) {
     toast(I18N.t("toast.pasteFailed", { error: err.message }), "error", 6000);
   }
+}
+
+export function pasteImageUrl(taskId) {
+  if (typeof taskId === "string") {
+    const m = /^n(\d+):(\d+)$/.exec(taskId);
+    if (m) return `/api/nodes/${m[1]}/tasks/${m[2]}/paste-image`;
+    return null;
+  }
+  return `/api/tasks/${taskId}/paste-image`;
 }
 
 // Detach the dock from any task WITHOUT tearing panes down: hide every pane and
