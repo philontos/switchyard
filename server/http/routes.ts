@@ -13,7 +13,7 @@ import { renameTask } from "../task/tasks.js";
 import { initMirror, fetchMirror, listBranches, removeWorktree, mirrorPath } from "../repo/git.js";
 import { findRepoByGitUrl } from "../repo/catalog.js";
 import { scanSkills, defaultSources } from "../skills/skills.js";
-import { extForMime, pasteTargetBase, pastedDest, pasteFilename } from "../task/paste.js";
+import { extForMime, pasteTargetBase, pastedDest, pasteFilename, pasteGitExcludePattern, pasteInputText } from "../task/paste.js";
 import { listAvailable, installPlugin } from "../skills/plugins.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions, pasteText } from "../session/tmux.js";
 import { asAgentKind } from "../session/agent.js";
@@ -389,10 +389,10 @@ app.post("/api/tasks/local", async (req, res) => {
   }
 });
 
-// paste a screenshot into a task's claude: receive the raw image bytes, land
+// paste a screenshot into a task's agent: receive the raw image bytes, land
 // them ON the task's machine (worktree for a repo task, cwd for a local task)
-// via the Runner, then bracketed-paste the absolute path into the session so
-// claude attaches it as an inline image. Identical local + remote (Runner).
+// via the Runner, then bracketed-paste the adapter's input text into the
+// session. Identical local + remote (Runner).
 app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25mb" }), async (req, res) => {
   const lang = langFromReq(req);
   const task = getTask.get(req.params.id) as Task | undefined;
@@ -405,7 +405,8 @@ app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25
   if (!base) return res.status(409).json({ error: tr(lang, "paste.noTarget") });
 
   const runner = taskRunner(task);
-  const dest = pastedDest(base, pasteFilename(Date.now(), ext));
+  const agent = asAgentKind(task.agent);
+  const dest = pastedDest(base, pasteFilename(Date.now(), ext), agent);
   const tmp = path.join(os.tmpdir(), `tdsp-paste-${NS}-${task.id}-${path.basename(dest)}`);
   try {
     fs.writeFileSync(tmp, req.body);
@@ -417,12 +418,12 @@ app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25
   }
   // keep pasted images out of git status (best-effort; a local task's cwd may
   // not be a git repo at all — the guard makes that a clean no-op)
+  const excludePattern = pasteGitExcludePattern(agent);
   await runner.exec("sh", ["-c",
     `cd ${JSON.stringify(base)} && p=$(git rev-parse --git-path info/exclude 2>/dev/null) && [ -n "$p" ] && ` +
-    `{ grep -qxF '.claude/pasted/' "$p" 2>/dev/null || printf '%s\\n' '.claude/pasted/' >> "$p"; }`,
+    `{ grep -qxF ${JSON.stringify(excludePattern)} "$p" 2>/dev/null || printf '%s\\n' ${JSON.stringify(excludePattern)} >> "$p"; }`,
   ]).catch(() => {});
-  // inject the path as a bracketed paste → claude shows [Image #N] in its input
-  if (task.session) await pasteText(runner, task.session, dest).catch(() => {});
+  if (task.session) await pasteText(runner, task.session, pasteInputText(agent, dest)).catch(() => {});
   res.json({ ok: true, path: dest });
 });
 
