@@ -118,6 +118,18 @@ function fitPane(p) {
   }
 }
 
+// True when xterm's screen (canvas) currently sticks out past the pane's
+// paintable area — i.e. its right edge crosses the xterm element's right
+// padding. fitPane() can only be right for the cell size it measured; if xterm
+// re-measures its font LATER (font settling, late measure) it rebuilds the
+// canvas wider with no resize event, and the right edge then clips mid-glyph.
+function paneOverfit(p) {
+  const s = p.pane.querySelector(".xterm-screen");
+  if (!s || !p.term.element) return false;
+  const padR = parseFloat(getComputedStyle(p.term.element).paddingRight) || 0;
+  return s.getBoundingClientRect().right > p.pane.getBoundingClientRect().right - padR + 0.5;
+}
+
 // Re-fit the visible pane (background panes can't be measured while display:none,
 // and are re-fit when next shown). Coalesced to one fit per frame: rAF both
 // batches a burst of resize notifications and defers the measurement until after
@@ -287,6 +299,25 @@ function createPane(id, query, agent) {
     }
   }
   term.open(pane);
+
+  // Self-healing geometry: the .xterm-screen box tracks the canvas exactly, so
+  // any post-fit cell-size drift shows up here as a size change. Refit with the
+  // NOW-current cell width, which shrinks cols until the canvas sits inside the
+  // pane again. Converges (a correct fit is not overfit, so nothing re-fires)
+  // and skips hidden panes — those are refit by showPane() anyway.
+  try {
+    const screen = pane.querySelector(".xterm-screen");
+    let driftQueued = false;
+    new ResizeObserver(() => {
+      if (driftQueued || activeId !== p.id) return;
+      driftQueued = true;
+      requestAnimationFrame(() => {
+        driftQueued = false;
+        if (activeId !== p.id || !paneOverfit(p)) return;
+        try { fitPane(p); sendResize(p); } catch {}
+      });
+    }).observe(screen);
+  } catch {}
 
   // mobile: all input goes through the on-screen quick-input bar, so make xterm's
   // hidden helper textarea readOnly + inputmode=none. Tapping the terminal then
