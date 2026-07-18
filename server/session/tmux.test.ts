@@ -45,7 +45,7 @@ test("ensureSessionOptions keeps panes readable, enables mouse, and stabilizes m
   assert.deepEqual(calls, [
     { file: "tmux", args: ["set-option", "-t", "tdsp-1-x", "remain-on-exit", "on"] },
     { file: "tmux", args: ["set-option", "-t", "tdsp-1-x", "mouse", "on"] },
-    { file: "tmux", args: ["set-window-option", "-t", "tdsp-1-x", "window-size", "smallest"] },
+    { file: "tmux", args: ["set-window-option", "-t", "tdsp-1-x", "window-size", "latest"] },
   ]);
 });
 
