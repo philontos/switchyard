@@ -13,6 +13,10 @@ test("mobile code detail state targets the outer modal controller", () => {
   assert.match(css, /#code-modal\.detail \.cv-main\s*\{\s*display:\s*flex;/);
 });
 
+test("code preview disables mobile text autosizing to keep source and gutter aligned", () => {
+  assert.match(css, /\.cv-content\s*\{[^}]*-webkit-text-size-adjust:\s*100%;[^}]*text-size-adjust:\s*100%;/s);
+});
+
 test("code tree icons use accessible state and stable vector masks", () => {
   assert.match(feature, /row\.setAttribute\("aria-expanded", String\(isOpen\)\)/);
   assert.match(feature, /caret\.classList\.toggle\("open", isOpen\)/);
