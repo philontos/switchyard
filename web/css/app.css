@@ -149,7 +149,10 @@
 .cv-view-switch button:hover { color: var(--text); background: var(--surface-2); }
 .cv-view-switch button.on { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .cv-content { flex: 1; min-height: 0; position: relative; overflow: auto; overscroll-behavior: contain;
-  -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+  -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
+  /* iOS Safari can independently inflate the wide max-content source block
+     after syntax highlighting, while leaving the line-number gutter unchanged. */
+  -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .cv-state { width: 100%; height: 100%; min-height: 140px; padding: 24px; display: flex; align-items: center; justify-content: center;
   gap: 9px; color: var(--faint); text-align: center; }
 .cv-code-scroll { min-width: 100%; width: max-content; display: flex; align-items: stretch; font: 12px/1.55 Menlo, Consolas, monospace;
