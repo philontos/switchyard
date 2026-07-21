@@ -78,6 +78,10 @@
       "code.binaryDiff": "二进制文件已变化，不提供文本 diff",
       "code.diffTooLarge": "diff 较大，MVP 暂不加载",
       "code.diffTruncated": "diff 较大，已截断显示",
+      "code.viewMode": "文件展示方式",
+      "code.structure": "结构",
+      "code.source": "源码",
+      "code.structureTruncated": "结构较大，已截断显示",
 
       // terminal-centric layout: col2 list (groups + machine header)
       "repo.repoWord": "仓库",
@@ -336,6 +340,10 @@
       "code.binaryDiff": "This binary file changed; no text diff is available",
       "code.diffTooLarge": "This diff is too large for the MVP preview",
       "code.diffTruncated": "This diff is large and has been truncated",
+      "code.viewMode": "File view mode",
+      "code.structure": "Structure",
+      "code.source": "Source",
+      "code.structureTruncated": "This structure is large and has been truncated",
 
       // terminal-centric layout: col2 list (groups + machine header)
       "repo.repoWord": "repo",
