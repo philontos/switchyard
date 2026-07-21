@@ -81,7 +81,7 @@ export function repoGroupHead(r, online, collapsed, tasks = []) {
   const disp = r.status === "ready"
     ? `<button class="grp-act" title="${t("task.dispatch")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskModal(${r.id})">＋</button>` : "";
   const code = r.status === "ready"
-    ? `<button class="grp-code" title="${t("code.open")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openRepoCode(${r.id})">&lt;/&gt;</button>` : "";
+    ? `<button class="grp-code" title="${t("code.open")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openRepoCode(${r.id})"><span class="code-ico" aria-hidden="true"></span></button>` : "";
   const summary = collapsed && tasks.length
     ? `<span class="muted">(${tasks.length})</span>`
       + (tasks.some(tk => tk.alive && tk.waiting) ? `<span class="sdot waiting" title="${t("task.waiting")}"></span>` : "")

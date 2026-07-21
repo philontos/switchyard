@@ -506,7 +506,7 @@ export function taskCard(t, online) {
     ? `<button class="t-resume" title="${I18N.t("task.resumeTitle")}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();resume(${t.id})">⟳ ${I18N.t("task.resume")}</button>`
     : "";
   const codeBtn = t.kind !== "local" && t.hasWorktree
-    ? `<button class="card-code" title="${I18N.t("code.open")}" aria-label="${I18N.t("code.open")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskCode(${t.id})">&lt;/&gt;</button>`
+    ? `<button class="card-code" title="${I18N.t("code.open")}" aria-label="${I18N.t("code.open")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskCode(${t.id})"><span class="code-ico" aria-hidden="true"></span></button>`
     : "";
   // local quick tasks have no branch/MR — show their working dir + a "local" tag
   const meta = t.kind === "local"
