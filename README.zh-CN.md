@@ -4,7 +4,7 @@
 
 <p align="center"><a href="README.md">English</a> | 简体中文</p>
 
-> 一个 web 控制台，把「交给 AI 一个编码任务」变成甩一张牌。每个任务都是一个**真实、可交互的 Claude Code 或 Codex**，跑在自己专属的 git worktree + tmux 会话里；你从浏览器直接进入那个终端，看它干活，随时接管。多个任务并行互不干扰，局域网里的每台机器都是一等节点——在一个页面上派发、围观、收工。手机上同样是完整体验：加到主屏幕就是一个 App。
+> 一个 web 控制台，把「交给 AI 一个编码任务」变成甩一张牌。每个任务都是一个**真实、可交互的 Claude Code、Codex 或 Kimi Code**，跑在自己专属的 git worktree + tmux 会话里；你从浏览器直接进入那个终端，看它干活，随时接管。多个任务并行互不干扰，局域网里的每台机器都是一等节点——在一个页面上派发、围观、收工。手机上同样是完整体验：加到主屏幕就是一个 App。
 
 <p align="center">
   <img src="docs/screenshots/desktop-board.png" alt="桌面总览:左侧按仓库分组的任务看板,右侧真实的 Claude Code 终端" width="100%">
@@ -16,19 +16,24 @@
 
 任务的宿主是机器上的 tmux，**网页只是取景器**：关掉浏览器任务照跑，换台设备打开会话原样都在；也可以随时从自己的终端 `tmux attach` 接管同一个会话，权限确认、斜杠命令这些 TUI 交互在网页里原样可用。
 
+tmux 会话被误杀、主机重启或任务归档也不等于现场丢了：只要 worktree 还在，就能一键用原来的 CLI、模型和端点恢复会话。实时终端还支持直接粘贴剪贴板截图；图片会落到任务所在的本机或远程节点，再交给对应 agent。
+
 > 顺带一提：不挂仓库也能直接开终端——在本机或任何远程节点的 Shells 组点 ＋，在指定目录起一个真 tmux shell（临时排查、跑脚本都行），和仓库任务同一套列表 / 连接 / 归档流程。
 
-## 多 CLI × 多模型端点
+## 三种 Agent CLI × 多模型
 
-派发任务时**按任务选 agent CLI**——当前支持 **Claude Code** 与 **Codex**，同一块看板上并肩跑，卡片按 CLI 上色，一眼分清。本机、远程完全对等：派到哪台机器，哪台机器就跑你选的那个 CLI。
+派发任务时**按任务选 agent CLI**——当前支持 **Claude Code、Codex 与 Kimi Code**，同一块看板上并肩跑，卡片按 CLI 上色，一眼分清。本机、远程完全对等：派到哪台机器，哪台机器就跑你选的 CLI；任务也会记住对应的模型或端点，恢复时沿用。
 
 <p align="center">
-  <img src="docs/screenshots/dispatch-modal.png" alt="派发弹窗:Claude Code / Codex 双选 + 分支 + 开场指令 + 模型后端" width="100%">
+  <img src="docs/screenshots/dispatch-modal.png" alt="派发弹窗:agent CLI + 分支 + 开场指令 + 模型后端" width="100%">
 </p>
 
 - **Claude Code** —— 完整能力：技能注入（派发时勾选官方插件技能，直接送进任务的 worktree）、权限确认黄灯（原生 hook 驱动，见下）。
-- **Codex** —— 以 on-request + danger-full-access 启动，能 push、联网、跑 `gh`；派发时可指定模型（如 `gpt-5.2`），留空用机器默认。
-- **多模型接入端点** —— 给 Claude Code 配任意 **Anthropic 兼容端点**（如 GLM），同一个 Claude Code TUI 驱动别家模型。添加端点时服务端按 claude 运行时的真实调用方式探测连通性，**绿灯才能保存**；之后每次派发按任务选用，选择会被记住。密钥是节点本地配置，永远不跨机传播。
+- **Codex** —— 以 on-request + danger-full-access 启动，能 push、联网、跑 `gh`；派发时可指定本机 Codex 可用的模型 ID，留空使用机器默认。
+- **Kimi Code / Kimi K3** —— 以交互式 `--auto` 模式启动，普通工具审批由 Kimi Code 自动处理；使用机器上已登录的 Kimi 账号。可按任务指定模型 ID，例如填 `k3` 使用 [Kimi K3](https://www.kimi.com/code/docs/kimi-code/models.html)（以账号权益为准），留空使用 Kimi Code 默认模型。
+- **多模型接入端点** —— 给 Claude Code 配任意 **Anthropic 兼容端点**（如 GLM），同一个 Claude Code TUI 驱动别家模型。添加端点时服务端按 claude 运行时的真实调用方式探测连通性，**绿灯才能保存**；之后每次派发按任务选用，选择会被记住。密钥仅存目标节点本地，不在节点之间传播。
+
+> 当前能力边界：Switchyard 的附加 skill 注入和权限等待黄灯只对 Claude Code 生效；Codex、Kimi Code 暂不注入这些 skill，也不会上报权限等待状态。三种 CLI 都支持实时终端、恢复会话和图片粘贴。
 
 ## 多机协同
 
@@ -50,13 +55,13 @@
 </p>
 
 - **主-详双视图** —— 任务列表和全屏终端两页切换，点卡片进任务，iOS 边缘右划原生返回（接入浏览器 history，实时终端里也能划）。
-- **阅读 | 实时 双模式** —— **阅读**把 Claude / Codex 的会话记录渲染成聊天流：原生滚动、自动追新、工具调用折叠展示，适合躺着翻进度；任务等你确认时顶部亮「Needs you」黄条，一键跳**实时**——那个真终端，要出手就在这。
+- **阅读 | 实时 双模式** —— **阅读**把本机 Claude / Codex 任务的会话记录渲染成聊天流：原生滚动、自动追新、工具调用折叠展示，适合躺着翻进度；Claude 等你确认时顶部亮「Needs you」黄条，一键跳**实时**——那个真终端，要出手就在这。远程节点任务与 Kimi Code 的阅读记录尚未接入，目前会直接进入实时终端。
 - **贴键盘输入条** —— 输入条钉在 iOS 软键盘正上方，支持多行；每个任务有独立的未发送草稿，切换任务互不串词。
 - **触控打磨** —— 禁双击/捏合缩放、禁误选 UI 文字、终端单指拖动 + 惯性滚动、hover 只在真悬停设备生效。
 
 ## 安装与启动（每台机器一次）
 
-**前置：** Node 22+，装好 `git` / `tmux` / `claude`。拉代码，一条命令装完：
+**前置：** Node 22+，装好 `git` / `tmux`，以及要使用并已完成登录的 agent CLI（`claude` / `codex` / `kimi`）。当前 `setup.sh` 会统一预检 `claude` 与 `kimi`；要运行 Codex 时还需自行确认 `codex` 在非交互 shell 中可达。安装脚本当前面向 zsh。拉代码，一条命令装完：
 
 ```sh
 git clone <repo-url> switchyard && cd switchyard
@@ -64,7 +69,7 @@ git clone <repo-url> switchyard && cd switchyard
 tdsp serve           # 启动 → http://localhost:4500
 ```
 
-> `setup.sh` 依次做三件事：① **环境预检**——用非交互 shell 验证 `claude` / `kimi` / `tmux` / `git` 可达（任务就是用这种只读 `~/.zshenv` 的 shell 启动的，找不到命令任务面板会直接死），缺的把所在目录幂等写进 `~/.zshenv`；② `npm install`（4 个运行时依赖，零构建）；③ 安装全局 `tdsp` 命令（`~/.task-dispatcher/src` 指向这份 clone，启动器链到 `~/.local/bin/tdsp`——敲不到就把 `~/.local/bin` 加进 PATH）。`--check` 只检查、不写不装。
+> `setup.sh` 依次做三件事：① **环境预检**——用非交互 zsh 验证 `claude` / `kimi` / `tmux` / `git` 可达（任务就是用这种只读 `~/.zshenv` 的 shell 启动的，找不到命令任务面板会直接死），缺的把所在目录幂等写进 `~/.zshenv`；② `npm install`（4 个运行时依赖，零构建）；③ 安装全局 `tdsp` 命令（`~/.task-dispatcher/src` 指向这份 clone，启动器链到 `~/.local/bin/tdsp`——敲不到就把 `~/.local/bin` 加进 PATH）。`--check` 只检查、不写不装。
 
 装完之后，一切都是 `tdsp`：
 
@@ -85,7 +90,7 @@ task-dispatcher on http://10.10.0.3:4500
 ## 使用
 
 1. **添加仓库** —— 名字 + git 地址（GitHub / GitLab；https 私有仓库填 token，SSH 留空）。注册并克隆，状态变 `ready`。
-2. **派发任务** —— 选仓库 → 基础分支 → 标题 + 开场指令 → 选 agent（Claude Code / Codex）→（可选）技能、模型后端。自动建 worktree、开工。
+2. **派发任务** —— 选仓库 → 基础分支 → 标题 + 开场指令 → 选 agent（Claude Code / Codex / Kimi Code）→ Claude 可选 skill 与模型端点，Codex / Kimi 可选模型 ID。自动建 worktree、开工。
 3. **进终端** —— 右侧面板自动连上；卡片上的「进入终端」随时重连。你面对的就是真 agent。
 4. **收尾** —— 归档（杀会话、留 worktree）/ 清理（杀会话 + 删 worktree）/ 删除（移除记录）。
 
@@ -132,7 +137,7 @@ server/                REST API + /pty WebSocket;tdsp CLI;git / tmux / pty / ssh
   repo/                git 镜像、worktree、每任务的 repo 环境
   task/                任务生命周期(创建/清单/改名) + tdsp 节点本地 API(cli.ts)
   fleet/               远程主机:runner、bootstrap、存活探测、跨节点舰队视图
-  session/             tmux 会话、pty 派生、attach 命令、agent 启动参数(claude / codex)
+  session/             tmux 会话、pty 派生、attach 命令、agent 启动参数(claude / codex / kimi)
   skills/              技能扫描/解析、插件安装、hook 设置
   preview/             预览反向代理引擎
 web/                   看板 + xterm 终端(原生 ES Modules,零构建)
