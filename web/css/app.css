@@ -199,8 +199,8 @@
   .cv-body { position: relative; }
   .cv-nav { flex: 1; max-width: none; min-width: 0; width: 100%; border-right: none; padding: 8px 10px max(14px, env(safe-area-inset-bottom)); }
   .cv-main { display: none; position: absolute; inset: 0; }
-  .code-modal.detail .cv-nav { display: none; }
-  .code-modal.detail .cv-main { display: flex; }
+  #code-modal.detail .cv-nav { display: none; }
+  #code-modal.detail .cv-main { display: flex; }
   .cv-mobile-bar { display: block; flex: none; border-bottom: 1px solid var(--border); background: var(--surface); }
   .cv-mobile-bar button { width: auto; min-height: 42px; margin: 0; padding: 6px 12px; border: none; background: none; color: var(--accent-text); }
   .cv-path { min-height: 42px; padding: 6px 8px 6px 12px; }
