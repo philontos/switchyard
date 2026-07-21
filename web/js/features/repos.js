@@ -80,6 +80,8 @@ export function repoGroupHead(r, online, collapsed, tasks = []) {
   const dot = r.status === "cloning" ? `<span class="sdot cloning" title="${esc(statusText)}"></span>` : "";
   const disp = r.status === "ready"
     ? `<button class="grp-act" title="${t("task.dispatch")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskModal(${r.id})">＋</button>` : "";
+  const code = r.status === "ready"
+    ? `<button class="grp-code" title="${t("code.open")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openRepoCode(${r.id})">&lt;/&gt;</button>` : "";
   const summary = collapsed && tasks.length
     ? `<span class="muted">(${tasks.length})</span>`
       + (tasks.some(tk => tk.alive && tk.waiting) ? `<span class="sdot waiting" title="${t("task.waiting")}"></span>` : "")
@@ -92,6 +94,7 @@ export function repoGroupHead(r, online, collapsed, tasks = []) {
     ${statusText ? `<span class="grp-status ${r.status === "error" ? "error" : ""}">${esc(statusText)}</span>` : ""}
     ${summary}
     ${r.error ? `<span class="grp-err" title="${esc(r.error)}">!</span>` : ""}
+    ${code}
     <button class="grp-del" title="${t("repo.delTitle")}" onclick="event.stopPropagation();delRepo(${r.id})">🗑</button>
     ${disp}
   </div>${r.status === "error" && r.error ? `<div class="grp-error-detail">${esc(r.error)}</div>` : ""}`;

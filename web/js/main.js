@@ -17,6 +17,7 @@ import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./fe
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, removeNodeWt, resumeNodeTask, deleteNodeTask, updateHost } from "./features/hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, cancelTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, addNodeShell, allTasks } from "./features/tasks.js";
 import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./features/skills.js";
+import { initCodeView, openRepoCode, openTaskCode, closeCodeView, repaintCodeView, isCodeViewOpen } from "./features/codeview.js";
 import { initReorder } from "./features/reorder.js";
 import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./features/providers.js";
 
@@ -54,7 +55,9 @@ Object.assign(window, {
   addTask, openTaskModal, cancelTaskModal, connect, archive, removeWt, deleteTask, resume,
   addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent,
   // repos
-  delRepo, openRepoModal, closeRepoModal, addRepo,
+  delRepo, openRepoModal, closeRepoModal, addRepo, openRepoCode,
+  // read-only code explorer
+  openTaskCode,
   // hosts
   selectHost, openHostModal, closeHostModal, addHost, delHost,
   toggleRepo, toggleArchived, toggleHostMenu, bootstrapHost, connectNode, stopNodeTask,
@@ -100,6 +103,7 @@ I18N.onChange = () => {
   const pv = Selects["t-provider"];
   if (pv) { pv.ph = t("provider.default"); }
   repaintProviders();   // re-localize the "Anthropic 默认" option + manage list
+  repaintCodeView();
   loadRepos();
   loadHosts();
   loadTasks();
@@ -138,6 +142,7 @@ initReading({ onEmpty: () => setMode("live") });   // mobile reading view; empty
 showTermEmpty();
 initHostMenuDismiss();   // close the machine ⚙ menu on any outside click
 initReorder();           // long-press drag-to-reorder of repo task cards (session-only)
+initCodeView();          // read-only repository tree + task diff modal
 $("t-base").dataset.ph = t("task.branchPh");   // localized placeholder for the branch select
 csMount("t-base");
 csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", label: "mosh" }]);
@@ -158,6 +163,7 @@ $("skills-modal").addEventListener("click", e => { if (e.target.id === "skills-m
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
+  if (isCodeViewOpen()) { closeCodeView(); return; }
   if ($("dialog").style.display === "flex") closeDialog(null);
   else { closeRepoModal(); cancelTaskModal(); closeHostModal(); closeSkillsModal(); }
 });

@@ -8,7 +8,7 @@ const opts = (didMigrate: boolean) => ({ didMigrate, legacyDir: "/legacy", dataD
 // The reported boot crash: an old DB whose `tasks` table predates the
 // worktree_path column. initSchema must backfill it instead of throwing
 // "no such column: worktree_path".
-test("initSchema backfills worktree_path onto an old tasks table (regression)", () => {
+test("initSchema backfills worktree_path and code baseline onto an old tasks table (regression)", () => {
   const db = new Database(":memory:");
   db.exec("CREATE TABLE repos (id INTEGER PRIMARY KEY, name TEXT, mirror_path TEXT)");
   db.exec("CREATE TABLE tasks (id INTEGER PRIMARY KEY, repo_id INTEGER, title TEXT)");
@@ -17,9 +17,14 @@ test("initSchema backfills worktree_path onto an old tasks table (regression)", 
   assert.doesNotThrow(() => initSchema(db, opts(false)));
   const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
   assert.ok(cols.includes("worktree_path"), "worktree_path should be backfilled");
+  assert.ok(cols.includes("base_commit"), "base_commit should be backfilled");
   assert.equal(
     (db.prepare("SELECT worktree_path FROM tasks WHERE id=1").get() as { worktree_path: string }).worktree_path,
     "",
+  );
+  assert.equal(
+    (db.prepare("SELECT base_commit FROM tasks WHERE id=1").get() as { base_commit: string | null }).base_commit,
+    null,
   );
 });
 
@@ -27,7 +32,7 @@ test("initSchema on a fresh DB has worktree_path and the newer columns", () => {
   const db = new Database(":memory:");
   initSchema(db, opts(false));
   const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
-  for (const c of ["worktree_path", "kind", "host_id", "cwd"]) assert.ok(cols.includes(c), `missing ${c}`);
+  for (const c of ["worktree_path", "base_commit", "kind", "host_id", "cwd"]) assert.ok(cols.includes(c), `missing ${c}`);
 });
 
 // The agent axis: every task records which coding-agent CLI it runs (claude by

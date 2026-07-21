@@ -7,6 +7,7 @@ import {
   runCli,
   aggregateNodes,
   ARCHIVED_TASK_LIFECYCLE_CAPABILITY,
+  CODE_VIEW_CAPABILITY,
   isUnknownTdspCommand,
   type TaskLiveness,
 } from "./cli.ts";
@@ -33,7 +34,7 @@ test("taskListPayload wraps the local tasks in a versioned envelope", async () =
   const db = seed();
   const payload = await taskListPayload(db, noLive);
   assert.equal(payload.schema_version, 3);
-  assert.deepEqual(payload.capabilities, [ARCHIVED_TASK_LIFECYCLE_CAPABILITY]);
+  assert.deepEqual(payload.capabilities, [ARCHIVED_TASK_LIFECYCLE_CAPABILITY, CODE_VIEW_CAPABILITY]);
   assert.equal(payload.tasks.length, 1);
   assert.equal(payload.tasks[0].title, "old");
   assert.equal(payload.tasks[0].session, "tdsp-1-r-old");
@@ -106,6 +107,7 @@ function fakeDeps(db: Database.Database) {
   const lifecycleCalls: Array<[string, number]> = [];
   const branchCalls: string[] = [];
   const providerCalls: any[] = [];
+  const inspectCalls: any[] = [];
   return {
     deps: {
       db,
@@ -144,6 +146,11 @@ function fakeDeps(db: Database.Database) {
         lifecycleCalls.push(["delete-task", id]);
         return { ok: true as const };
       },
+      inspectCode: async (request: any) => {
+        inspectCalls.push(request);
+        return { ok: true as const, kind: "tree" as const, files: ["README.md"], truncated: false,
+          revision: { label: "main", commit: "a".repeat(40) }, generatedAt: "now" };
+      },
       providersList: () => [{ id: 2, name: "GLM", base_url: "https://open.bigmodel.cn/api/anthropic", auth_token: "tok", model: "glm-5.2", small_fast_model: null, created_at: "now" }],
       providersTest: async (body: any) => {
         providerCalls.push(["test", body]);
@@ -170,6 +177,7 @@ function fakeDeps(db: Database.Database) {
     lifecycleCalls,
     branchCalls,
     providerCalls,
+    inspectCalls,
     get out() {
       return out;
     },
@@ -193,7 +201,34 @@ test("runCli list --json prints the versioned task envelope and exits 0", async 
   const parsed = JSON.parse(f.out);
   assert.equal(parsed.schema_version, 3);
   assert.ok(parsed.capabilities.includes(ARCHIVED_TASK_LIFECYCLE_CAPABILITY));
+  assert.ok(parsed.capabilities.includes(CODE_VIEW_CAPABILITY));
   assert.equal(parsed.tasks[0].title, "old");
+});
+
+test("runCli inspect-code decodes a typed read request and prints its result", async () => {
+  const f = fakeDeps(seed());
+  const request = { scope: "task", id: 7, operation: "tree" };
+  const code = await runCli(["inspect-code", Buffer.from(JSON.stringify(request)).toString("base64")], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.inspectCalls, [request]);
+  assert.deepEqual(JSON.parse(f.out).files, ["README.md"]);
+});
+
+test("runCli inspect-code rejects malformed base64 JSON without invoking the reader", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["inspect-code", "not-json"], f.deps);
+  assert.equal(code, 1);
+  assert.equal(f.inspectCalls.length, 0);
+  assert.equal(JSON.parse(f.out).error, "invalidRequest");
+});
+
+test("runCli inspect-code rejects a parsed but invalid request shape", async () => {
+  const f = fakeDeps(seed());
+  const invalid = Buffer.from(JSON.stringify({ scope: "repo", operation: "file" })).toString("base64");
+  const code = await runCli(["inspect-code", invalid], f.deps);
+  assert.equal(code, 1);
+  assert.equal(f.inspectCalls.length, 0);
+  assert.equal(JSON.parse(f.out).error, "invalidRequest");
 });
 
 test("runCli serve boots the local server and exits 0", async () => {

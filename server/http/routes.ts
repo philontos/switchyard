@@ -39,6 +39,14 @@ import {
   syncTaskManifest, providerEnv, checkProvider, slug, SESSION_RE, SSH_BIN,
 } from "./context.js";
 import { insertCheckedProvider, listProviders } from "../provider/providers.js";
+import {
+  codeErrorStatus,
+  codeResult,
+  inspectRepoCode,
+  inspectTaskCode,
+  isCodeInspectRequest,
+  type CodeInspectRequest,
+} from "../codeview/codeview.js";
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -307,6 +315,7 @@ app.post("/api/tasks", async (req, res) => {
       mirror: repo.mirror_path,
       name: repo.name,
       git_url: repo.git_url,
+      default_branch: repo.default_branch,
       base: base_branch,
       title,
       prompt: prompt || null,
@@ -578,6 +587,58 @@ function parseNodeResult(stdout: string): any | null {
   try { return JSON.parse(line); } catch { return null; }
 }
 
+// One read-only code-inspection endpoint for both contexts used by the UI:
+// controller-owned repo/tasks resolve through their Runner; node-owned fleet
+// items relay the same typed request to `tdsp inspect-code` on the owner. The
+// browser never supplies mirror/worktree paths.
+app.post("/api/code/inspect", async (req, res) => {
+  const lang = langFromReq(req);
+  const request = req.body as CodeInspectRequest & { node_id?: number };
+  if (!isCodeInspectRequest(request)) {
+    return res.status(400).json({ code: "invalidRequest", error: "Invalid code inspection request" });
+  }
+  if (request.node_id != null && (!Number.isInteger(request.node_id) || request.node_id <= 0)) {
+    return res.status(400).json({ code: "invalidRequest", error: "Invalid code inspection node" });
+  }
+  res.setHeader("cache-control", "no-store");
+
+  if (request.node_id != null) {
+    const host = getHost.get(request.node_id) as Host | undefined;
+    if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
+    if (!host.tdsp_bin) return res.status(409).json({ code: "nodeUpdateRequired", error: tr(lang, "host.nodeUpdateRequired") });
+    if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+    const nodeRequest = { ...request } as any;
+    delete nodeRequest.node_id;
+    const out = await runTdsp(host, ["inspect-code", b64Json(nodeRequest)]);
+    const result = parseNodeResult(out.stdout);
+    if (!result) {
+      if (isUnknownTdspCommand(`${out.stderr}\n${out.stdout}`, "inspect-code")) {
+        return res.status(409).json({ code: "nodeUpdateRequired", error: tr(lang, "host.nodeUpdateRequired") });
+      }
+      return res.status(502).json({ error: `node code inspection failed: ${(out.stderr || "no result").slice(0, 300)}` });
+    }
+    if (result.ok) return res.json(result);
+    return res.status(codeErrorStatus(String(result.error || "inspectFailed")))
+      .json({ code: result.error, error: result.message || result.error });
+  }
+
+  let result;
+  if (request.scope === "repo") {
+    const repo = getRepo.get(request.id) as Repo | undefined;
+    if (!repo) return res.status(404).json({ error: tr(lang, "notFound") });
+    const host = getHost.get(repo.host_id) as Host | undefined;
+    if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
+    result = await codeResult(() => inspectRepoCode(host ? runnerFor(host) : localRunner, repo, request));
+  } else {
+    const task = getTask.get(request.id) as Task | undefined;
+    if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+    if (offline(taskHost(task))) return res.status(409).json({ error: tr(lang, "host.offline") });
+    result = await codeResult(() => inspectTaskCode(taskRunner(task), task, request));
+  }
+  if (result.ok) return res.json(result);
+  return res.status(codeErrorStatus(result.error)).json({ code: result.error, error: result.message });
+});
+
 // One glass: every node's tasks read from its OWN truth. The local node comes
 // from this controller's DB; each bootstrapped remote is fetched live and merged
 // (offline → unreachable, older schema → version, no wrapper yet → notBootstrapped).
@@ -635,7 +696,7 @@ app.post("/api/nodes/:hostId/tasks", async (req, res) => {
   if (!host || host.kind === "local") return res.status(404).json({ error: tr(lang, "notFound") });
   if (!host.tdsp_bin) return res.status(409).json({ error: "node not bootstrapped" });
   if (offline(host)) return res.status(409).json({ error: tr(lang, "host.offline") });
-  const { mirror, name, git_url, base, title, prompt, agent, provider_id } = req.body ?? {};
+  const { mirror, name, git_url, default_branch, base, title, prompt, agent, provider_id } = req.body ?? {};
   if (!mirror || !base || !title) return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
   const skills = Array.isArray(req.body?.skills) ? req.body.skills.map(String) : [];
   const agentKind = asAgentKind(agent);
@@ -643,6 +704,7 @@ app.post("/api/nodes/:hostId/tasks", async (req, res) => {
     mirror,
     name: name || "",
     git_url: git_url || "",
+    default_branch: default_branch || base,
     base,
     title,
     prompt: prompt || null,

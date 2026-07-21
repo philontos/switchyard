@@ -65,9 +65,9 @@ export function readTaskManifests(dataDir: string): TaskManifest[] {
 }
 
 const TASK_COLS = [
-  "id", "repo_id", "base_branch", "work_branch", "title", "prompt", "worktree_path",
+  "id", "repo_id", "base_branch", "base_commit", "work_branch", "title", "prompt", "worktree_path",
   "session", "status", "error", "created_at", "skills", "kind", "host_id", "cwd",
-  "claude_session",
+  "claude_session", "provider_id", "agent", "agent_model",
 ] as const;
 
 /**
@@ -85,7 +85,10 @@ export function adoptTaskManifests(db: DB, manifests: TaskManifest[]): number {
   for (const m of manifests) {
     const t = m.task as unknown as Record<string, unknown>;
     if (typeof t?.id !== "number" || have.has(t.id)) continue;
-    insert.run(...TASK_COLS.map((c) => (t[c] ?? null) as unknown));
+    insert.run(...TASK_COLS.map((c) => {
+      if (c === "agent" && t[c] == null) return "claude";
+      return (t[c] ?? null) as unknown;
+    }));
     have.add(t.id);
     adopted++;
   }

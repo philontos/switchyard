@@ -11,6 +11,8 @@ export interface ExecOpts {
   cwd?: string;
   /** Extra env vars to set for THIS command (merged over the base env). */
   env?: Record<string, string>;
+  /** Bound captured stdout/stderr for read-heavy commands such as code previews. */
+  maxBuffer?: number;
 }
 
 /**
@@ -44,7 +46,7 @@ export class LocalRunner implements Runner {
     const { stdout } = await pexec(file, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
-      maxBuffer: 1024 * 1024 * 64,
+      maxBuffer: opts.maxBuffer ?? 1024 * 1024 * 64,
     });
     return stdout;
   }
@@ -109,7 +111,9 @@ export class RemoteRunner implements Runner {
   }
 
   async exec(file: string, args: string[], opts: ExecOpts = {}): Promise<string> {
-    return localRunner.exec("ssh", [...SSH_MUX, ...SSH_BATCH, this.target, this.remoteCmd(file, args, opts)]);
+    return localRunner.exec("ssh", [...SSH_MUX, ...SSH_BATCH, this.target, this.remoteCmd(file, args, opts)], {
+      maxBuffer: opts.maxBuffer,
+    });
   }
   async mkdirp(dir: string) { await this.exec("mkdir", ["-p", dir]); }
   async exists(p: string) { try { await this.exec("test", ["-e", p]); return true; } catch { return false; } }

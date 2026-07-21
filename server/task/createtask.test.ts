@@ -177,6 +177,7 @@ function makeRepoEnv(overrides: Partial<RepoTaskEnv> = {}) {
     setupWorktree: async (a) => {
       calls.push("setup");
       setupArgs = a;
+      return "a".repeat(40);
     },
     startSession: async (_session, _worktree, opening) => {
       calls.push(`start:${opening ?? "∅"}`);
@@ -201,6 +202,7 @@ test("createRepoTask inserts a running task, prepares the worktree, starts the s
     assert.equal(row.status, "running");
     assert.equal(row.repo_id, 4);
     assert.equal(row.base_branch, "master");
+    assert.equal(row.base_commit, "a".repeat(40));
     assert.equal(row.work_branch, `feat/${r.id}-fix-login`);
     assert.equal(r.workBranch, `feat/${r.id}-fix-login`);
     assert.equal(row.session, `tdsp-abcd1234-${r.id}-switchyard-fix-login`);
@@ -305,7 +307,7 @@ test("createRepoTask (codex) records agent+model, ignores skills, and threads ag
   let startOpts: any = null;
   let setupArgs: any = null;
   const { env, dir, db, calls } = makeRepoEnv({
-    setupWorktree: async (a) => { setupArgs = a; calls.push("setup"); },
+    setupWorktree: async (a) => { setupArgs = a; calls.push("setup"); return "a".repeat(40); },
     startSession: async (_s, _w, opening, o) => { startOpts = o; calls.push(`start:${opening ?? "∅"}`); },
   });
   try {
@@ -332,7 +334,7 @@ test("createRepoTask (kimi) records agent+model, ignores skills, and threads age
   let startOpts: any = null;
   let setupArgs: any = null;
   const { env, dir, db, calls } = makeRepoEnv({
-    setupWorktree: async (a) => { setupArgs = a; calls.push("setup"); },
+    setupWorktree: async (a) => { setupArgs = a; calls.push("setup"); return "a".repeat(40); },
     startSession: async (_s, _w, opening, o) => { startOpts = o; calls.push(`start:${opening ?? "∅"}`); },
   });
   try {

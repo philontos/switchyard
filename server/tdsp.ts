@@ -21,6 +21,7 @@ import { listBranches, removeWorktree } from "./repo/git.js";
 import { buildRepoTaskEnv, repoFindOrCreate } from "./repo/repoenv.js";
 import { removeTaskManifest, writeTaskManifest } from "./task/taskmanifest.js";
 import { checkProvider, insertCheckedProvider, listProviders, providerEnv } from "./provider/providers.js";
+import { inspectOwnedCode } from "./codeview/codeview.js";
 
 // Ensure child processes (tmux/git/claude) find Homebrew binaries regardless of
 // how tdsp was launched — a bare non-interactive ssh PATH otherwise can't resolve
@@ -130,7 +131,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
         runner: localRunner,
         writeManifest: (id) => writeTaskManifest(DATA_DIR, db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task),
       }),
-      repoFindOrCreate(db, { mirror: spec.mirror, name: spec.name, git_url: spec.git_url }),
+      repoFindOrCreate(db, { mirror: spec.mirror, name: spec.name, git_url: spec.git_url, default_branch: spec.default_branch }),
       {
         baseBranch: spec.base,
         title: spec.title,
@@ -143,6 +144,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
       },
     );
   },
+  inspectCode: (request) => inspectOwnedCode(db, localRunner, request),
   // stop one of THIS node's tasks: kill its session, mark cleaned, re-manifest.
   stop: (id) =>
     stopTask(
