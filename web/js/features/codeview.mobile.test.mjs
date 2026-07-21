@@ -21,6 +21,7 @@ test("code tree icons use accessible state and stable vector masks", () => {
   assert.doesNotMatch(feature, /caret\.textContent\s*=/);
   assert.doesNotMatch(feature, /mark\.textContent\s*=/);
   assert.match(css, /\.cv-caret\s*\{[^}]*-webkit-mask:/s);
+  assert.match(css, /\.cv-caret\s*\{[^}]*opacity:\s*\.7;[^}]*stroke-width='1\.8'[^}]*14px 14px/s);
   assert.match(css, /\.cv-caret\.open\s*\{\s*transform:\s*rotate\(90deg\)/);
   assert.match(css, /\.cv-file-mark\s*\{[^}]*-webkit-mask:/s);
 });
