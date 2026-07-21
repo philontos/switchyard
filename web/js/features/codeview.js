@@ -150,9 +150,11 @@ function renderTreeNode(node, parent, depth) {
     row.className = "cv-item cv-dir";
     row.style.setProperty("--depth", depth);
     const isOpen = openDirs.has(dir.path);
+    row.setAttribute("aria-expanded", String(isOpen));
     const caret = document.createElement("span");
     caret.className = "cv-caret";
-    caret.textContent = isOpen ? "▾" : "▸";
+    caret.classList.toggle("open", isOpen);
+    caret.setAttribute("aria-hidden", "true");
     const label = document.createElement("span");
     label.className = "cv-item-label";
     label.textContent = dir.name;
@@ -173,7 +175,7 @@ function renderTreeNode(node, parent, depth) {
     row.title = file.path;
     const mark = document.createElement("span");
     mark.className = "cv-file-mark";
-    mark.textContent = "·";
+    mark.setAttribute("aria-hidden", "true");
     const label = document.createElement("span");
     label.className = "cv-item-label";
     label.textContent = file.name;

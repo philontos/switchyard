@@ -12,3 +12,15 @@ test("mobile code detail state targets the outer modal controller", () => {
   assert.match(css, /#code-modal\.detail \.cv-nav\s*\{\s*display:\s*none;/);
   assert.match(css, /#code-modal\.detail \.cv-main\s*\{\s*display:\s*flex;/);
 });
+
+test("code tree icons use accessible state and stable vector masks", () => {
+  assert.match(feature, /row\.setAttribute\("aria-expanded", String\(isOpen\)\)/);
+  assert.match(feature, /caret\.classList\.toggle\("open", isOpen\)/);
+  assert.match(feature, /caret\.setAttribute\("aria-hidden", "true"\)/);
+  assert.match(feature, /mark\.setAttribute\("aria-hidden", "true"\)/);
+  assert.doesNotMatch(feature, /caret\.textContent\s*=/);
+  assert.doesNotMatch(feature, /mark\.textContent\s*=/);
+  assert.match(css, /\.cv-caret\s*\{[^}]*-webkit-mask:/s);
+  assert.match(css, /\.cv-caret\.open\s*\{\s*transform:\s*rotate\(90deg\)/);
+  assert.match(css, /\.cv-file-mark\s*\{[^}]*-webkit-mask:/s);
+});
