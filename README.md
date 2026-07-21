@@ -4,7 +4,7 @@
 
 <p align="center">English | <a href="README.zh-CN.md">简体中文</a></p>
 
-> A web console that turns "handing a coding task to an AI" into dealing out a card. Every task is a **real, interactive Claude Code or Codex** running in its own git worktree + tmux session; you drop into that terminal from the browser, watch it work, and take over anytime. Tasks run in parallel without stepping on each other, every machine on your network is a first-class node — dispatch, watch, and wrap up from one page. And your phone gets the full experience: add it to your home screen and it's an app.
+> A web console that turns "handing a coding task to an AI" into dealing out a card. Every task is a **real, interactive Claude Code, Codex, or Kimi Code** running in its own git worktree + tmux session; you drop into that terminal from the browser, watch it work, and take over anytime. Tasks run in parallel without stepping on each other, every machine on your network is a first-class node — dispatch, watch, and wrap up from one page. And your phone gets the full experience: add it to your home screen and it's an app.
 
 <p align="center">
   <img src="docs/screenshots/desktop-board.png" alt="Desktop overview: task board grouped by repo on the left, a real Claude Code terminal on the right" width="100%">
@@ -16,19 +16,24 @@ The core loop is repo-centric: register a repo (`+repo` — GitHub / GitLab, clo
 
 Tasks are hosted by tmux on the machine — **the web page is just a viewfinder**: close the browser and the task keeps running; open it from another device and the session is right where it was. You can also `tmux attach` from your own terminal and share the very same session, and TUI interactions — permission prompts, slash commands — work as-is in the web terminal.
 
+A killed tmux session, host reboot, or archived task does not mean its working state is lost: as long as its worktree remains, one click resumes it with the same CLI, model, and endpoint. The live terminal also accepts screenshots pasted from the clipboard; the image is stored on the task's local or remote machine and handed to the selected agent.
+
 > Aside: you can open a terminal without any repo — hit ＋ on the Shells group of the local machine or any remote node to get a bare tmux shell in a directory of your choice (quick debugging, one-off scripts), riding the same list / connect / archive flow as repo tasks.
 
-## Multiple CLIs × multiple model endpoints
+## Three agent CLIs × multiple models
 
-Pick the **agent CLI per task** — currently **Claude Code** and **Codex** — and they run side by side on the same board, cards colored by CLI. Local and remote are fully symmetric: whichever machine you dispatch to runs the CLI you picked.
+Pick the **agent CLI per task** — currently **Claude Code, Codex, and Kimi Code** — and they run side by side on the same board, cards colored by CLI. Local and remote are fully symmetric: whichever machine you dispatch to runs the CLI you picked; the task also remembers its model or endpoint when resumed.
 
 <p align="center">
-  <img src="docs/screenshots/dispatch-modal.png" alt="Dispatch modal: Claude Code / Codex picker + base branch + opening prompt + model backend" width="100%">
+  <img src="docs/screenshots/dispatch-modal.png" alt="Dispatch modal: agent CLI + base branch + opening prompt + model backend" width="100%">
 </p>
 
 - **Claude Code** — full capability: skill injection (check off official plugin skills at dispatch; they're delivered straight into the task's worktree) and the permission **yellow light** (driven by a native hook, see below).
-- **Codex** — launched with on-request + danger-full-access, so it can push, reach the network, and run `gh`; optionally pin a model (e.g. `gpt-5.2`), blank = the machine's default.
-- **Multiple model endpoints** — point Claude Code at any **Anthropic-compatible endpoint** (e.g. GLM): the same Claude Code TUI drives another vendor's model. When you add an endpoint, the server probes it exactly the way claude will call it at runtime — **it only saves on a green check**. Picked per task and remembered across dispatches; keys are node-local config and never travel across machines.
+- **Codex** — launched with on-request + danger-full-access, so it can push, reach the network, and run `gh`; optionally pin any model ID available to the machine's Codex installation, or leave it blank for the machine default.
+- **Kimi Code / Kimi K3** — launched as an interactive TUI with `--auto`, so Kimi Code handles routine tool approvals; it uses the Kimi account already signed in on that machine. Set a per-task model ID such as `k3` for [Kimi K3](https://www.kimi.com/code/docs/en/kimi-code/models.html) (subject to account access), or leave it blank for the Kimi Code default.
+- **Multiple model endpoints** — point Claude Code at any **Anthropic-compatible endpoint** (e.g. GLM): the same Claude Code TUI drives another vendor's model. When you add an endpoint, the server probes it exactly the way claude will call it at runtime — **it only saves on a green check**. Picked per task and remembered across dispatches; keys stay on the target node and are never propagated between nodes.
+
+> Current capability boundary: Switchyard's extra skill injection and permission-waiting yellow light are Claude Code-only. Codex and Kimi Code do not receive those skills or report permission-waiting state yet. All three CLIs support the live terminal, session resume, and image paste.
 
 ## Fleet: many machines, one page
 
@@ -50,13 +55,13 @@ On narrow screens the UI switches to a full touch experience. **Recommended: ope
 </p>
 
 - **Master–detail views** — a task list page and a full-screen terminal page; tap a card to enter, swipe from the edge to go back (wired into browser history, so the iOS back gesture is native-smooth — even inside the live terminal).
-- **Read | Live modes** — **Read** renders the Claude / Codex session transcript as a chat stream: native scrolling, auto-tailing, tool calls folded — perfect for checking progress from the couch. When a task needs your confirmation, a "Needs you" banner appears with a one-tap jump to **Live** — the real terminal, where you act.
+- **Read | Live modes** — **Read** renders transcripts for local Claude / Codex tasks as a chat stream: native scrolling, auto-tailing, tool calls folded — perfect for checking progress from the couch. When Claude needs your confirmation, a "Needs you" banner appears with a one-tap jump to **Live** — the real terminal, where you act. Remote-node and Kimi Code transcripts are not wired in yet, so those tasks currently open in the live terminal.
 - **Keyboard-glued input bar** — the input bar sits right above the iOS soft keyboard, supports multiple lines, and keeps a separate unsent draft per task, so switching tasks never leaks text.
 - **Touch polish** — no double-tap/pinch zoom, no accidental text selection, one-finger terminal scrolling with momentum, hover styles only on true hover devices.
 
 ## Install & start (once per machine)
 
-**Prerequisites:** Node 22+, with `git` / `tmux` / `claude` installed. Clone, then one command:
+**Prerequisites:** Node 22+, `git` / `tmux`, and whichever signed-in agent CLIs you plan to use (`claude` / `codex` / `kimi`). The current `setup.sh` preflights both `claude` and `kimi`; to run Codex tasks, also make sure `codex` is reachable from a non-interactive shell. The setup helper currently targets zsh. Clone, then one command:
 
 ```sh
 git clone <repo-url> switchyard && cd switchyard
@@ -64,7 +69,7 @@ git clone <repo-url> switchyard && cd switchyard
 tdsp serve           # → http://localhost:4500
 ```
 
-> `setup.sh` does three things in order: ① **preflight** — verifies `claude` / `kimi` / `tmux` / `git` are reachable from a non-interactive shell (tasks are launched by exactly that kind of shell, which reads only `~/.zshenv`; a missing command kills the pane), idempotently writing any missing PATH dirs into `~/.zshenv`; ② `npm install` (4 runtime deps, zero build); ③ installs the global `tdsp` command (`~/.task-dispatcher/src` points at this clone, launcher linked at `~/.local/bin/tdsp` — if `tdsp` isn't found, put `~/.local/bin` on your PATH). `--check` inspects only — writes and installs nothing.
+> `setup.sh` does three things in order: ① **preflight** — verifies `claude` / `kimi` / `tmux` / `git` are reachable from a non-interactive zsh (tasks are launched by exactly that kind of shell, which reads only `~/.zshenv`; a missing command kills the pane), idempotently writing any missing PATH dirs into `~/.zshenv`; ② `npm install` (4 runtime deps, zero build); ③ installs the global `tdsp` command (`~/.task-dispatcher/src` points at this clone, launcher linked at `~/.local/bin/tdsp` — if `tdsp` isn't found, put `~/.local/bin` on your PATH). `--check` inspects only — writes and installs nothing.
 
 From here on, everything is `tdsp`:
 
@@ -85,7 +90,7 @@ task-dispatcher on http://10.10.0.3:4500
 ## Using it
 
 1. **Add a repo** — name + git url (GitHub / GitLab; supply a token for an https private repo, blank for SSH). It registers and clones; status goes `ready`.
-2. **Dispatch a task** — pick a repo → base branch → title + opening prompt → choose the agent (Claude Code / Codex) → optionally skills and a model endpoint. Worktree created, session started.
+2. **Dispatch a task** — pick a repo → base branch → title + opening prompt → choose the agent (Claude Code / Codex / Kimi Code) → optionally pick Claude skills and an endpoint, or a Codex / Kimi model ID. Worktree created, session started.
 3. **Enter the terminal** — the right pane auto-connects; "Enter terminal" on a card reconnects anytime. You're talking to the real agent.
 4. **Wrap up** — archive (kill session, keep worktree) / clean up (kill session + delete worktree) / delete (remove the record).
 
@@ -132,7 +137,7 @@ server/                REST API + /pty WebSocket; the tdsp CLI; git / tmux / pty
   repo/                git mirrors, worktrees, per-task repo env
   task/                task lifecycle (create/manifest/rename) + the tdsp node-local API (cli.ts)
   fleet/               remote hosts: runners, bootstrap, liveness, cross-node fleet view
-  session/             tmux sessions, pty spawn, attach command, agent launch args (claude / codex)
+  session/             tmux sessions, pty spawn, attach command, agent launch args (claude / codex / kimi)
   skills/              skill scan/resolve, plugin install, hook settings
   preview/             the preview reverse-proxy engine
 web/                   board + xterm terminal (native ES Modules, no build)
