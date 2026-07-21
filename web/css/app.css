@@ -54,15 +54,18 @@
    READ-ONLY CODE EXPLORER
    Isolated full-size modal: it never changes terminal layout or xterm geometry.
    ========================================================================== */
-.grp-code { flex: none; width: 24px; height: 24px; margin: 0; padding: 0; font: 600 9px/1 Menlo, Consolas, monospace;
+.grp-code { flex: none; width: 24px; height: 24px; margin: 0; padding: 0;
   display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;
   background: none; border: 1px solid transparent; color: var(--faint); }
 .grp-code:hover { color: var(--accent-text); background: var(--surface-2); border-color: var(--border); }
 .grp-code:disabled { opacity: .35; cursor: default; }
-.task.has-code .t { padding-right: 56px; }
-.card-code { position: absolute; z-index: 2; top: 6px; right: 35px; width: 30px; height: 24px; margin: 0; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 5px;
-  color: var(--faint); background: none; font: 600 9px/1 Menlo, Consolas, monospace; }
+.code-ico { display: block; flex: none; width: 16px; height: 16px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7.25 5 3 10l4.25 5M12.75 5 17 10l-4.25 5M11.5 3.25l-3 13.5' fill='none' stroke='black' stroke-width='1.65' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7.25 5 3 10l4.25 5M12.75 5 17 10l-4.25 5M11.5 3.25l-3 13.5' fill='none' stroke='black' stroke-width='1.65' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+.task.has-code .t { padding-right: 64px; }
+.card-code { position: absolute; z-index: 2; top: 6px; right: 36px; width: 28px; height: 26px; margin: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 6px;
+  color: var(--faint); background: none; }
 .card-code:hover { color: var(--accent-text); background: var(--surface-2); border-color: var(--border); }
 .card-code:disabled { opacity: .35; cursor: default; }
 
@@ -132,9 +135,11 @@
 .cv-diff-line.meta, .cv-diff-line.header { color: var(--faint); font-weight: 600; }
 
 @media (max-width: 760px) {
-  .grp-code { width: 34px; height: 34px; border-radius: 10px; font-size: 10px; }
-  .task.has-code .t { padding-right: 78px; }
-  .card-code { top: 8px; right: 49px; width: 36px; height: 36px; border-radius: 10px; font-size: 10px; }
+  .grp-code { width: 34px; height: 34px; border-radius: 10px; }
+  .grp-code .code-ico { width: 17px; height: 17px; }
+  .task.has-code .t { padding-right: 84px; }
+  .card-code { top: 8px; right: 49px; width: 36px; height: 36px; border-radius: 10px; }
+  .card-code .code-ico { width: 18px; height: 18px; }
   .code-modal-bg { padding: 0; }
   .modal.code-modal { width: 100%; max-width: 100%; height: var(--vvh, 100dvh); max-height: var(--vvh, 100dvh);
     border: none; border-radius: 0; padding: 0; overflow: hidden; }
@@ -457,12 +462,13 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   box-shadow: inset 3px 0 0 var(--codex-accent); }
 .card.task-kimi.selected, .card.task-kimi.clickable.selected:hover { border-color: var(--kimi-accent); background: var(--kimi-tint-selected);
   box-shadow: inset 3px 0 0 var(--kimi-accent); }
-.card-x { position: absolute; top: 7px; right: 7px; width: auto; margin: 0; padding: 1px 6px;
-  background: none; border: none; color: var(--faint); font-size: 13px; line-height: 1; }
+.card-x { position: absolute; z-index: 2; top: 6px; right: 6px; width: 28px; height: 26px; margin: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent;
+  border-radius: 6px; color: var(--faint); font-size: 13px; line-height: 1; }
 .card-x:hover { background: #f8514914; color: var(--red); }
 .card-x.stop { color: var(--faint); }
-.stop-ico { width: 15px; height: 15px; border: 1.5px solid currentColor; border-radius: 50%; display: block; position: relative; }
-.stop-ico::before { content: ""; position: absolute; inset: 4px; border-radius: 2px; background: currentColor; }
+.stop-ico { display: block; width: 10px; height: 10px; border-radius: 2px; background: currentColor;
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent); }
 .card-x.stop:hover { background: #f8514914; color: var(--red); }
 /* drag-to-reorder (reorder.js): repo task cards carry data-repo. touch-action:pan-y
    lets the browser own VERTICAL scrolling (so a swipe over a card still scrolls the
@@ -911,8 +917,7 @@ a { color: var(--accent-bar); }
   .card-x { top: 8px; right: 8px; width: 36px; height: 36px; padding: 0; font-size: 17px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; }
   .card-x.stop { background: transparent; border: 1px solid transparent; color: color-mix(in srgb, var(--red-text) 38%, var(--faint)); }
   .card-x.stop:active { background: color-mix(in srgb, var(--red) 7%, transparent); color: color-mix(in srgb, var(--red-text) 58%, var(--muted)); }
-  .stop-ico { width: 14px; height: 14px; border-width: 1.25px; }
-  .stop-ico::before { inset: 4.5px; border-radius: 1.5px; }
+  .stop-ico { width: 12px; height: 12px; border-radius: 2.5px; }
   .muted { font-size: 13px; }
   .sdot { width: 9px; height: 9px; }
   .tag-local { font-size: 11px; padding: 1px 7px; }
