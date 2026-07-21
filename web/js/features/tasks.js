@@ -287,6 +287,7 @@ async function addNodeTask() {
   const providerShown = $("t-provider-sec").style.display !== "none";
   const body = {
     mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url,
+    default_branch: repo.default_branch,
     base: Selects["t-base"].value, title: $("t-title").value.trim(),
     prompt: $("t-prompt").value,
     // non-Claude agents carry a model and no Switchyard-injected skills.
@@ -504,6 +505,9 @@ export function taskCard(t, online) {
   const resumeBtn = resumable
     ? `<button class="t-resume" title="${I18N.t("task.resumeTitle")}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();resume(${t.id})">⟳ ${I18N.t("task.resume")}</button>`
     : "";
+  const codeBtn = t.kind !== "local" && t.hasWorktree
+    ? `<button class="card-code" title="${I18N.t("code.open")}" aria-label="${I18N.t("code.open")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskCode(${t.id})">&lt;/&gt;</button>`
+    : "";
   // local quick tasks have no branch/MR — show their working dir + a "local" tag
   const meta = t.kind === "local"
     ? `<div class="muted">📂 <code>${t.cwd || "~"}</code> <span class="tag-local">${I18N.t("local.tag")}</span></div>`
@@ -525,7 +529,8 @@ export function taskCard(t, online) {
   // data-repo marks a card as drag-reorderable (reorder.js) — only active repo
   // tasks: shells have no repo group, archived/cleaned ones aren't reorderable.
   const drag = active && t.kind !== "local" ? ` data-repo="${t.repo_id}"` : "";
-  return `<div class="card task task-${agent}${open}" data-id="${t.id}"${drag}>
+  return `<div class="card task task-${agent}${codeBtn ? " has-code" : ""}${open}" data-id="${t.id}"${drag}>
+    ${codeBtn}
     <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
     ${head}${note}${resumeBtn}
   </div>`;
@@ -604,6 +609,7 @@ export function renameTask(event, id) {
 // All cached tasks in API order (id-DESC). renderList (hosts.js) reads this to
 // group tasks under their repo / machine.
 export function allTasks() { return taskOrder.map(id => tasksById[id]).filter(Boolean); }
+export function taskById(id) { return tasksById[id] || null; }
 export async function archive(id){
   if(!await confirmDialog(t("task.killConfirm"),{title:t("task.killTitle"),okText:t("dialog.ok"),danger:true}))return;
   await api(`/api/tasks/${id}/archive`,{method:"POST"});

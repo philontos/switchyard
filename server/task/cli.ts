@@ -6,6 +6,8 @@ import type Database from "better-sqlite3";
 import type { Provider, Task } from "../core/db.js";
 import type { CreateLocalOpts, CreateLocalResult, CreateRepoResult, StopResult } from "./createtask.js";
 import type { LifecycleResult } from "./lifecycle.js";
+import { CODE_VIEW_CAPABILITY, isCodeInspectRequest, type CodeInspectRequest, type CodeInspectResult } from "../codeview/codeview.js";
+export { CODE_VIEW_CAPABILITY } from "../codeview/codeview.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
 // prompt and skill list survive intact). The node registers the repo by `mirror`
@@ -14,6 +16,7 @@ export interface CreateRepoSpec {
   mirror: string;
   name: string;
   git_url: string;
+  default_branch?: string;
   base: string;
   title: string;
   prompt?: string | null;
@@ -49,7 +52,7 @@ type DB = Database.Database;
 // spot a node that predates a one-shot CLI verb before offering a broken action.
 export const TASK_LIST_VERSION = 3;
 export const ARCHIVED_TASK_LIFECYCLE_CAPABILITY = "archived-task-lifecycle-v1";
-export const TASK_CAPABILITIES = [ARCHIVED_TASK_LIFECYCLE_CAPABILITY] as const;
+export const TASK_CAPABILITIES = [ARCHIVED_TASK_LIFECYCLE_CAPABILITY, CODE_VIEW_CAPABILITY] as const;
 
 // A repo as a node exposes it to controllers — enough to group the node's tasks
 // by repo (name) and to dispatch a new task here using the node's OWN mirror (no
@@ -198,6 +201,8 @@ export interface CliDeps {
   resume: (id: number) => Promise<LifecycleResult>;
   cleanup: (id: number) => Promise<LifecycleResult>;
   deleteTask: (id: number) => Promise<LifecycleResult>;
+  // Typed, read-only repository/worktree inspection for remote controllers.
+  inspectCode: (request: CodeInspectRequest) => Promise<CodeInspectResult>;
   providersList: () => Provider[];
   providersTest: (body: ProviderInput) => Promise<{ ok: true } | { ok: false; error: string }>;
   providersCreate: (body: ProviderInput) => Promise<{ ok: true; id: number } | { ok: false; error: string }>;
@@ -256,6 +261,23 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     case "list":
       deps.out(JSON.stringify(await taskListPayload(deps.db, deps.liveness)));
       return 0;
+    case "inspect-code": {
+      let request: CodeInspectRequest;
+      try {
+        request = JSON.parse(Buffer.from(argv[1] ?? "", "base64").toString("utf8")) as CodeInspectRequest;
+      } catch {
+        const result = { ok: false, error: "invalidRequest", message: "inspect-code expects a base64 JSON request" };
+        deps.out(JSON.stringify(result));
+        return 1;
+      }
+      if (!isCodeInspectRequest(request)) {
+        deps.out(JSON.stringify({ ok: false, error: "invalidRequest", message: "Invalid code inspection request" }));
+        return 1;
+      }
+      const result = await deps.inspectCode(request);
+      deps.out(JSON.stringify(result));
+      return result.ok ? 0 : 1;
+    }
     case "create-local": {
       const f = parseFlags(argv.slice(1));
       const r = await deps.createLocal({ cwd: f.cwd ?? null, title: f.title ?? null });
@@ -367,7 +389,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve|list|create-local|create|stop|resume|cleanup|delete-task|branches|providers-list|providers-test|providers-create|providers-delete|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|inspect-code|create-local|create|stop|resume|cleanup|delete-task|branches|providers-list|providers-test|providers-create|providers-delete|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

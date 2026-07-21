@@ -199,8 +199,12 @@ function fleetCard(hostId, tk) {
   const resumeBtn = lifecycle.resumable
     ? `<button class="t-resume" title="${t("task.resumeTitle")}" onclick="event.stopPropagation();resumeNodeTask(${hostId},${tk.id})">⟳ ${t("task.resume")}</button>`
     : "";
+  const codeBtn = tk.kind !== "local" && tk.hasWorktree && state.fleet[hostId]?.capabilities?.includes("code-view-v1")
+    ? `<button class="card-code" title="${t("code.open")}" aria-label="${t("code.open")}" onclick="event.stopPropagation();openTaskCode(${tk.id},${hostId})">&lt;/&gt;</button>`
+    : "";
   const open = lifecycle.connectable ? ` clickable" onclick="connectNode(${hostId},${tk.id})` : "";
-  return `<div class="card task task-${agent}${open}" data-pane="${paneId}">
+  return `<div class="card task task-${agent}${codeBtn ? " has-code" : ""}${open}" data-pane="${paneId}">
+      ${codeBtn}
       <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
       <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname">${tk.title}</span></div>
       ${meta}
@@ -438,6 +442,7 @@ function renderListHtml() {
       const all = fl.tasks || [];
       const live = all.filter(tk => tk.status !== "cleaned");
       const repos = fl.repos || [];
+      const canCode = fl.capabilities?.includes("code-view-v1");
       const known = new Set(repos.map(r => r.id));
       const repoGroups = repos.map(r => {
         // optimistic placeholders (newest-on-top) render ahead of the node's real
@@ -447,7 +452,10 @@ function renderListHtml() {
         const cards = pend + mine.map(tk => fleetCard(h.id, tk)).join("");
         const body = cards || `<div class="grp-empty">${t("repo.noTasks")}</div>`;
         const add = `<button class="grp-act" title="${t("node.newTask")}" onclick="event.stopPropagation();openNodeTaskModal(${h.id},${r.id})">＋</button>`;
-        return `<div class="grp open"><div class="grp-head static"><span class="grp-name">📦 ${r.name}</span>${add}</div>${body}</div>`;
+        const code = canCode
+          ? `<button class="grp-code" title="${t("code.open")}" onclick="event.stopPropagation();openRepoCode(${r.id},${h.id})">&lt;/&gt;</button>`
+          : "";
+        return `<div class="grp open"><div class="grp-head static"><span class="grp-name">📦 ${r.name}</span>${code}${add}</div>${body}</div>`;
       }).join("");
       // the node's own shells, with a ＋ that opens a new shell ON the node
       const pendShells = pendingShellCards(h.id).map(pendingCard).join("");

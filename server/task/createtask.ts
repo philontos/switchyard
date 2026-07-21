@@ -138,7 +138,7 @@ export interface RepoTaskEnv {
     baseBranch: string;
     skills: SkillRef[];
     agent: AgentKind;
-  }): Promise<void>;
+  }): Promise<string>; // exact HEAD immediately after worktree creation
   // Launch the agent in the worktree (opening = freeform prompt + skills line, or
   // null). opts.env injects ANTHROPIC_* vars for claude's alternate model backend;
   // opts.agent picks the CLI (claude default | codex | kimi); opts.model is the
@@ -203,12 +203,13 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
   const session = `tdsp-${env.ns}-${id}-${slug(repo.name)}-${s}`;
 
   try {
-    await env.setupWorktree({ id, mirror: repo.mirror_path, worktree, workBranch, baseBranch: opts.baseBranch, skills: found, agent });
+    const baseCommit = await env.setupWorktree({ id, mirror: repo.mirror_path, worktree, workBranch, baseBranch: opts.baseBranch, skills: found, agent });
     // opening = freeform prompt + the "skills delivered" line; pass it UNTRIMMED
     // (only the null-decision uses trim) to match the prior HTTP behavior exactly.
     const opening = (opts.prompt || "") + skillsLine(found.map((f) => f.name));
     await env.startSession(session, worktree, opening.trim() ? opening : null, { env: opts.env, agent, model: opts.model });
-    env.db.prepare("UPDATE tasks SET work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?").run(workBranch, worktree, session, id);
+    env.db.prepare("UPDATE tasks SET base_commit=?, work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
+      .run(baseCommit, workBranch, worktree, session, id);
     await env.writeManifest(id);
     return { ok: true, id, session, workBranch };
   } catch (e: any) {

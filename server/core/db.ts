@@ -47,6 +47,7 @@ export interface Task {
   id: number;
   repo_id: number;
   base_branch: string;
+  base_commit: string | null;     // immutable task start point, for stable code diffs
   work_branch: string;
   title: string;
   prompt: string | null;

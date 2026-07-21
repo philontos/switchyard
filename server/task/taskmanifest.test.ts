@@ -24,9 +24,9 @@ function seedDb() {
 function insertTask(db: Database.Database, title: string): Task {
   const info = db
     .prepare(
-      "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status) VALUES (1,'m',?,?,?, '/wt/x', ?, 'running')",
+      "INSERT INTO tasks (repo_id, base_branch, base_commit, work_branch, title, prompt, worktree_path, session, status) VALUES (1,'m',?,?,?, ?, '/wt/x', ?, 'running')",
     )
-    .run(`feat/x-${title}`, title, `prompt for ${title}`, `tdsp-1-r-${title}`);
+    .run("a".repeat(40), `feat/x-${title}`, title, `prompt for ${title}`, `tdsp-1-r-${title}`);
   return db.prepare("SELECT * FROM tasks WHERE id=?").get(Number(info.lastInsertRowid)) as Task;
 }
 
@@ -54,6 +54,7 @@ test("writeTaskManifest then readTaskManifests round-trips the task as edge-resi
     const all = readTaskManifests(dir);
     assert.equal(all.length, 1);
     assert.equal(all[0].task.title, "beta");
+    assert.equal(all[0].task.base_commit, "a".repeat(40));
     assert.equal(all[0].schema_version, 1);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -75,12 +76,14 @@ test("adoptTaskManifests inserts a manifest the DB doesn't have (sit-down-and-se
   const task = insertTask(other, "gamma"); // a task that lives only as a manifest here
   const adopted = adoptTaskManifests(db, [taskManifest(task)]);
   assert.equal(adopted, 1);
-  const row = db.prepare("SELECT title, session FROM tasks WHERE id=?").get(task.id) as {
+  const row = db.prepare("SELECT title, session, base_commit FROM tasks WHERE id=?").get(task.id) as {
     title: string;
     session: string;
+    base_commit: string | null;
   };
   assert.equal(row.title, "gamma");
   assert.equal(row.session, "tdsp-1-r-gamma");
+  assert.equal(row.base_commit, "a".repeat(40));
 });
 
 test("adoptTaskManifests skips a task the DB already owns (no duplicate, no clobber)", () => {

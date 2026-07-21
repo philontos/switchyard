@@ -16,7 +16,7 @@ function recordingRunner() {
   const putDirs: { src: string; dest: string }[] = [];
   const runner = {
     kind: "local", dataDir: "/tmp",
-    exec: async () => "",
+    exec: async (_file: string, args: string[]) => args[0] === "rev-parse" ? "a".repeat(40) + "\n" : "",
     mkdirp: async () => {}, exists: async () => false, readText: async () => null,
     rmrf: async () => {}, putFile: async () => {},
     putDir: async (src: string, dest: string) => { putDirs.push({ src, dest }); },

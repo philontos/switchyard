@@ -26,13 +26,16 @@ type DB = Database.Database;
  * a repeated dispatch of the same repo (same mirror) reuses the one row. The mirror
  * itself already lives on the node (A creates it at repo-registration time).
  */
-export function repoFindOrCreate(db: DB, spec: { mirror: string; name: string; git_url: string }): RepoRef {
+export function repoFindOrCreate(db: DB, spec: { mirror: string; name: string; git_url: string; default_branch?: string }): RepoRef {
   const existing = db.prepare("SELECT id, name, mirror_path FROM repos WHERE mirror_path = ?").get(spec.mirror) as RepoRef | undefined;
-  if (existing) return existing;
+  if (existing) {
+    if (spec.default_branch) db.prepare("UPDATE repos SET default_branch=? WHERE id=?").run(spec.default_branch, existing.id);
+    return existing;
+  }
   const localHost = db.prepare("SELECT id FROM hosts WHERE kind='local'").get() as { id: number } | undefined;
   const info = db
-    .prepare("INSERT INTO repos (host_id, name, git_url, mirror_path, status) VALUES (?,?,?,?,'ready')")
-    .run(localHost?.id ?? null, spec.name, spec.git_url, spec.mirror);
+    .prepare("INSERT INTO repos (host_id, name, git_url, default_branch, mirror_path, status) VALUES (?,?,?,?,?,'ready')")
+    .run(localHost?.id ?? null, spec.name, spec.git_url, spec.default_branch || "main", spec.mirror);
   return { id: Number(info.lastInsertRowid), name: spec.name, mirror_path: spec.mirror };
 }
 
@@ -45,6 +48,11 @@ function setupWorktreeOn(runner: Runner, ns: string): RepoTaskEnv["setupWorktree
     // a local head for unpushed bases). The base is only a start point, so this
     // works even when a live task currently has that branch checked out.
     await addWorktreeFromBranch(runner, mirror, worktree, workBranch, baseBranch);
+    // Capture the immutable start point before skills/hooks are delivered and,
+    // crucially, before the agent can create commits. Code preview diffs against
+    // this SHA rather than HEAD, so a committed task never appears "clean".
+    const baseCommit = (await runner.exec("git", ["rev-parse", "HEAD"], { cwd: worktree })).trim();
+    if (!baseCommit) throw new Error("could not resolve task base commit");
     // Skills delivery and the waiting-hook both ride claude's .claude/ conventions;
     // codex shares neither, so it opts out of both (agentCaps). codex also has no
     // yellow-light hook — the dispatcher can't see a codex approval pause (see agentArgv).
@@ -75,6 +83,7 @@ function setupWorktreeOn(runner: Runner, ns: string): RepoTaskEnv["setupWorktree
         `for f in '.claude/settings.local.json' '.claude/waiting' '.claude/session-id'; do grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
       ]).catch(() => {});
     }
+    return baseCommit;
   };
 }
 

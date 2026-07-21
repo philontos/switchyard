@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   repo_id INTEGER NOT NULL,
   base_branch TEXT NOT NULL,
+  base_commit TEXT,             -- immutable HEAD captured before the agent starts
   work_branch TEXT NOT NULL,
   title TEXT NOT NULL,
   prompt TEXT,
@@ -96,6 +97,7 @@ function dropDeprecated(db: DB) {
 function reconcileColumns(db: DB) {
   addColumn(db, "repos", "mirror_path", "TEXT");
   addColumn(db, "tasks", "worktree_path", "TEXT NOT NULL DEFAULT ''");
+  addColumn(db, "tasks", "base_commit", "TEXT");              // exact dispatch baseline for read-only diffs
   // machine model (the hosts table doubles as "machines")
   addColumn(db, "hosts", "data_dir", "TEXT");                  // the machine's ~/.task-dispatcher
   addColumn(db, "hosts", "status", "TEXT DEFAULT 'unknown'");  // online | offline | unknown
