@@ -17,6 +17,11 @@ test("code preview disables mobile text autosizing to keep source and gutter ali
   assert.match(css, /\.cv-content\s*\{[^}]*-webkit-text-size-adjust:\s*100%;[^}]*text-size-adjust:\s*100%;/s);
 });
 
+test("mobile code preview separates vertical reading from horizontal panning", () => {
+  assert.match(css, /\.cv-content\s*\{\s*overflow-x:\s*hidden;\s*overflow-y:\s*auto;\s*\}/);
+  assert.match(css, /\.cv-code-scroll, \.cv-diff, \.cv-json\s*\{[^}]*min-width:\s*0;[^}]*width:\s*100%;[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;[^}]*overscroll-behavior-x:\s*none;/s);
+});
+
 test("code tree icons use accessible state and stable vector masks", () => {
   assert.match(feature, /row\.setAttribute\("aria-expanded", String\(isOpen\)\)/);
   assert.match(feature, /caret\.classList\.toggle\("open", isOpen\)/);
