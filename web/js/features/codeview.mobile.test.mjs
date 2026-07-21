@@ -13,6 +13,13 @@ test("mobile code detail state targets the outer modal controller", () => {
   assert.match(css, /#code-modal\.detail \.cv-main\s*\{\s*display:\s*flex;/);
 });
 
+test("mobile back control shares the file path row", () => {
+  assert.match(css, /\.cv-mobile-bar\s*\{[^}]*position:\s*absolute;[^}]*top:\s*0;[^}]*width:\s*42px;[^}]*height:\s*42px;[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.cv-mobile-bar button\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;/s);
+  assert.match(css, /#cv-back::before\s*\{[^}]*border-left:\s*1\.7px solid currentColor;[^}]*rotate\(45deg\)/s);
+  assert.match(css, /\.cv-path\s*\{[^}]*padding:[^}]*safe-area-inset-left/s);
+});
+
 test("code preview disables mobile text autosizing to keep source and gutter aligned", () => {
   assert.match(css, /\.cv-content\s*\{[^}]*-webkit-text-size-adjust:\s*100%;[^}]*text-size-adjust:\s*100%;/s);
 });
