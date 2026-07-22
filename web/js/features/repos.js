@@ -6,7 +6,7 @@ import { $, api } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 import { confirmDialog } from "../core/dialog.js";
 import { state } from "../core/state.js";
-import { rerender } from "./hosts.js";
+import { rerender, loadFleet } from "./hosts.js";
 
 let repoHostId = null;   // which machine the register-repo modal targets
 let repoSubmitting = false;
@@ -143,21 +143,26 @@ export async function addRepo() {
     name: $("r-name").value.trim(), git_url: $("r-url").value.trim(),
     token: $("r-token").value.trim(),
     default_branch: $("r-default").value.trim() || "main",
-    host_id: repoHostId,
   };
   if (!body.name) return showRepoValidation("r-name", t("repo.nameRequired"));
   if (!body.git_url) return showRepoValidation("r-url", t("repo.urlRequired"));
   ["r-name", "r-url"].forEach((id) => $(id).removeAttribute("aria-invalid"));
   setRepoSubmitState(true, t("repo.submittingHint"));
   try {
-    const created = await api("/api/repos", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
+    const host = state.hostsById[repoHostId];
+    const remote = host && host.kind !== "local";
+    const endpoint = remote ? `/api/nodes/${repoHostId}/repos` : "/api/repos";
+    const created = await api(endpoint, { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
     ["r-name","r-url","r-token","r-default"].forEach(i => $(i).value = "");
     setRepoSubmitState(false);
     $("repo-modal").style.display = "none";
     const key = created.existing && !created.retrying ? "toast.repoExists" : "toast.repoRegistered";
     toast(t(key, { id: created.id }), "success", 5000);
-    await loadRepos();
-    watchRepoRegistration(created.id);
+    if (remote) await loadFleet();
+    else {
+      await loadRepos();
+      watchRepoRegistration(created.id);
+    }
   } catch (e) {
     setRepoSubmitState(false, t("repo.submitFailed", { error: e.message }), true);
     toast(e.message, "error", 6000);

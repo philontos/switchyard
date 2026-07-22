@@ -8,7 +8,9 @@ import {
   aggregateNodes,
   ARCHIVED_TASK_LIFECYCLE_CAPABILITY,
   CODE_VIEW_CAPABILITY,
+  NODE_CONTROL_CAPABILITY,
   isUnknownTdspCommand,
+  type CliDeps,
   type TaskLiveness,
 } from "./cli.ts";
 import type { CreateLocalResult } from "./createtask.ts";
@@ -22,8 +24,10 @@ const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 function seed() {
   const db = new Database(":memory:");
   initSchema(db, opts);
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,default_branch,mirror_path,status) VALUES (1,1,'switchyard','git@x:sw','main','/d/mirrors/1-sw.git','ready')").run();
   db.prepare(
-    "INSERT INTO tasks (repo_id, base_branch, work_branch, title, worktree_path, session, status) VALUES (1,'m','feat/1-old','old','/wt/x','tdsp-1-r-old','running')",
+    "INSERT INTO tasks (kind,repo_id, base_branch, work_branch, title, worktree_path, session, status) VALUES ('repo',1,'m','feat/1-old','old','/wt/x','tdsp-1-r-old','running')",
   ).run();
   return db;
 }
@@ -34,10 +38,13 @@ test("taskListPayload wraps the local tasks in a versioned envelope", async () =
   const db = seed();
   const payload = await taskListPayload(db, noLive);
   assert.equal(payload.schema_version, 3);
-  assert.deepEqual(payload.capabilities, [ARCHIVED_TASK_LIFECYCLE_CAPABILITY, CODE_VIEW_CAPABILITY]);
+  assert.deepEqual(payload.capabilities, [ARCHIVED_TASK_LIFECYCLE_CAPABILITY, CODE_VIEW_CAPABILITY, NODE_CONTROL_CAPABILITY]);
   assert.equal(payload.tasks.length, 1);
   assert.equal(payload.tasks[0].title, "old");
   assert.equal(payload.tasks[0].session, "tdsp-1-r-old");
+  assert.equal("worktree_path" in payload.tasks[0], false);
+  assert.equal("prompt" in payload.tasks[0], false);
+  assert.equal("provider_id" in payload.tasks[0], false);
 });
 
 // `tdsp list` ships each task's OWN liveness (the node computes it locally — it's
@@ -73,11 +80,12 @@ test("taskListPayload also includes the node's repos", async () => {
   db.prepare("INSERT INTO repos (id,host_id,name,git_url,default_branch,mirror_path,status) VALUES (5,1,'ug-fe','git@x:ug','main','/d/mirrors/5-ug.git','ready')").run();
   const payload = await taskListPayload(db, noLive);
   assert.ok(Array.isArray(payload.repos));
-  assert.equal(payload.repos.length, 1);
-  assert.equal(payload.repos[0].id, 5);
-  assert.equal(payload.repos[0].name, "ug-fe");
-  assert.equal(payload.repos[0].mirror_path, "/d/mirrors/5-ug.git");
-  assert.equal(payload.repos[0].default_branch, "main");
+  assert.equal(payload.repos.length, 2);
+  const repo = payload.repos.find((candidate) => candidate.id === 5)!;
+  assert.equal(repo.name, "ug-fe");
+  assert.equal("mirror_path" in repo, false, "node responses never expose filesystem paths");
+  assert.equal("git_url" in repo, false, "node responses expose no unused repository coordinates");
+  assert.equal(repo.default_branch, "main");
 });
 
 // Newest-first, matching today's GET /api/tasks (ORDER BY id DESC) so the list
@@ -105,11 +113,10 @@ function fakeDeps(db: Database.Database) {
   const repoCalls: any[] = [];
   const stopCalls: number[] = [];
   const lifecycleCalls: Array<[string, number]> = [];
-  const branchCalls: string[] = [];
+  const branchCalls: number[] = [];
   const providerCalls: any[] = [];
   const inspectCalls: any[] = [];
-  return {
-    deps: {
+  const deps: CliDeps = {
       db,
       out: (s: string) => {
         out += s;
@@ -129,6 +136,22 @@ function fakeDeps(db: Database.Database) {
       createRepo: async (spec: any) => {
         repoCalls.push(spec);
         return { ok: true as const, id: 77, session: "tdsp-x-77-sw-t", workBranch: "feat/77-t" };
+      },
+      repoCreate: async (input: any) => {
+        repoCalls.push(["create", input]);
+        return { ok: true as const, id: 5, existing: false, retrying: false, status: "ready" as const };
+      },
+      repoFetch: async (id: number) => {
+        repoCalls.push(["fetch", id]);
+        return { ok: true as const, id, existing: true, retrying: false, status: "ready" as const };
+      },
+      repoBranches: async (id: number) => {
+        branchCalls.push(id);
+        return { ok: true as const, branches: ["main", "develop", "release/1.0"] };
+      },
+      repoDelete: async (id: number, force: boolean) => {
+        repoCalls.push(["delete", id, force]);
+        return { ok: true as const, id, existing: true, retrying: false, status: "ready" as const };
       },
       stop: async (id: number) => {
         stopCalls.push(id);
@@ -151,7 +174,7 @@ function fakeDeps(db: Database.Database) {
         return { ok: true as const, kind: "tree" as const, files: ["README.md"], truncated: false,
           revision: { label: "main", commit: "a".repeat(40) }, generatedAt: "now" };
       },
-      providersList: () => [{ id: 2, name: "GLM", base_url: "https://open.bigmodel.cn/api/anthropic", auth_token: "tok", model: "glm-5.2", small_fast_model: null, created_at: "now" }],
+      providersList: () => [{ id: 2, name: "GLM", model: "glm-5.2" }],
       providersTest: async (body: any) => {
         providerCalls.push(["test", body]);
         return { ok: true as const };
@@ -164,13 +187,16 @@ function fakeDeps(db: Database.Database) {
         providerCalls.push(["delete", id]);
         return { ok: true as const };
       },
+      pasteImage: async () => ({ ok: true as const }),
+      readStdin: async () => Buffer.from("image"),
+      skillsList: () => [],
+      pluginsList: async () => [],
+      pluginsInstall: async () => ({ ok: true as const }),
       install: () => ({ src: "/h/.task-dispatcher/src", binPath: "/h/.task-dispatcher/bin/tdsp", localBin: "/h/.local/bin/tdsp", clone: "/h/clone" }),
       update: async () => ({ ok: true as const, clone: "/h/clone", head: "abc1234 feat: latest" }),
-      branches: async (mirror: string) => {
-        branchCalls.push(mirror);
-        return { ok: true as const, branches: ["main", "develop", "release/1.0"] };
-      },
-    },
+  };
+  return {
+    deps,
     createCalls,
     repoCalls,
     stopCalls,
@@ -202,6 +228,7 @@ test("runCli list --json prints the versioned task envelope and exits 0", async 
   assert.equal(parsed.schema_version, 3);
   assert.ok(parsed.capabilities.includes(ARCHIVED_TASK_LIFECYCLE_CAPABILITY));
   assert.ok(parsed.capabilities.includes(CODE_VIEW_CAPABILITY));
+  assert.ok(parsed.capabilities.includes(NODE_CONTROL_CAPABILITY));
   assert.equal(parsed.tasks[0].title, "old");
 });
 
@@ -283,7 +310,7 @@ test("runCli create-local supports --flag=value form too", async () => {
 // prompt with newlines/quotes survives ssh argv) and the node decodes + runs it.
 test("runCli create decodes the base64 spec, invokes createRepo, prints JSON, exits 0", async () => {
   const f = fakeDeps(seed());
-  const spec = { mirror: "/d/mirrors/5-sw.git", name: "sw", git_url: "g", base: "main", title: "fix", prompt: "line1\nline2", skills: ["dispatcher:tdd"] };
+  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "line1\nline2", skills: ["dispatcher:tdd"] };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 0);
@@ -297,7 +324,7 @@ test("runCli create decodes the base64 spec, invokes createRepo, prints JSON, ex
 // ride in the spec, so the node's own createRepoTask runs the same agent A picked.
 test("runCli create round-trips the agent + model in the spec (symmetric codex dispatch)", async () => {
   const f = fakeDeps(seed());
-  const spec = { mirror: "/d/mirrors/5-sw.git", name: "sw", git_url: "g", base: "main", title: "fix", prompt: "go", skills: [], agent: "codex", model: "gpt-5.4" };
+  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "go", skills: [], agent: "codex", model: "gpt-5.4" };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 0);
@@ -307,7 +334,7 @@ test("runCli create round-trips the agent + model in the spec (symmetric codex d
 
 test("runCli create round-trips kimi as an agent in the spec", async () => {
   const f = fakeDeps(seed());
-  const spec = { mirror: "/d/mirrors/5-sw.git", name: "sw", git_url: "g", base: "main", title: "fix", prompt: "go", skills: [], agent: "kimi", model: "kimi-code/kimi-for-coding" };
+  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "go", skills: [], agent: "kimi", model: "kimi-code/kimi-for-coding" };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 0);
@@ -317,7 +344,7 @@ test("runCli create round-trips kimi as an agent in the spec", async () => {
 
 test("runCli create round-trips provider_id in the spec (node-local provider)", async () => {
   const f = fakeDeps(seed());
-  const spec = { mirror: "/d/mirrors/5-sw.git", name: "sw", git_url: "g", base: "main", title: "fix", prompt: "go", skills: [], agent: "claude", provider_id: 9 };
+  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "go", skills: [], agent: "claude", provider_id: 9 };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 0);
@@ -328,6 +355,7 @@ test("runCli provider verbs manage this node's provider catalog", async () => {
   const f = fakeDeps(seed());
   assert.equal(await runCli(["providers-list"], f.deps), 0);
   assert.match(f.out, /GLM/);
+  assert.doesNotMatch(f.out, /auth_token|base_url|tok/);
 
   const body = { name: "GLM", base_url: "https://open.bigmodel.cn/api/anthropic", auth_token: "tok", model: "glm-5.2" };
   const b64 = Buffer.from(JSON.stringify(body)).toString("base64");
@@ -347,7 +375,7 @@ test("runCli create exits 1 and reports an error when the spec is not valid base
 test("runCli create exits 1 and prints the error when dispatch fails", async () => {
   const f = fakeDeps(seed());
   f.deps.createRepo = async () => ({ ok: false as const, error: "skillsMissing", missing: ["dispatcher:x"] });
-  const b64 = Buffer.from(JSON.stringify({ mirror: "/m", name: "n", git_url: "g", base: "main", title: "t" })).toString("base64");
+  const b64 = Buffer.from(JSON.stringify({ repo_id: 5, base: "main", title: "t" })).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 1);
   assert.match(f.out, /skillsMissing/);
@@ -384,19 +412,19 @@ test("runCli rejects an invalid archived-task lifecycle id", async () => {
   assert.deepEqual(f.lifecycleCalls, []);
 });
 
-test("runCli branches lists a mirror's branches as JSON, exits 0", async () => {
+test("runCli repo-branches asks the owning node by repo id", async () => {
   const f = fakeDeps(seed());
-  const code = await runCli(["branches", "/d/mirrors/2-ug.git"], f.deps);
+  const code = await runCli(["repo-branches", "2"], f.deps);
   assert.equal(code, 0);
-  assert.deepEqual(f.branchCalls, ["/d/mirrors/2-ug.git"]);
+  assert.deepEqual(f.branchCalls, [2]);
   const parsed = JSON.parse(f.out);
   assert.equal(parsed.ok, true);
   assert.deepEqual(parsed.branches, ["main", "develop", "release/1.0"]);
 });
 
-test("runCli branches requires a mirror path, exits 1 otherwise", async () => {
+test("runCli repo-branches requires a numeric repo id", async () => {
   const f = fakeDeps(seed());
-  const code = await runCli(["branches"], f.deps);
+  const code = await runCli(["repo-branches", "not-an-id"], f.deps);
   assert.equal(code, 1);
   assert.deepEqual(f.branchCalls, []);
 });
@@ -416,6 +444,14 @@ test("runCli update pulls the install and reports the new head", async () => {
   assert.match(f.out, /updated/);
   assert.match(f.out, /abc1234/);
   assert.match(f.out, /tdsp serve/, "tells the user a running console needs a restart");
+});
+
+test("runCli update --json omits the node-local clone path", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["update", "--json"], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(JSON.parse(f.out), { ok: true, head: "abc1234 feat: latest" });
+  assert.doesNotMatch(f.out, /\/h\/clone/);
 });
 
 test("runCli update exits 1 and surfaces the error when the pull fails", async () => {
@@ -447,6 +483,33 @@ test("aggregateNodes returns each node's tasks on a successful fetch", async () 
   assert.equal(r.ok, true);
   assert.equal(r.node.name, "B");
   assert.equal(r.tasks?.[0].title, "x");
+});
+
+test("aggregateNodes strips private fields emitted by an older node", async () => {
+  const fetch = async () => JSON.stringify({
+    schema_version: 1,
+    tasks: [{
+      id: 7, repo_id: 1, base_branch: "main", work_branch: "feat/7", title: "x",
+      session: "tdsp-7", status: "running", kind: "repo", cwd: null, agent: "claude",
+      worktree_path: "/secret/worktree", prompt: "private prompt", provider_id: 9,
+    }],
+    repos: [{
+      id: 1, name: "switchyard", git_url: "https://token@example/repo.git",
+      default_branch: "main", mirror_path: "/secret/mirror.git", status: "error",
+      error: "git failed in /secret/mirror.git using https://token@example/repo.git",
+    }],
+  });
+  const [result] = await aggregateNodes([{ id: 2, name: "B" }], fetch);
+  const task = result.tasks?.[0] as any;
+  const repo = result.repos?.[0] as any;
+  assert.equal(task.title, "x");
+  assert.equal("worktree_path" in task, false);
+  assert.equal("prompt" in task, false);
+  assert.equal("provider_id" in task, false);
+  assert.equal("alive" in task, false, "v1 liveness remains absent for status-based fallback");
+  assert.equal("mirror_path" in repo, false);
+  assert.equal("git_url" in repo, false);
+  assert.doesNotMatch(repo.error, /secret|token|mirror/);
 });
 
 test("aggregateNodes carries capabilities and treats an old node's missing field as empty", async () => {

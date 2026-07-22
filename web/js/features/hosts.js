@@ -7,8 +7,8 @@ import { $, api } from "../core/dom.js";
 import { hideLoading, showLoading, toast } from "../core/feedback.js";
 import { confirmDialog } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
-import { controllerOnlyRepos } from "../core/repos.js";
 import { taskLifecycle } from "../core/task-lifecycle.js";
+import { remoteFollowTasks } from "../core/host-follow.js";
 import { state } from "../core/state.js";
 import { repoGroupHead } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask, connect,
@@ -69,7 +69,10 @@ export async function loadFleet() {
   state.fleet = Object.fromEntries(f.nodes.map((n) => [n.node.id, n]));
   // drop any open node-task terminal whose session is no longer live on its node
   const keep = new Set();
-  for (const n of f.nodes) for (const tk of n.tasks || []) if (tk.status !== "cleaned") keep.add(`n${n.node.id}:${tk.id}`);
+  for (const n of f.nodes) {
+    if (n.kind === "local") continue;
+    for (const tk of n.tasks || []) if (tk.status !== "cleaned") keep.add(`n${n.node.id}:${tk.id}`);
+  }
   if (pruneNodePanes(keep).includes(state.selectedTaskId)) state.selectedTaskId = null;
   renderList();
 }
@@ -252,12 +255,11 @@ export function rerender() {
 // how the per-task yellow ("needs you") gets pulled up to the machine's rail dot.
 // A task's machine is its host_id (shells) or its repo's host_id (repo tasks).
 function blockedHosts() {
-  const hostOf = Object.fromEntries(state.repos.map(r => [r.id, Number(r.host_id)]));
   const blocked = new Set();
-  for (const tk of allTasks()) {
-    if (!(tk.alive && tk.waiting)) continue;
-    const hid = tk.host_id ?? hostOf[tk.repo_id];
-    if (hid != null) blocked.add(hid);
+  const local = Object.values(state.hostsById).find(h => h.kind === "local");
+  if (local && allTasks().some(tk => tk.alive && tk.waiting)) blocked.add(local.id);
+  for (const [hostId, fleet] of Object.entries(state.fleet)) {
+    if (fleet?.kind !== "local" && fleet?.tasks?.some(tk => tk.alive && tk.waiting)) blocked.add(Number(hostId));
   }
   return blocked;
 }
@@ -302,8 +304,8 @@ function followHostTask(hostId) {
   // ships no `alive`, so treat such tasks as connectable rather than hiding them.
   const host = state.hostsById[hostId];
   const fl = state.fleet[hostId];
-  if (host && host.kind !== "local" && fl?.ok) {
-    const nodeTasks = fl.tasks || [];
+  const nodeTasks = remoteFollowTasks(host, fl);
+  if (nodeTasks) {
     const liveNode = tk => tk.status !== "cleaned" && (tk.alive ?? true);
     const remId = nodePaneTaskId(hostId, state.lastTaskByHost[hostId]);
     const remembered = remId != null ? nodeTasks.find(tk => tk.id === remId) : null;
@@ -322,7 +324,7 @@ function followHostTask(hostId) {
   const remembered = tasks.find(tk => tk.id === state.lastTaskByHost[hostId]);
   if (remembered && connectable(remembered)) { connect(remembered.id); return; }
 
-  for (const r of state.repos.filter(r => Number(r.host_id) === hostId)) {
+  for (const r of state.repos) {
     const mine = orderTasks(r.id, tasks.filter(tk => tk.repo_id === r.id && connectable(tk)));
     if (mine.length) { connect(mine[0].id); return; }
   }
@@ -332,6 +334,24 @@ function followHostTask(hostId) {
   state.selectedTaskId = null;
   detachDock();
   paintSelection();
+}
+
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[ch]));
+
+export async function delNodeRepo(hostId, repoId) {
+  if (!await confirmDialog(t("repo.delConfirm"), { title: t("repo.delTitle"), okText: t("common.delete"), danger: true })) return;
+  try {
+    await api(`/api/nodes/${hostId}/repos/${repoId}`, { method: "DELETE" });
+  } catch (error) {
+    if (!(error.status === 409 && error.body?.liveCount > 0)) return toast(error.message, "error");
+    if (!await confirmDialog(t("repo.forceDelConfirm", { count: error.body.liveCount }),
+      { title: t("repo.delTitle"), okText: t("common.delete"), danger: true })) return;
+    try { await api(`/api/nodes/${hostId}/repos/${repoId}?force=1`, { method: "DELETE" }); }
+    catch (forced) { return toast(forced.message, "error"); }
+  }
+  await loadFleet();
 }
 
 // col2: machine header (name + ＋register-repo + remote ⚙ menu) then collapsible
@@ -360,15 +380,16 @@ function renderListHtml() {
   const isLocal = h.kind === "local";
   const online = isLocal || h.status === "online";
   const tasks = allTasks();
-  const hostOf = Object.fromEntries(state.repos.map(r => [r.id, Number(r.host_id)]));
+  const fl = state.fleet[h.id];
+  const remoteReady = !isLocal && fl?.ok && !fl.needsUpdate;
 
   const gear = isLocal ? ""
     : `<button class="mh-gear" title="${t("host.manage")}" onclick="event.stopPropagation();toggleHostMenu(${h.id})">⚙</button>`;
-  const newRepo = `<button class="mh-act" ${online ? "" : "disabled"} onclick="openRepoModal(${h.id})">＋${t("repo.repoWord")}</button>`;
+  const canAddRepo = isLocal || remoteReady;
+  const newRepo = `<button class="mh-act" ${canAddRepo ? "" : "disabled"} onclick="openRepoModal(${h.id})">＋${t("repo.repoWord")}</button>`;
   // fleet/bootstrap status for this remote machine: bootstrapped+reachable shows a
   // live task count; reachable-but-not-installed offers a one-click Bootstrap; an
   // unreachable/erroring node says so. Read from the last /api/fleet snapshot.
-  const fl = state.fleet[h.id];
   let fleetRow = "";
   if (!isLocal) {
     if (bootstrappingHosts.has(h.id)) {
@@ -396,103 +417,63 @@ function renderListHtml() {
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
   const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${newRepo}${menu}</div>`;
-
-  const isFleetView = !isLocal && state.fleet[h.id]?.ok;
-  const repos = state.repos.filter(r => Number(r.host_id) === h.id);
-  const visibleRepos = isFleetView ? controllerOnlyRepos(repos, state.fleet[h.id]?.repos || []) : repos;
-  const repoBlocks = visibleRepos.map(r => {
-    // an in-flight create expands its own group (addTask), so pending cards are never
-    // hidden by a collapsed body; still render them when collapsed, just in case.
-    const collapsed = collapsedRepos.has(r.id);
-    const mine = orderTasks(r.id, tasks.filter(tk => tk.repo_id === r.id && tk.status !== "cleaned" && !isShadowedByPending(tk)));
-    const pend = pendingRepoCards(r.id).map(pendingCard).join("");   // newest-on-top, like new real tasks
-    const cards = pend + mine.map(tk => taskCard(tk, online)).join("");
-    const body = collapsed ? pend
-      : (cards || `<div class="grp-empty">${t("repo.noTasks")}</div>`);
-    // `.open` (expanded) is what shows the state now — a left accent bar + faint
-    // wash on the whole group, in place of the old ▸/▾ caret glyph.
-    return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, online, collapsed, mine)}${body}</div>`;
-    // "no repos" only for the local machine — a remote node's own repos render in
-    // the node section below, so the message would be misleading there.
-  }).join("") || (isLocal ? `<div class="muted mempty">${t("host.noRepos")}</div>` : "");
-
-  // every machine (local + remote) gets a Shells group: bare tmux shells you can
-  // open many of, persistent like tasks. ＋ is disabled while the machine is offline.
-  const shells = tasks.filter(tk => tk.kind === "local" && tk.host_id === h.id && tk.status !== "cleaned" && !isShadowedByPending(tk));
-  const pendShells = pendingShellCards(h.id).map(pendingCard).join("");
-  const shellCards = pendShells + shells.map(tk => taskCard(tk, online)).join("");
-  const addShell = `<button class="grp-act" title="${t("local.new")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();addLocalTask(${h.id})">＋</button>`;
-  const shellBlock = `<div class="grp open"><div class="grp-head static">
-      <span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>
-      ${shellCards || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
-
-  // Remote nodes: a group showing the tasks the NODE itself reports (its own live
-  // truth, fetched over ssh — includes anything dispatched here under the sink
-  // model). Legacy tasks recorded in THIS controller's db stay in the repo groups
-  // above; these are a separate, clearly-labelled source. Local machine: skipped
-  // (its tasks already render above).
-  // Remote node: the node's OWN repos + tasks (live, over ssh). Each node repo is a
-  // group (like the local repo groups) with a ＋ to dispatch a task to it — using
-  // the node's existing mirror, no re-registration here. The node's shells + any
-  // repo task whose repo isn't listed fall into a "🛰 节点任务" catch-all.
-  let nodeBlock = "", nodeArchBlock = "";
-  if (!isLocal) {
-    const fl = state.fleet[h.id];
-    if (fl?.ok) {
-      const all = fl.tasks || [];
-      const live = all.filter(tk => tk.status !== "cleaned");
-      const repos = fl.repos || [];
-      const canCode = fl.capabilities?.includes("code-view-v1");
-      const known = new Set(repos.map(r => r.id));
-      const repoGroups = repos.map(r => {
-        // optimistic placeholders (newest-on-top) render ahead of the node's real
-        // cards; the matching real 'creating' card is shadowed until the POST resolves.
-        const pend = pendingNodeRepoCards(h.id, r.id).map(pendingCard).join("");
-        const mine = live.filter(tk => tk.kind === "repo" && tk.repo_id === r.id && !isShadowedByNodePending(h.id, tk));
-        const cards = pend + mine.map(tk => fleetCard(h.id, tk)).join("");
-        const body = cards || `<div class="grp-empty">${t("repo.noTasks")}</div>`;
-        const add = `<button class="grp-act" title="${t("node.newTask")}" onclick="event.stopPropagation();openNodeTaskModal(${h.id},${r.id})">＋</button>`;
-        const code = canCode
-          ? `<button class="grp-code" title="${t("code.open")}" onclick="event.stopPropagation();openRepoCode(${r.id},${h.id})"><span class="code-ico" aria-hidden="true"></span></button>`
-          : "";
-        return `<div class="grp open"><div class="grp-head static"><span class="grp-name">📦 ${r.name}</span>${code}${add}</div>${body}</div>`;
-      }).join("");
-      // the node's own shells, with a ＋ that opens a new shell ON the node
-      const pendShells = pendingShellCards(h.id).map(pendingCard).join("");
-      const nodeShells = live.filter(tk => tk.kind === "local" && !isShadowedByNodePending(h.id, tk));
-      const addShell = `<button class="grp-act" title="${t("local.new")}" onclick="event.stopPropagation();addNodeShell(${h.id})">＋</button>`;
-      const shellCards = pendShells + nodeShells.map(tk => fleetCard(h.id, tk)).join("");
-      const shellGroup = `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>${shellCards || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
-      // repo tasks whose repo the node didn't list — rare safety net
-      const orphans = live.filter(tk => tk.kind === "repo" && !known.has(tk.repo_id));
-      const orphanGroup = orphans.length
-        ? `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div>${orphans.map(tk => fleetCard(h.id, tk)).join("")}</div>`
-        : "";
-      nodeBlock = repoGroups + shellGroup + orphanGroup;
-      // the node's OWN archived (cleaned) tasks — its truth, not A's db
-      const arch = all.filter(tk => tk.status === "cleaned");
-      nodeArchBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
-          <span class="grp-name">${t("list.archived")}</span>
-          <span class="muted">${arch.length ? `(${arch.length})` : ""}</span></div>
-          ${archivedOpen ? (arch.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
-    } else if (fl && fl.reason && fl.reason !== "notBootstrapped") {
-      nodeBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">⚠ ${t("host." + fl.reason)}</div></div>`;
-    }
+  let content = "";
+  if (isLocal) {
+    const repoBlocks = state.repos.map(r => {
+      const collapsed = collapsedRepos.has(r.id);
+      const mine = orderTasks(r.id, tasks.filter(tk => tk.kind !== "local" && tk.repo_id === r.id && tk.status !== "cleaned" && !isShadowedByPending(tk)));
+      const pend = pendingRepoCards(r.id).map(pendingCard).join("");
+      const cards = pend + mine.map(tk => taskCard(tk, true)).join("");
+      const body = collapsed ? pend : (cards || `<div class="grp-empty">${t("repo.noTasks")}</div>`);
+      return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, true, collapsed, mine)}${body}</div>`;
+    }).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`;
+    const shells = tasks.filter(tk => tk.kind === "local" && tk.status !== "cleaned" && !isShadowedByPending(tk));
+    const shellCards = pendingShellCards(h.id).map(pendingCard).join("") + shells.map(tk => taskCard(tk, true)).join("");
+    const shellBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("list.localGroup")}</span>
+        <button class="grp-act" title="${t("local.new")}" onclick="event.stopPropagation();addLocalTask()">＋</button></div>
+        ${shellCards || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
+    const archived = tasks.filter(tk => tk.status === "cleaned");
+    const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
+        <span class="grp-name">${t("list.archived")}</span><span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
+        ${archivedOpen ? (archived.map(tk => taskCard(tk, true)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
+    content = repoBlocks + shellBlock + archBlock;
+  } else if (fl?.ok) {
+    const all = fl.tasks || [];
+    const live = all.filter(tk => tk.status !== "cleaned");
+    const repos = fl.repos || [];
+    const known = new Set(repos.map(r => r.id));
+    const canCode = fl.capabilities?.includes("code-view-v1");
+    const repoGroups = repos.map(r => {
+      const ready = !r.status || r.status === "ready";
+      const pend = pendingNodeRepoCards(h.id, r.id).map(pendingCard).join("");
+      const mine = live.filter(tk => tk.kind === "repo" && tk.repo_id === r.id && !isShadowedByNodePending(h.id, tk));
+      const cards = pend + mine.map(tk => fleetCard(h.id, tk)).join("");
+      const code = canCode && ready
+        ? `<button class="grp-code" title="${t("code.open")}" onclick="event.stopPropagation();openRepoCode(${r.id},${h.id})"><span class="code-ico" aria-hidden="true"></span></button>` : "";
+      const del = remoteReady ? `<button class="grp-del" title="${t("repo.delTitle")}" onclick="event.stopPropagation();delNodeRepo(${h.id},${r.id})">🗑</button>` : "";
+      const add = remoteReady && ready ? `<button class="grp-act" title="${t("node.newTask")}" onclick="event.stopPropagation();openNodeTaskModal(${h.id},${r.id})">＋</button>` : "";
+      const status = r.status && r.status !== "ready" ? `<span class="grp-status ${r.status === "error" ? "error" : ""}">${esc(r.status)}</span>` : "";
+      return `<div class="grp open"><div class="grp-head static"><span class="grp-name">📦 ${esc(r.name)}</span><span class="grp-repo-id">#${Number(r.id)}</span>${status}${code}${del}${add}</div>
+        ${cards || `<div class="grp-empty">${t("repo.noTasks")}</div>`}${r.error ? `<div class="grp-error-detail">${esc(r.error)}</div>` : ""}</div>`;
+    }).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`;
+    const nodeShells = live.filter(tk => tk.kind === "local" && !isShadowedByNodePending(h.id, tk));
+    const shellCards = pendingShellCards(h.id).map(pendingCard).join("") + nodeShells.map(tk => fleetCard(h.id, tk)).join("");
+    const addShell = remoteReady ? `<button class="grp-act" title="${t("local.new")}" onclick="event.stopPropagation();addNodeShell(${h.id})">＋</button>` : "";
+    const shellGroup = `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("list.localGroup")}</span>${addShell}</div>${shellCards || `<div class="grp-empty">${t("local.none")}</div>`}</div>`;
+    const orphans = live.filter(tk => tk.kind === "repo" && !known.has(tk.repo_id));
+    const orphanGroup = orphans.length
+      ? `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div>${orphans.map(tk => fleetCard(h.id, tk)).join("")}</div>` : "";
+    const archived = all.filter(tk => tk.status === "cleaned");
+    const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
+        <span class="grp-name">${t("list.archived")}</span><span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
+        ${archivedOpen ? (archived.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
+    content = repoGroups + shellGroup + orphanGroup + archBlock;
+  } else {
+    const reason = fl?.reason === "notBootstrapped" ? "notBootstrapped" : (fl?.reason || "error");
+    content = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">⚠ ${t("host." + reason)}</div></div>`;
   }
 
-  const archived = tasks.filter(tk => tk.status === "cleaned" && (tk.host_id ?? hostOf[tk.repo_id]) === h.id);
-  const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
-      <span class="grp-name">${t("list.archived")}</span>
-      <span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
-      ${archivedOpen ? (archived.map(tk => taskCard(tk, online)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
-
-  // A reachable remote primarily shows the node's own live truth. Repositories
-  // registered by this controller use the controller's namespace, though, so they
-  // are not present in the node snapshot; prepend only those controller-only repos.
-  // controllerOnlyRepos also collapses historical duplicate registrations by URL.
-  const html = isFleetView
-    ? header + repoBlocks + nodeBlock + nodeArchBlock
-    : header + repoBlocks + shellBlock + nodeBlock + archBlock;
+  const html = header + content;
   // Buffer: nothing changed since the last write → leave the DOM alone. The markup
   // is a pure function of the render state (host, tasks, fleet, selection, collapse/
   // menu flags), so identical markup means an identical list; rewriting it would only

@@ -3,7 +3,8 @@
 // drive these functions through one-shot `tdsp` verbs instead of mutating their
 // own databases.
 import type Database from "better-sqlite3";
-import type { Repo, Task } from "../core/db.js";
+import type { Task } from "../core/db.js";
+import { getOwnedRepo, getOwnedTask } from "../core/ownership.js";
 
 type DB = Database.Database;
 
@@ -50,7 +51,7 @@ function messageOf(error: unknown): string {
 
 /** Relaunch the task's original agent in its retained worktree. */
 export async function resumeTask(env: ResumeTaskEnv, id: number): Promise<LifecycleResult> {
-  const task = env.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task | undefined;
+  const task = getOwnedTask(env.db, id);
   if (!task) return { ok: false, error: "notFound" };
   if (!task.session || !task.worktree_path) return { ok: false, error: "notResumable" };
 
@@ -75,9 +76,9 @@ export async function resumeTask(env: ResumeTaskEnv, id: number): Promise<Lifecy
 
 /** End any remaining session and remove the retained repo worktree. */
 export async function cleanupTask(env: CleanupTaskEnv, id: number): Promise<LifecycleResult> {
-  const task = env.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task | undefined;
+  const task = getOwnedTask(env.db, id);
   if (!task) return { ok: false, error: "notFound" };
-  const repo = env.db.prepare("SELECT * FROM repos WHERE id=?").get(task.repo_id) as Repo | undefined;
+  const repo = getOwnedRepo(env.db, task.repo_id);
 
   try {
     await env.killSession(task.session);
@@ -94,8 +95,14 @@ export async function cleanupTask(env: CleanupTaskEnv, id: number): Promise<Life
 
 /** Delete only the durable record; retained worktrees must be cleaned first. */
 export async function deleteTaskRecord(env: DeleteTaskEnv, id: number): Promise<LifecycleResult> {
-  const task = env.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task | undefined;
+  const task = getOwnedTask(env.db, id);
   if (!task) {
+    // Idempotently remove a manifest only when the row is truly absent. If the
+    // id belongs to a historical remote row, treating it as absent would let a
+    // local command erase that row's controller-era manifest.
+    if (env.db.prepare("SELECT id FROM tasks WHERE id=?").get(id)) {
+      return { ok: false, error: "notFound" };
+    }
     await env.removeManifest(id);
     return { ok: true };
   }

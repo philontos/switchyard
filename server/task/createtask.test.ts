@@ -22,6 +22,8 @@ const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 function seedDb() {
   const db = new Database(":memory:");
   initSchema(db, opts);
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,status) VALUES (1,1,'repo','git@example/repo','ready')").run();
   return db;
 }
 function insertTask(db: Database.Database, title: string) {
@@ -34,6 +36,7 @@ function insertTask(db: Database.Database, title: string) {
 function makeEnv(overrides: Partial<LocalTaskEnv> = {}) {
   const db = new Database(":memory:");
   initSchema(db, opts);
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tdsp-ct-"));
   const started: { session: string; cwd: string }[] = [];
   const env: LocalTaskEnv = {

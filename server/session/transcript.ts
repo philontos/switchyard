@@ -10,11 +10,10 @@
 //            session_meta.cwd == the worktree)
 //   Kimi:    launched and live in the terminal, but not parsed into Reading yet.
 //
-// All file access goes through the task's Runner, so a local task reads the fs and a
-// remote one reads over ssh with identical code. Parsing is stateless per line, so
-// tailing is a pure append: tool_use/tool_result are emitted as separate entries and
-// correlated by id on the CLIENT (which holds the whole stream), keeping the cursor a
-// simple byte offset with no cross-line state on the server.
+// All file access is performed by the task's owning node. A controller asks that
+// node for higher-level task operations; it never locates or tails the node's
+// transcript files over SSH. Parsing is stateless per line, so tailing remains a
+// pure append with a simple byte cursor.
 import os from "node:os";
 import path from "node:path";
 import type { Runner } from "../fleet/runner.js";
@@ -141,21 +140,6 @@ export function parseCodexLine(o: any): Entry[] {
 
 const escapeClaudeCwd = (cwd: string) => cwd.replace(/[/.]/g, "-");
 
-// The home dir on the target machine. Local is os.homedir(); a remote is resolved once
-// (one ssh round-trip) and cached by ssh target.
-const homeCache = new Map<string, string>();
-async function resolveHome(runner: Runner): Promise<string> {
-  if (runner.kind === "local") return os.homedir();
-  const key = (runner as any).target as string;
-  const hit = homeCache.get(key);
-  if (hit) return hit;
-  // Must go through a remote shell so $HOME expands ON the target — passing "$HOME"
-  // as a plain exec arg would be single-quoted and come back literal.
-  const home = (await runner.exec("sh", ["-c", 'printf %s "$HOME"']).catch(() => "")).trim();
-  if (home) homeCache.set(key, home);
-  return home;
-}
-
 // Locate a task's Codex rollout: the newest rollout whose session_meta.cwd is the
 // worktree. Cached per task once found (the file only grows). One shell round-trip.
 const codexPathCache = new Map<number, string>();
@@ -207,11 +191,11 @@ export async function readTranscript(
   since = 0,
   knownSource: string | null = null,
 ): Promise<TranscriptResult> {
+  if (runner.kind !== "local") throw new Error("Transcript must be read by the node that owns the task");
   const agent = asAgentKind(task.agent);
   const cwd = task.worktree_path;
   if (!cwd) return { agent, source: null, entries: [], cursor: 0 };
-  const home = await resolveHome(runner);
-  if (!home) return { agent, source: null, entries: [], cursor: 0 };
+  const home = os.homedir();
   if (agent === "kimi") return { agent, source: null, entries: [], cursor: 0 };
 
   let file: string | null = null;

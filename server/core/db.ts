@@ -80,7 +80,7 @@ export interface Host {
   name: string;
   target: string;
   kind: string;          // local | ssh | mosh
-  data_dir: string | null;   // the machine's ~/.task-dispatcher
+  data_dir: string | null;   // local node root; non-null remote values are legacy audit data
   status: string;            // online | offline | unknown
   last_checked: string | null;
   tdsp_bin: string | null;   // absolute path to this node's tdsp wrapper once bootstrapped; null = not yet

@@ -7,6 +7,7 @@
 
 import http from "node:http";
 import net from "node:net";
+import type { Duplex } from "node:stream";
 
 // Matches a preview Host header: `t<taskId>-<port>.localhost` with an optional
 // `:<dispatcherPort>` suffix. The leading `t` + the `.localhost` anchor keep
@@ -141,7 +142,7 @@ function proxyHttp(
 // the upstream computes the right Accept and the browser sees a valid handshake.
 export function handlePreviewUpgrade(
   req: http.IncomingMessage,
-  clientSocket: net.Socket,
+  clientSocket: Duplex,
   head: Buffer,
   resolve: PreviewResolver,
 ): void {
@@ -179,33 +180,4 @@ export function tcpProbe(host: string, port: number, timeoutMs = 2000): Promise<
     sock.once("timeout", () => done(false));
     sock.once("error", () => done(false));
   });
-}
-
-export interface ForwardTarget { id: number; target: string; }
-export interface ForwardHandle { localPort: number; close(): void; }
-export type ForwardSpawner = (target: ForwardTarget, remotePort: number) => Promise<ForwardHandle>;
-
-// Keeps at most one ssh -L forward per (host, remotePort), reused across requests
-// and torn down after `idleMs` of no use. Spawning is injected so the lifecycle
-// is testable without real ssh. Concurrent acquires share one in-flight spawn; a
-// failed spawn isn't cached, so the next acquire retries.
-export function createForwardRegistry(spawn: ForwardSpawner, idleMs = 60000) {
-  const fwds = new Map<string, { handleP: Promise<ForwardHandle>; timer?: ReturnType<typeof setTimeout> }>();
-  async function acquire(target: ForwardTarget, remotePort: number): Promise<number> {
-    const key = `${target.id}:${remotePort}`;
-    let e = fwds.get(key);
-    if (!e) { e = { handleP: spawn(target, remotePort) }; fwds.set(key, e); }
-    let handle: ForwardHandle;
-    try {
-      handle = await e.handleP;
-    } catch (err) {
-      fwds.delete(key); // don't cache a failed spawn
-      throw err;
-    }
-    if (e.timer) clearTimeout(e.timer);
-    e.timer = setTimeout(() => { try { handle.close(); } catch {} fwds.delete(key); }, idleMs);
-    e.timer.unref?.();
-    return handle.localPort;
-  }
-  return { acquire };
 }

@@ -2,12 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { db, Repo } from "../core/db.js";
 import { DATA_DIR, MANIFEST_PATH } from "../core/paths.js";
+import { listOwnedRepos } from "../core/ownership.js";
 
 // repos.json — a machine's self-describing list of registered repos. Metadata
 // ONLY: never the token. Keeping the secret out of an on-disk manifest matters
-// even more once these get written on remote machines too. With a fixed layout
-// + this manifest, any controller that reaches a machine can reconstruct its
-// catalog (and reconcile a wiped local DB against what's actually on disk).
+// even more once every node writes its own copy. With a fixed layout + this
+// manifest, the owning node can recover its catalog after a wiped local DB;
+// another node never adopts it over the transport layer.
 export interface RepoManifestEntry {
   id: number;
   name: string;
@@ -36,7 +37,7 @@ export function reposManifest(repos: Repo[]): { version: number; repos: RepoMani
 // Rewrite the manifest from the current repos table. Call after register/delete
 // (and once at startup) so repos.json always mirrors the catalog.
 export function syncReposManifest() {
-  const repos = db.prepare("SELECT * FROM repos ORDER BY id").all() as Repo[];
+  const repos = listOwnedRepos(db).sort((a, b) => a.id - b.id);
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(reposManifest(repos), null, 2));
 }

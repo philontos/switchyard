@@ -15,27 +15,28 @@ export interface ExecOpts {
   maxBuffer?: number;
 }
 
-/**
- * A Runner executes work ON a machine. The local box (machine #0) runs things
- * directly; RemoteRunner wraps each call in ssh. Every git/tmux command and
- * every filesystem touch goes through a Runner, so the same orchestration code
- * can target any machine just by swapping the Runner.
- */
-export interface Runner {
+/** Minimal command transport used by bootstrap and interactive tmux relays. */
+export interface CommandRunner {
   kind: "local" | "ssh";
-  /** This machine's ~/.task-dispatcher (absolute path ON the target machine). */
-  dataDir: string;
   exec(file: string, args: string[], opts?: ExecOpts): Promise<string>;
+}
+
+/**
+ * Owner-local process/filesystem primitives. Repo/task domain services require
+ * this fuller interface; RemoteRunner intentionally cannot satisfy it.
+ */
+export interface Runner extends CommandRunner {
+  /** This local instance's namespaced data directory. */
+  dataDir: string;
   mkdirp(dir: string): Promise<void>;
   exists(p: string): Promise<boolean>;
-  /** Read a text file's contents ON the target machine; null if it's missing. */
+  /** Read a local text file; null if it is missing. */
   readText(p: string): Promise<string | null>;
   rmrf(p: string): Promise<void>;
-  /** Copy a local directory tree to `dest` ON the target machine. */
+  /** Copy a local directory tree to another local path. */
   putDir(localSrc: string, dest: string): Promise<void>;
-  /** Copy a single local file to `dest` ON the target machine. */
+  /** Copy a local file to another local path. */
   putFile(localSrc: string, dest: string): Promise<void>;
-  ptySpec(file: string, args: string[]): { file: string; args: string[] };
 }
 
 export class LocalRunner implements Runner {
@@ -62,7 +63,6 @@ export class LocalRunner implements Runner {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(localSrc, dest);
   }
-  ptySpec(file: string, args: string[]) { return { file, args }; }
 }
 
 export const localRunner = new LocalRunner();
@@ -85,19 +85,9 @@ const SSH_BATCH = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"];
  *  the fleet's `ssh <node> tdsp list` — same muxing/batching the Runner uses. */
 export const SSH_BASE_ARGS = [...SSH_MUX, ...SSH_BATCH];
 
-/** ssh args for a detached `-N -L` port-forward that rides the shared master —
- *  used to reach a remote task's dev server for the web preview. The local end
- *  is bound IPv4 (we own it); the remote target is `localhost` (NOT 127.0.0.1)
- *  so the remote sshd resolves it and connects to whichever loopback family the
- *  dev server bound — vite & friends default to ::1 (IPv6) on macOS, which a
- *  hardcoded 127.0.0.1 target would miss. */
-export function sshForwardArgs(target: string, localPort: number, remotePort: number): string[] {
-  return ["-N", ...SSH_MUX, ...SSH_BATCH, "-L", `127.0.0.1:${localPort}:localhost:${remotePort}`, target];
-}
-
-export class RemoteRunner implements Runner {
+export class RemoteRunner implements CommandRunner {
   kind = "ssh" as const;
-  constructor(public target: string, public dataDir: string) {}
+  constructor(public target: string) {}
 
   // just forward: optional cd; per-command env prefix; the exec'd command —
   // joined into one remote shell command string. PATH/toolchain resolution is
@@ -115,54 +105,15 @@ export class RemoteRunner implements Runner {
       maxBuffer: opts.maxBuffer,
     });
   }
-  async mkdirp(dir: string) { await this.exec("mkdir", ["-p", dir]); }
-  async exists(p: string) { try { await this.exec("test", ["-e", p]); return true; } catch { return false; } }
-  // `cat` a missing file errors → null, matching LocalRunner's swallow-and-null.
-  async readText(p: string) { try { return await this.exec("cat", [p]); } catch { return null; } }
-  async rmrf(p: string) { await this.exec("rm", ["-rf", p]); }
-
-  // Stream the local dir to the remote with tar-over-ssh. We need a real pipe,
-  // so this goes through a local shell (`sh -c`); each ssh arg + the remote
-  // command are single-quoted for that shell, and the remote command's own
-  // paths are quoted again for the remote shell. If the source dir's basename
-  // differs from dest's, rename it ON THE REMOTE after extraction.
-  async putDir(localSrc: string, dest: string) {
-    const base = path.basename(localSrc);
-    const srcParent = path.dirname(localSrc);
-    const destParent = path.dirname(dest);
-    const extracted = path.join(destParent, base);
-    const rename = extracted === dest ? "" : ` && rm -rf ${shq(dest)} && mv ${shq(extracted)} ${shq(dest)}`;
-    const remote = `mkdir -p ${shq(destParent)} && tar -C ${shq(destParent)} -xf -${rename}`;
-    const sshArgs = [...SSH_MUX, ...SSH_BATCH, this.target, remote].map(shq).join(" ");
-    await localRunner.exec("sh", ["-c", `tar -C ${shq(srcParent)} -cf - ${shq(base)} | ssh ${sshArgs}`]);
-  }
-
-  // Stream one local file to the remote over ssh (mirrors putDir's pipe shape).
-  async putFile(localSrc: string, dest: string) {
-    const destParent = path.dirname(dest);
-    const remote = `mkdir -p ${shq(destParent)} && cat > ${shq(dest)}`;
-    const sshArgs = [...SSH_MUX, ...SSH_BATCH, this.target, remote].map(shq).join(" ");
-    await localRunner.exec("sh", ["-c", `cat ${shq(localSrc)} | ssh ${sshArgs}`]);
-  }
-
-  ptySpec(file: string, args: string[]) {
-    // interactive terminal: ssh -t, no BatchMode (allow host-key/password prompts)
-    const cmd = `exec ${[file, ...args].map(shq).join(" ")}`;
-    return { file: "ssh", args: ["-t", ...SSH_MUX, this.target, cmd] };
-  }
 }
 
-/** Pick the Runner for a machine. */
-export function runnerFor(host: Host): Runner {
+/** SSH transport runner; do not use it as a remote repo/task service. */
+export function transportRunnerFor(host: Host): CommandRunner {
   if (host.kind === "local") return localRunner;
-  return new RemoteRunner(host.target, host.data_dir ?? "");
+  return new RemoteRunner(host.target);
 }
 
-/**
- * One ssh round-trip that proves reachability AND reports the remote home dir
- * (so we can derive its ~/.task-dispatcher). Throws if the host is unreachable.
- */
-export async function sshProbe(target: string): Promise<{ home: string }> {
-  const home = (await localRunner.exec("ssh", [...SSH_MUX, ...SSH_BATCH, target, 'echo "$HOME"'])).trim();
-  return { home };
+/** One SSH round-trip that proves transport reachability. */
+export async function sshProbe(target: string): Promise<void> {
+  await localRunner.exec("ssh", [...SSH_MUX, ...SSH_BATCH, target, "true"]);
 }

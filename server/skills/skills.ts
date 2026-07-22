@@ -1,9 +1,9 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { BASE_DATA_DIR, DATA_DIR } from "../core/paths.js";
 
 // Read-through skill aggregation: no physical library. We scan a set of
-// read-only source roots ON THE CONTROLLER and list whatever skills are there,
+// read-only source roots ON THE CURRENT NODE and list whatever skills are there,
 // tagged by source. Identity is `source:name` (different sources may reuse a
 // name). The only copy happens at dispatch time (server/index.ts uses resolve +
 // Runner.putDir to drop a skill's whole dir into the task worktree).
@@ -11,19 +11,24 @@ import path from "node:path";
 export interface SkillSource { source: string; root: string; }
 export interface SkillEntry { key: string; name: string; description: string; source: string; dir: string; }
 
-/** The dispatcher's private skill library, on the controller. Deliberately does
+/** The node's private skill library. Deliberately does
  *  NOT scan the user's ~/.claude: a LOCAL task's claude already discovers those
- *  natively (user-level), so injecting them would be redundant; and a REMOTE
- *  task should get a curated, dispatcher-owned set, not whatever happens to sit
- *  in the operator's personal config. Populate this by hand
- *  (~/.task-dispatcher/skills) or via official-marketplace installs (plugins.ts)
- *  into the isolated config. */
-export function defaultSources(home = os.homedir()): SkillSource[] {
-  return [
-    { source: "dispatcher", root: path.join(home, ".task-dispatcher", "skills") },
+ *  natively (user-level), so injecting them would be redundant. Every node
+ *  resolves and injects its own curated set. The un-namespaced base roots remain
+ *  read-only fallbacks for installations created before per-instance data dirs. */
+export function defaultSources(dataDir = DATA_DIR, legacyBaseDir = BASE_DATA_DIR): SkillSource[] {
+  const roots = [
+    path.join(dataDir, "skills"),
     // official-marketplace installs land here (CLAUDE_CONFIG_DIR=<DATA_DIR>/claude-config)
-    { source: "dispatcher", root: path.join(home, ".task-dispatcher", "claude-config", "plugins", "cache") },
+    path.join(dataDir, "claude-config", "plugins", "cache"),
   ];
+  for (const legacy of [
+    path.join(legacyBaseDir, "skills"),
+    path.join(legacyBaseDir, "claude-config", "plugins", "cache"),
+  ]) {
+    if (!roots.includes(legacy)) roots.push(legacy);
+  }
+  return roots.map((root) => ({ source: "dispatcher", root }));
 }
 
 /** A skill = a directory directly containing SKILL.md. Recurse until found; do

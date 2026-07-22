@@ -67,6 +67,30 @@ export function listProviders(db: DB): Provider[] {
   return db.prepare("SELECT * FROM providers ORDER BY id DESC").all() as Provider[];
 }
 
+export interface ProviderSummary {
+  id: number;
+  name: string;
+  model: string | null;
+}
+
+/** Re-project any provider rows received over a node boundary to picker-safe metadata. */
+export function providerSummaries(rows: unknown): ProviderSummary[] {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
+    .map((row) => ({
+      id: Number(row.id),
+      name: String(row.name ?? ""),
+      model: row.model == null ? null : String(row.model),
+    }))
+    .filter((row) => Number.isInteger(row.id) && row.id > 0 && !!row.name);
+}
+
+/** Picker-safe provider metadata; credentials and endpoint coordinates stay local. */
+export function providersForList(db: DB): ProviderSummary[] {
+  return providerSummaries(listProviders(db));
+}
+
 export async function insertCheckedProvider(db: DB, body: any): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
   const { name } = body ?? {};
   if (!name || !String(name).trim()) return { ok: false, error: "name required" };

@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
+import { getOwnedRepo, getOwnedTask } from "../core/ownership.js";
 import type { Repo, Task } from "../core/db.js";
 import type { Runner } from "../fleet/runner.js";
 import { fetchBranch } from "../repo/git.js";
@@ -267,6 +268,12 @@ function pathInside(base: string, target: string): boolean {
   return target === base || target.startsWith(base + path.sep);
 }
 
+function requireOwnerLocalRunner(runner: Runner): void {
+  if (runner.kind !== "local") {
+    throw new CodeViewError("ownerRequired", "Code must be inspected by the node that owns it");
+  }
+}
+
 function readLocalFile(base: string, rel: string): RawFileRead {
   let realBase: string;
   try { realBase = fs.realpathSync(base); }
@@ -284,40 +291,6 @@ function readLocalFile(base: string, rel: string): RawFileRead {
   return { size: stat.size, buffer: fs.readFileSync(realTarget) };
 }
 
-const REMOTE_READ_SCRIPT = String.raw`
-const fs = require("node:fs"), path = require("node:path");
-const base = process.argv[1], rel = process.argv[2], max = Number(process.argv[3]);
-const send = (v) => process.stdout.write(JSON.stringify(v));
-(() => {
-  try {
-    const rb = fs.realpathSync(base), target = path.resolve(rb, ...rel.split("/"));
-    if (!(target === rb || target.startsWith(rb + path.sep))) return send({ ok:false, reason:"invalidPath" });
-    const st = fs.lstatSync(target);
-    if (st.isSymbolicLink()) return send({ ok:true, size:st.size, reason:"symlink" });
-    if (!st.isFile()) return send({ ok:false, reason:"fileMissing" });
-    const rt = fs.realpathSync(target);
-    if (!(rt === rb || rt.startsWith(rb + path.sep))) return send({ ok:false, reason:"invalidPath" });
-    if (st.size > max) return send({ ok:true, size:st.size, reason:"tooLarge" });
-    send({ ok:true, size:st.size, data:fs.readFileSync(rt).toString("base64") });
-  } catch (_) { send({ ok:false, reason:"fileMissing" }); }
-})();
-`;
-
-async function readWorktreeFile(runner: Runner, base: string, rel: string): Promise<RawFileRead> {
-  if (runner.kind === "local") return readLocalFile(base, rel);
-  const raw = await runner.exec("node", ["-e", REMOTE_READ_SCRIPT, base, rel, String(MAX_CODE_FILE_BYTES)], {
-    maxBuffer: Math.ceil(MAX_CODE_FILE_BYTES * 1.5) + 4096,
-  });
-  let parsed: any;
-  try { parsed = JSON.parse(raw); }
-  catch { throw new CodeViewError("readFailed", "Could not read file from the task machine"); }
-  if (!parsed?.ok) throw new CodeViewError(parsed?.reason || "fileMissing", "File is no longer available");
-  if (parsed.reason === "tooLarge" || parsed.reason === "symlink") {
-    return { size: Number(parsed.size) || 0, unavailable: parsed.reason };
-  }
-  return { size: Number(parsed.size) || 0, buffer: Buffer.from(String(parsed.data || ""), "base64") };
-}
-
 async function assertTaskVisiblePath(runner: Runner, task: Task, rel: string): Promise<void> {
   const out = await git(runner, task.worktree_path, [
     "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", literalPathspec(rel),
@@ -330,6 +303,7 @@ export async function inspectRepoCode(
   repo: Repo,
   request: Pick<CodeInspectRequest, "operation" | "path" | "refresh">,
 ): Promise<CodePayload> {
+  requireOwnerLocalRunner(runner);
   const revision = await repoRevision(runner, repo, !!request.refresh);
   const mirror = repo.mirror_path as string;
   if (request.operation === "tree") {
@@ -423,7 +397,7 @@ async function taskDiff(runner: Runner, task: Task, requestedPath: unknown): Pro
 
   if (change.status === "?") {
     await assertTaskVisiblePath(runner, task, rel);
-    const read = await readWorktreeFile(runner, task.worktree_path, rel);
+    const read = readLocalFile(task.worktree_path, rel);
     if (read.unavailable || !read.buffer) {
       return {
         kind: "diff", path: rel, content: null, truncated: read.unavailable === "tooLarge",
@@ -459,6 +433,7 @@ export async function inspectTaskCode(
   task: Task,
   request: Pick<CodeInspectRequest, "operation" | "path">,
 ): Promise<CodePayload> {
+  requireOwnerLocalRunner(runner);
   if (task.kind === "local" || !task.repo_id) throw new CodeViewError("notRepoTask", "Shell tasks do not have a repository worktree");
   const head = await taskHead(runner, task);
   if (request.operation === "tree") {
@@ -478,7 +453,7 @@ export async function inspectTaskCode(
 
   const rel = codePath(request.path);
   await assertTaskVisiblePath(runner, task, rel);
-  const read = await readWorktreeFile(runner, task.worktree_path, rel);
+  const read = readLocalFile(task.worktree_path, rel);
   if (read.unavailable) {
     return {
       kind: "file", path: rel, size: read.size, content: null, unavailable: read.unavailable,
@@ -515,18 +490,18 @@ export async function codeResult(work: () => Promise<CodePayload>): Promise<Code
 export async function inspectOwnedCode(db: DB, runner: Runner, request: CodeInspectRequest): Promise<CodeInspectResult> {
   if (!isCodeInspectRequest(request)) return { ok: false, error: "invalidRequest", message: "Invalid code inspection request" };
   if (request.scope === "repo") {
-    const repo = db.prepare("SELECT * FROM repos WHERE id=?").get(request.id) as Repo | undefined;
+    const repo = getOwnedRepo(db, request.id);
     if (!repo) return { ok: false, error: "notFound", message: "Repository not found" };
     return codeResult(() => inspectRepoCode(runner, repo, request));
   }
-  const task = db.prepare("SELECT * FROM tasks WHERE id=?").get(request.id) as Task | undefined;
+  const task = getOwnedTask(db, request.id);
   if (!task) return { ok: false, error: "notFound", message: "Task not found" };
   return codeResult(() => inspectTaskCode(runner, task, request));
 }
 
 export function codeErrorStatus(code: string): number {
   if (["notFound", "fileMissing"].includes(code)) return 404;
-  if (["worktreeGone", "notReady", "refMissing", "fileUnchanged", "notRepoTask"].includes(code)) return 409;
+  if (["worktreeGone", "notReady", "refMissing", "fileUnchanged", "notRepoTask", "ownerRequired"].includes(code)) return 409;
   if (["invalidRequest", "invalidPath", "invalidOperation"].includes(code)) return 400;
   return 500;
 }

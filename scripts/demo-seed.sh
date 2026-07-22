@@ -335,7 +335,7 @@ EOF
 
     # 在机器A 上登记它:target=localhost,tdsp_bin 指向包装器 → 舰队视图走真 ssh 拉真数据
     must_create "登记远程机器" "$PORT_A" /api/hosts "{\"name\":\"$REMOTE_NAME\",\"target\":\"localhost\"}"
-    sqlite3 "$DB_A" "UPDATE hosts SET tdsp_bin='$ROOT_B/bin/tdsp', data_dir='$ROOT_B', status='online' WHERE target='localhost'"
+    sqlite3 "$DB_A" "UPDATE hosts SET tdsp_bin='$ROOT_B/bin/tdsp', status='online' WHERE target='localhost'"
     say "远程机器「$REMOTE_NAME」已上线(ssh localhost + 独立数据根,一切走真实链路)"
   fi
 fi

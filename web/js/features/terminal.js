@@ -331,10 +331,12 @@ function createPane(id, query, agent) {
     mountTouchScroll(pane);
   }
 
-  // linkify localhost URLs the session prints (e.g. a dev server's
-  // "Local: http://localhost:5173") and open them in the side preview on click,
-  // instead of navigating the browser to the user's OWN (empty) localhost.
-  try { term.registerLinkProvider(localhostLinks(term, id)); } catch {}
+  // Preview currently resolves owner-local tasks only. A remote pane id is a
+  // transport handle ("n<host>:<task>"), not a controller-local task id, so do
+  // not turn its localhost output into an invalid/incorrect controller URL.
+  if (canPreviewTaskPane(id)) {
+    try { term.registerLinkProvider(localhostLinks(term, id)); } catch {}
+  }
 
   const p = {
     id, pane, term, fit, ws: null, query, agent,
@@ -618,12 +620,16 @@ export function closePending(tmpId) {
 // A localhost link the session prints (e.g. a dev server's "Local:
 // http://localhost:5173") is opened in a NEW BROWSER TAB pointed at the
 // dispatcher's proxy origin (t<task>-<port>.localhost), which reverse-proxies to
-// the dev server on the task's machine. The new tab rides the SAME path you
+// an owner-local task's dev server. The new tab rides the SAME path you
 // reach the dashboard by (direct, or an `ssh -L 4500` tunnel), so it works
-// whether the dispatcher is local or remote — and the browser handles
+// whether the browser is local or reaching that dispatcher remotely — and it handles
 // *.localhost + IPv4/IPv6 itself. A bare localhost:<port> would instead hit the
 // BROWSER's own machine, which is wrong whenever you aren't sitting at the box.
 const LOCALHOST_URL = /https?:\/\/(?:localhost|127\.0\.0\.1):(\d{1,5})(?:\/[^\s"'`]*)?/g;
+
+export function canPreviewTaskPane(id) {
+  return Number.isInteger(id) && id > 0;
+}
 
 function previewUrl(taskId, port) {
   const proto = location.protocol === "https:" ? "https" : "http";
@@ -663,7 +669,7 @@ function localhostLinks(term, taskId) {
 // in a new tab — for when the printed link is wrapped/truncated in a TUI.
 function goPreviewPort() {
   const port = Number($("prev-port").value);
-  if (activeId != null && port >= 1 && port <= 65535) openPreviewTab(activeId, port);
+  if (canPreviewTaskPane(activeId) && port >= 1 && port <= 65535) openPreviewTab(activeId, port);
 }
 
 // Attach the dock to a task's session: reuse its live pane if we have one (just

@@ -12,27 +12,24 @@ export const WEB_DIR = path.join(ROOT, "web");
 
 // Per-machine data root. The SAME layout lives on the local box (machine #0)
 // and on every remote host, so "local" is just another machine. Holds
-// mirrors/, worktrees/, repos.json, and (on the controller) dispatcher.db.
+// mirrors/, worktrees/, repos.json, and this node's dispatcher.db.
 //
 // Defaults to ~/.task-dispatcher, but TASK_DISPATCHER_DATA_DIR overrides it so a
-// second controller on the same box — a dev/test instance, or a dispatched task
-// that runs the dispatcher itself — can point at an isolated data root instead
+// second Switchyard instance on the same box — a dev/test instance, or a task
+// that runs Switchyard itself — can point at an isolated data root instead
 // of clobbering the live one's db/mirrors/worktrees (and, via the shared tmux
-// server, its live sessions). See the single-controller rule in the README.
+// server and its live sessions.
 export function resolveDataDir(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string {
   const override = env.TASK_DISPATCHER_DATA_DIR;
   return override && override.trim() ? path.resolve(override) : path.join(home, ".task-dispatcher");
 }
 export const BASE_DATA_DIR = resolveDataDir();
 
-// Per-controller namespace. Two controllers that share a machine's disk + tmux
-// server (e.g. two boxes that are each other's ssh remote) would otherwise
-// collide: their db ids both start at 1, and every path / session name is built
-// from those ids (mirrors/{repoId}-…, worktrees/{repoId}-{taskId}, tmux
-// tdsp-{taskId}-…). Slotting a stable per-controller id into the data root and
-// the tmux names keeps each controller's footprint disjoint on every machine it
-// touches. Stored as a flat file at the un-namespaced base so it's readable
-// before we build the namespaced DATA_DIR (chicken-and-egg); generated once.
+// Per-instance namespace. Two Switchyard instances sharing one machine's disk +
+// tmux server would otherwise collide because their DB ids both start at 1.
+// The stable id scopes this node instance's data and session names. The legacy
+// filename `controller-id` is retained to keep every existing DATA_DIR stable;
+// its value is now interpreted as the local instance id, not remote ownership.
 export function resolveNamespace(baseDir: string): string {
   const idFile = path.join(baseDir, "controller-id");
   try {

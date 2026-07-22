@@ -9,7 +9,7 @@ test("defaults to ~/.task-dispatcher when no override is set", () => {
   assert.equal(resolveDataDir({}, HOME), path.join(HOME, ".task-dispatcher"));
 });
 
-test("TASK_DISPATCHER_DATA_DIR overrides the default (isolated controller)", () => {
+test("TASK_DISPATCHER_DATA_DIR overrides the default (isolated instance)", () => {
   assert.equal(
     resolveDataDir({ TASK_DISPATCHER_DATA_DIR: "/srv/dispatch-dev" }, HOME),
     "/srv/dispatch-dev",

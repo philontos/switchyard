@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { initSchema } from "../core/schema.ts";
-import { repoFindOrCreate, buildRepoTaskEnv } from "./repoenv.ts";
+import { buildRepoTaskEnv } from "./repoenv.ts";
 import type { Runner } from "../fleet/runner.ts";
 import type { AgentKind } from "../session/agent.ts";
 
@@ -20,7 +20,6 @@ function recordingRunner() {
     mkdirp: async () => {}, exists: async () => false, readText: async () => null,
     rmrf: async () => {}, putFile: async () => {},
     putDir: async (src: string, dest: string) => { putDirs.push({ src, dest }); },
-    ptySpec: (file: string, args: string[]) => ({ file, args }),
   } as unknown as Runner;
   return { runner, putDirs };
 }
@@ -59,39 +58,13 @@ test("setupWorktree (kimi) skips skills and hooks — no .claude injection at al
   assert.equal(putDirs.length, 0, "kimi delivers no skills and injects no hooks");
 });
 
-function seed() {
+test("buildRepoTaskEnv refuses a remote runner", () => {
   const db = new Database(":memory:");
   initSchema(db, opts);
-  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
-  return db;
-}
-
-// When A dispatches a repo task to a node, the node registers the repo on itself
-// (so it owns + can display the task) keyed by the mirror path — idempotent, so
-// repeated dispatches of the same repo reuse the one row.
-test("repoFindOrCreate inserts a repo on first dispatch, owned by the local host", () => {
-  const db = seed();
-  const r = repoFindOrCreate(db, { mirror: "/data/mirrors/5-sw.git", name: "sw", git_url: "git@x:sw" });
-  assert.equal(typeof r.id, "number");
-  assert.equal(r.name, "sw");
-  assert.equal(r.mirror_path, "/data/mirrors/5-sw.git");
-  const row = db.prepare("SELECT host_id, status FROM repos WHERE id=?").get(r.id) as { host_id: number; status: string };
-  assert.equal(row.host_id, 1, "the node's own local host owns the repo");
-  assert.equal(row.status, "ready");
-});
-
-test("repoFindOrCreate is idempotent — same mirror path reuses the existing row", () => {
-  const db = seed();
-  const a = repoFindOrCreate(db, { mirror: "/data/mirrors/5-sw.git", name: "sw", git_url: "git@x:sw" });
-  const b = repoFindOrCreate(db, { mirror: "/data/mirrors/5-sw.git", name: "sw", git_url: "git@x:sw" });
-  assert.equal(a.id, b.id);
-  assert.equal((db.prepare("SELECT count(*) c FROM repos").get() as { c: number }).c, 1);
-});
-
-test("repoFindOrCreate keeps distinct repos distinct (different mirror paths)", () => {
-  const db = seed();
-  const a = repoFindOrCreate(db, { mirror: "/data/mirrors/5-sw.git", name: "sw", git_url: "u1" });
-  const b = repoFindOrCreate(db, { mirror: "/data/mirrors/6-ug.git", name: "ug", git_url: "u2" });
-  assert.notEqual(a.id, b.id);
-  assert.equal((db.prepare("SELECT count(*) c FROM repos").get() as { c: number }).c, 2);
+  const { runner } = recordingRunner();
+  (runner as any).kind = "ssh";
+  assert.throws(
+    () => buildRepoTaskEnv({ db, ns: "ns", runner, writeManifest: () => {} }),
+    /owning node/,
+  );
 });

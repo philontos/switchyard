@@ -18,6 +18,8 @@ const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 function seedDb() {
   const db = new Database(":memory:");
   initSchema(db, opts);
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,status) VALUES (1,1,'repo','git@example/repo','ready')").run();
   return db;
 }
 
@@ -94,4 +96,25 @@ test("adoptTaskManifests skips a task the DB already owns (no duplicate, no clob
   assert.equal(adopted, 0);
   const title = (db.prepare("SELECT title FROM tasks WHERE id=?").get(task.id) as { title: string }).title;
   assert.equal(title, "delta", "an existing row must not be overwritten by adopt");
+});
+
+test("adoptTaskManifests refuses manifests explicitly owned by another node", () => {
+  const db = seedDb();
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (2,'remote','dev@remote','ssh','online')").run();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,status) VALUES (2,2,'remote-repo','git@example/remote','ready')").run();
+
+  const remoteShell = taskManifest({ ...insertTask(db, "shell-seed"), id: 100, kind: "local", host_id: 2, repo_id: 0 });
+  const remoteRepoTask = taskManifest({ ...insertTask(db, "repo-seed"), id: 101, kind: "repo", host_id: null, repo_id: 2 });
+  assert.equal(adoptTaskManifests(db, [remoteShell, remoteRepoTask]), 0);
+  assert.equal(db.prepare("SELECT id FROM tasks WHERE id IN (100,101)").all().length, 0);
+});
+
+test("adoptTaskManifests does not mutate a legacy manifest while defaulting its owner", () => {
+  const db = seedDb();
+  const task = { ...insertTask(db, "legacy-shell"), id: 102, kind: "local", host_id: null, repo_id: 0 };
+  db.prepare("DELETE FROM tasks WHERE id=?").run(task.id);
+  const manifest = taskManifest(task);
+  assert.equal(adoptTaskManifests(db, [manifest]), 1);
+  assert.equal(manifest.task.host_id, null);
+  assert.equal((db.prepare("SELECT host_id FROM tasks WHERE id=102").get() as { host_id: number }).host_id, 1);
 });

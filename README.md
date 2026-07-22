@@ -41,6 +41,7 @@ Every machine on your network is a first-class node:
 
 - **Fleet view** — each node's repos and live tasks are read **live over ssh** and grouped by repo; a node that's offline or not yet set up says so — you never look at stale data.
 - **Dispatch anywhere** — pick a remote node's repo and dispatch; the task is created and owned on that node, and you connect / watch / stop it from your console, all relayed over ssh. Remote dispatches get the same instant optimistic loading card as local ones.
+- **One owner, one truth** — every node stores and operates only its own repos, tasks, worktrees, sessions, and manifests. A remote without Switchyard installed is view-only as an SSH host: task and repo actions are refused instead of falling back to controller-owned state.
 - **One-click bootstrap** — click "Install tdsp" on a machine and it's set up over ssh: code plus launcher, ready to use.
 - **State passthrough** — running / ready / cloning / errored each get a status dot; when a Claude session parks on a permission prompt waiting for you, a Claude Code **native hook** flips the card to a **yellow light** that says "your turn" — the same mechanism local and remote.
 
@@ -111,8 +112,10 @@ Every machine runs the same `tdsp`; the controller invokes the one-shot verbs on
 | `tdsp list` | print this machine's tasks + repos as JSON |
 | `tdsp create-local` | open a bare shell task on this machine |
 | `tdsp create` | create a repo task on this machine (driven by the controller) |
+| `tdsp repo-create` / `repo-fetch` / `repo-branches` / `repo-delete` | operate on this machine's own repo catalog (node-control verbs) |
 | `tdsp stop <id>` | stop one of this machine's tasks |
-| `tdsp branches` | list live branches of one of this machine's mirrors (for the controller's dispatch picker) |
+| `tdsp resume` / `cleanup` / `delete-task` | operate on one of this machine's archived tasks |
+| `tdsp doctor legacy [--json]` | read-only audit for controller-owned remote rows and broken ownership references left by older versions |
 | `tdsp install` | set up the global `tdsp` for this machine from its clone |
 | `tdsp update` | update this machine's install: `git pull --ff-only` + `npm install` on the clone behind `~/.task-dispatcher/src`; restart serve to apply |
 

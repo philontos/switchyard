@@ -17,11 +17,17 @@ import { startSession, startShellSession, hasSession, killSession, listSessions 
 import { createLocalTask, createRepoTask, stopTask } from "./task/createtask.js";
 import { cleanupTask, deleteTaskRecord, resumeTask } from "./task/lifecycle.js";
 import { asAgentKind } from "./session/agent.js";
-import { listBranches, removeWorktree } from "./repo/git.js";
-import { buildRepoTaskEnv, repoFindOrCreate } from "./repo/repoenv.js";
+import { removeWorktree } from "./repo/git.js";
+import { buildRepoTaskEnv } from "./repo/repoenv.js";
 import { removeTaskManifest, writeTaskManifest } from "./task/taskmanifest.js";
-import { checkProvider, insertCheckedProvider, listProviders, providerEnv } from "./provider/providers.js";
+import { checkProvider, insertCheckedProvider, providersForList, providerEnv } from "./provider/providers.js";
 import { inspectOwnedCode } from "./codeview/codeview.js";
+import { clearProviderFromOwnedTasks, getOwnedRepo } from "./core/ownership.js";
+import { branchesForOwnedRepo, deleteOwnedRepo, fetchOwnedRepo, registerOwnedRepo, type OwnedRepoEnv } from "./repo/owned.js";
+import { syncReposManifest } from "./repo/manifest.js";
+import { pasteImageIntoOwnedTask } from "./task/paste-service.js";
+import { defaultSources, scanSkills } from "./skills/skills.js";
+import { installPlugin, listAvailable } from "./skills/plugins.js";
 
 // Ensure child processes (tmux/git/claude) find Homebrew binaries regardless of
 // how tdsp was launched — a bare non-interactive ssh PATH otherwise can't resolve
@@ -66,6 +72,20 @@ function findLocalIpInCidr(cidr: string): string | null {
   return ips.find((ip) => ipv4InCidr(ip, cidr)) || null;
 }
 
+async function readStdin(): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+const ownedRepoEnv: OwnedRepoEnv = {
+  db,
+  runner: localRunner,
+  syncRepos: syncReposManifest,
+  removeTaskManifest: (id) => removeTaskManifest(DATA_DIR, id),
+  killSession: (session) => killSession(localRunner, session),
+};
+
 process.exitCode = await runCli(process.argv.slice(2), {
   db,
   out: (s) => process.stdout.write(s + "\n"),
@@ -88,7 +108,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
   },
   // This node's own task liveness, for `tdsp list`. The node is the sole authority
   // for its tmux server + worktrees, so it computes the same three signals the
-  // controller computes for local tasks in GET /api/tasks — green when the session
+  // local HTTP API computes in GET /api/tasks — green when the session
   // is alive, yellow when it's blocked on a permission prompt — and ships them so a
   // remote card lights up identically. One `tmux list-sessions` covers every task
   // (set membership) instead of an exec per task.
@@ -119,10 +139,12 @@ process.exitCode = await runCli(process.argv.slice(2), {
       },
       opts,
     ),
-  // a node dispatching a repo task ON ITSELF: register the repo locally, then run
-  // the shared orchestration with the LOCAL runner. As the owner, it writes the
-  // manifest to its own data dir (no ownership gate needed).
+  // A node dispatches only against a repo id in its own catalog. Paths and repo
+  // metadata never come from the controller.
   createRepo: (spec) => {
+    const repo = getOwnedRepo(db, spec.repo_id);
+    if (!repo?.mirror_path) return Promise.resolve({ ok: false as const, error: "repoNotFound" as const });
+    if (repo.status !== "ready") return Promise.resolve({ ok: false as const, error: "repoNotReady" as const, message: repo.status });
     const provider = spec.provider_id ? db.prepare("SELECT * FROM providers WHERE id=?").get(spec.provider_id) as any : undefined;
     return createRepoTask(
       buildRepoTaskEnv({
@@ -131,7 +153,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
         runner: localRunner,
         writeManifest: (id) => writeTaskManifest(DATA_DIR, db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task),
       }),
-      repoFindOrCreate(db, { mirror: spec.mirror, name: spec.name, git_url: spec.git_url, default_branch: spec.default_branch }),
+      { id: repo.id, name: repo.name, mirror_path: repo.mirror_path },
       {
         baseBranch: spec.base,
         title: spec.title,
@@ -144,6 +166,10 @@ process.exitCode = await runCli(process.argv.slice(2), {
       },
     );
   },
+  repoCreate: (input) => registerOwnedRepo(ownedRepoEnv, input),
+  repoFetch: (id) => fetchOwnedRepo(ownedRepoEnv, id),
+  repoBranches: (id) => branchesForOwnedRepo(ownedRepoEnv, id),
+  repoDelete: (id, force) => deleteOwnedRepo(ownedRepoEnv, id, force),
   inspectCode: (request) => inspectOwnedCode(db, localRunner, request),
   // stop one of THIS node's tasks: kill its session, mark cleaned, re-manifest.
   stop: (id) =>
@@ -197,6 +223,8 @@ process.exitCode = await runCli(process.argv.slice(2), {
       },
       id,
     ),
+  pasteImage: (id, mime, bytes) => pasteImageIntoOwnedTask(db, localRunner, NS, id, mime, bytes),
+  readStdin,
   // set up THIS machine's global tdsp from its clone (point src here + the wrapper)
   install: () => {
     const p = applyInstall(os.homedir(), ROOT);
@@ -223,20 +251,22 @@ process.exitCode = await runCli(process.argv.slice(2), {
       return { ok: false as const, error: String(e?.stderr || e?.message || e).trim() };
     }
   },
-  // live branches for one of this machine's mirrors (git ls-remote on the mirror)
-  branches: async (mirror) => {
-    try {
-      return { ok: true, branches: await listBranches(localRunner, mirror) };
-    } catch (e: any) {
-      return { ok: false, error: String(e?.message || e) };
-    }
-  },
-  providersList: () => listProviders(db),
+  providersList: () => providersForList(db),
   providersTest: (body) => checkProvider(body),
   providersCreate: (body) => insertCheckedProvider(db, body),
   providersDelete: async (id) => {
-    db.prepare("UPDATE tasks SET provider_id=NULL WHERE provider_id=?").run(id);
+    clearProviderFromOwnedTasks(db, id);
     db.prepare("DELETE FROM providers WHERE id=?").run(id);
     return { ok: true as const };
+  },
+  skillsList: () => scanSkills(defaultSources()).map(({ key, name, description, source }) => ({ key, name, description, source })),
+  pluginsList: () => listAvailable(),
+  pluginsInstall: async (pluginId) => {
+    try {
+      await installPlugin(pluginId);
+      return { ok: true as const };
+    } catch (error: any) {
+      return { ok: false as const, error: String(error?.message || error) };
+    }
   },
 });
