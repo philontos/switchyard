@@ -16,7 +16,7 @@ import {
 const pexec = promisify(execFile);
 
 class TestRunner implements Runner {
-  constructor(public kind: "local" | "remote" = "local") {}
+  constructor(public kind: "local" | "ssh" = "local") {}
   dataDir = "/tmp";
   async exec(file: string, args: string[], opts: ExecOpts = {}) {
     const { stdout } = await pexec(file, args, {
@@ -32,11 +32,10 @@ class TestRunner implements Runner {
   async rmrf(target: string) { fs.rmSync(target, { recursive: true, force: true }); }
   async putDir(src: string, dest: string) { fs.cpSync(src, dest, { recursive: true }); }
   async putFile(src: string, dest: string) { fs.copyFileSync(src, dest); }
-  ptySpec(file: string, args: string[]) { return { file, args }; }
 }
 
 const runner = new TestRunner();
-const remoteLikeRunner = new TestRunner("remote");
+const remoteLikeRunner = new TestRunner("ssh");
 
 async function git(cwd: string, ...args: string[]) {
   return (await runner.exec("git", args, { cwd })).trim();
@@ -92,12 +91,13 @@ test("repository view lists the committed structure and reads a text blob", asyn
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
 
-test("remote worktree reader runs as valid node -e code and preserves bytes", async () => {
+test("code inspection refuses a remote runner so the owning node must handle it", async () => {
   const f = await fixture();
   try {
-    const file = await inspectTaskCode(remoteLikeRunner, f.task, { operation: "file", path: "src/app.ts" });
-    assert.equal(file.kind, "file");
-    if (file.kind === "file") assert.equal(file.content, "export const answer = 1;\n");
+    await assert.rejects(
+      () => inspectTaskCode(remoteLikeRunner, f.task, { operation: "file", path: "src/app.ts" }),
+      (error: any) => error?.code === "ownerRequired",
+    );
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
 

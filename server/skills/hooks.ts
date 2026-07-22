@@ -2,14 +2,12 @@
 // .claude/settings.local.json at dispatch. They let a session report when it is
 // blocked on the user (a tool permission prompt → the card's yellow light) and
 // when it resumes — by touching / removing a marker file IN ITS OWN WORKTREE
-// (.claude/waiting). The dispatcher reads that marker's existence back through
-// the Runner (local fs on the controller, `ssh test -e` on a remote), so the
-// exact same mechanism drives the light for the local box and every remote host.
+// (.claude/waiting). The owning node reads that marker locally and includes the
+// boolean in its fleet payload, so no controller probes another node's path.
 //
-// Why a file and not an HTTP ping: the session runs ON its machine, which for a
-// remote task can't reach the dispatcher's localhost. A file the session writes
-// locally and the dispatcher polls over its existing ssh channel needs zero new
-// network plumbing — and the UI is poll-based anyway (no latency lost).
+// Why a file and not an HTTP ping: the session and Switchyard node share the
+// same machine. A local marker needs no callback service, and the node's existing
+// fleet response carries the resulting state to any controller.
 
 /**
  * settings.local.json content for one task, given the worktree's ABSOLUTE path

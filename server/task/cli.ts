@@ -3,20 +3,22 @@
 // both the HTTP server (tdsp serve) and the one-shot CLI verbs. A node is the
 // sole authority for its own tasks; these read/return that local truth.
 import type Database from "better-sqlite3";
-import type { Provider, Task } from "../core/db.js";
+import type { Repo, Task } from "../core/db.js";
+import type { ProviderSummary } from "../provider/providers.js";
 import type { CreateLocalOpts, CreateLocalResult, CreateRepoResult, StopResult } from "./createtask.js";
 import type { LifecycleResult } from "./lifecycle.js";
 import { CODE_VIEW_CAPABILITY, isCodeInspectRequest, type CodeInspectRequest, type CodeInspectResult } from "../codeview/codeview.js";
+import type { OwnedRepoFailure, OwnedRepoInput, OwnedRepoResult } from "../repo/owned.js";
+import type { PasteImageResult } from "./paste-service.js";
+import { legacyOwnershipReport } from "../core/ownership.js";
+import { listOwnedRepos, listOwnedTasks } from "../core/ownership.js";
 export { CODE_VIEW_CAPABILITY } from "../codeview/codeview.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
-// prompt and skill list survive intact). The node registers the repo by `mirror`
-// and dispatches the task on itself.
+// prompt and skill list survive intact). The repo id belongs to the target
+// node's own catalog; paths and credentials never cross the node boundary.
 export interface CreateRepoSpec {
-  mirror: string;
-  name: string;
-  git_url: string;
-  default_branch?: string;
+  repo_id: number;
   base: string;
   title: string;
   prompt?: string | null;
@@ -52,7 +54,8 @@ type DB = Database.Database;
 // spot a node that predates a one-shot CLI verb before offering a broken action.
 export const TASK_LIST_VERSION = 3;
 export const ARCHIVED_TASK_LIFECYCLE_CAPABILITY = "archived-task-lifecycle-v1";
-export const TASK_CAPABILITIES = [ARCHIVED_TASK_LIFECYCLE_CAPABILITY, CODE_VIEW_CAPABILITY] as const;
+export const NODE_CONTROL_CAPABILITY = "node-control-v1";
+export const TASK_CAPABILITIES = [ARCHIVED_TASK_LIFECYCLE_CAPABILITY, CODE_VIEW_CAPABILITY, NODE_CONTROL_CAPABILITY] as const;
 
 // A repo as a node exposes it to controllers — enough to group the node's tasks
 // by repo (name) and to dispatch a new task here using the node's OWN mirror (no
@@ -60,9 +63,21 @@ export const TASK_CAPABILITIES = [ARCHIVED_TASK_LIFECYCLE_CAPABILITY, CODE_VIEW_
 export interface NodeRepo {
   id: number;
   name: string;
-  git_url: string;
   default_branch: string;
-  mirror_path: string;
+  status: string;
+  error: string | null;
+}
+
+function repoForList(repo: Repo | NodeRepo): NodeRepo {
+  return {
+    id: Number(repo.id),
+    name: String(repo.name ?? ""),
+    default_branch: String(repo.default_branch || "main"),
+    status: "status" in repo && typeof repo.status === "string" ? repo.status : "ready",
+    // Raw git errors can contain owner-local paths or credential-bearing URLs.
+    // The status is enough for the controller; detailed diagnostics stay on-node.
+    error: "error" in repo && repo.error ? "Repository operation failed on this node" : null,
+  };
 }
 
 // Per-task liveness a node computes for its OWN tasks — the same three signals the
@@ -78,18 +93,58 @@ export interface TaskLive {
 // in (not computed here) so taskListPayload stays testable without a real tmux/fs —
 // the same dependency-injection seam aggregateNodes uses for its ssh fetch.
 export type TaskLiveness = (tasks: Task[]) => Promise<Map<number, TaskLive>>;
-export interface LiveTask extends Task, TaskLive {}
+export interface NodeTask {
+  id: number;
+  repo_id: number;
+  base_branch: string;
+  work_branch: string;
+  title: string;
+  session: string;
+  status: string;
+  kind: string;
+  cwd: string | null;
+  agent: string;
+  alive?: boolean;
+  hasWorktree?: boolean;
+  waiting?: boolean;
+}
 
 export interface TaskListPayload {
   schema_version: number;
   capabilities: string[];
-  tasks: LiveTask[];
+  tasks: NodeTask[];
   repos: NodeRepo[];
 }
 
 /** The node's own repos, for the cross-node view (group-by-repo + dispatch here). */
 export function reposForList(db: DB): NodeRepo[] {
-  return db.prepare("SELECT id, name, git_url, default_branch, mirror_path FROM repos ORDER BY id").all() as NodeRepo[];
+  return listOwnedRepos(db).map(repoForList);
+}
+
+/**
+ * Cross-node task DTO. Paths, prompts, provider ids and transcript metadata stay
+ * on the owner; a controller receives only what it needs to draw the card,
+ * address the tmux session and send a node-local command.
+ */
+function taskForList(task: Task, live?: Partial<TaskLive>): NodeTask {
+  const hasLive = !!live && ("alive" in live || "hasWorktree" in live || "waiting" in live);
+  return {
+    id: task.id,
+    repo_id: task.repo_id,
+    base_branch: task.base_branch,
+    work_branch: task.work_branch,
+    title: task.title,
+    session: task.session,
+    status: task.status,
+    kind: task.kind,
+    cwd: task.cwd,
+    agent: task.agent,
+    ...(hasLive ? {
+      alive: live?.alive ?? false,
+      hasWorktree: live?.hasWorktree ?? false,
+      waiting: live?.waiting ?? false,
+    } : {}),
+  };
 }
 
 /**
@@ -99,11 +154,11 @@ export function reposForList(db: DB): NodeRepo[] {
  * to not-alive, so a missing/failed probe is honest rather than throwing.
  */
 export async function taskListPayload(db: DB, liveness: TaskLiveness): Promise<TaskListPayload> {
-  const tasks = db.prepare("SELECT * FROM tasks ORDER BY id DESC").all() as Task[];
+  const tasks = listOwnedTasks(db);
   const live = await liveness(tasks);
-  const enriched: LiveTask[] = tasks.map((t) => {
+  const enriched: NodeTask[] = tasks.map((t) => {
     const l = live.get(t.id);
-    return { ...t, alive: l?.alive ?? false, hasWorktree: l?.hasWorktree ?? false, waiting: l?.waiting ?? false };
+    return taskForList(t, l ?? { alive: false, hasWorktree: false, waiting: false });
   });
   return {
     schema_version: TASK_LIST_VERSION,
@@ -129,7 +184,7 @@ export interface NodeTasks<T extends NodeRef = NodeRef> {
   reason?: "unreachable" | "version" | "error"; // why ok=false
   schema_version?: number;
   capabilities?: string[];
-  tasks?: Task[];
+  tasks?: NodeTask[];
   repos?: NodeRepo[];
 }
 
@@ -173,8 +228,14 @@ export async function aggregateNodes<T extends NodeRef>(
         ok: true,
         schema_version: payload.schema_version,
         capabilities,
-        tasks: payload.tasks ?? [],
-        repos: payload.repos ?? [],
+        // Older list payloads exposed the full task row. Re-project at the
+        // controller boundary so those owner-private fields never reach its UI.
+        tasks: (Array.isArray(payload.tasks) ? payload.tasks : [])
+          .map((task) => taskForList(task as unknown as Task, task)),
+        // v1/v2 nodes exposed git_url + mirror_path. Strip those again at the
+        // controller boundary before the aggregate reaches the browser.
+        repos: (Array.isArray(payload.repos) ? payload.repos : [])
+          .map((repo) => repoForList(repo as unknown as Repo)),
       };
     }),
   );
@@ -196,25 +257,31 @@ export interface CliDeps {
   // report THIS node's own task liveness (tmux + worktree probes), for `list`
   liveness: TaskLiveness;
   createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
-  createRepo: (spec: CreateRepoSpec) => Promise<CreateRepoResult>;
+  createRepo: (spec: CreateRepoSpec) => Promise<CreateRepoResult | { ok: false; error: "repoNotFound" | "repoNotReady"; message?: string }>;
+  repoCreate: (input: OwnedRepoInput) => Promise<OwnedRepoResult>;
+  repoFetch: (id: number) => Promise<OwnedRepoResult>;
+  repoBranches: (id: number) => Promise<{ ok: true; branches: string[] } | OwnedRepoFailure>;
+  repoDelete: (id: number, force: boolean) => Promise<OwnedRepoResult>;
   stop: (id: number) => Promise<StopResult>;
   resume: (id: number) => Promise<LifecycleResult>;
   cleanup: (id: number) => Promise<LifecycleResult>;
   deleteTask: (id: number) => Promise<LifecycleResult>;
+  pasteImage: (id: number, mime: string, bytes: Buffer) => Promise<PasteImageResult>;
+  readStdin: () => Promise<Buffer>;
   // Typed, read-only repository/worktree inspection for remote controllers.
   inspectCode: (request: CodeInspectRequest) => Promise<CodeInspectResult>;
-  providersList: () => Provider[];
+  providersList: () => ProviderSummary[];
   providersTest: (body: ProviderInput) => Promise<{ ok: true } | { ok: false; error: string }>;
   providersCreate: (body: ProviderInput) => Promise<{ ok: true; id: number } | { ok: false; error: string }>;
   providersDelete: (id: number) => Promise<{ ok: true }>;
+  skillsList: () => unknown[];
+  pluginsList: () => Promise<unknown[]>;
+  pluginsInstall: (pluginId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   // set up THIS machine's global tdsp from its clone (symlink src + wrapper)
   install: () => { src: string; binPath: string; localBin: string; clone: string };
   // pull the machine's install (the clone behind ~/.task-dispatcher/src) to the
   // latest code and refresh its deps; a running serve picks it up on next start
   update: () => Promise<{ ok: true; clone: string; head: string } | { ok: false; error: string }>;
-  // live branch list for one of this machine's mirrors (so a controller can offer
-  // the node repo's real branches when dispatching here)
-  branches: (mirror: string) => Promise<{ ok: boolean; branches?: string[]; error?: string }>;
 }
 
 export interface ServeOpts {
@@ -288,13 +355,41 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       let spec: CreateRepoSpec;
       try {
         spec = JSON.parse(Buffer.from(argv[1] ?? "", "base64").toString("utf8")) as CreateRepoSpec;
-        if (!spec || typeof spec.mirror !== "string") throw new Error("missing fields");
+        if (!spec || !Number.isInteger(spec.repo_id)) throw new Error("missing fields");
       } catch {
         deps.err("create: expected a base64-encoded JSON spec");
         deps.out(JSON.stringify({ ok: false, error: "invalid spec" }));
         return 1;
       }
       const r = await deps.createRepo(spec);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
+    case "repo-create": {
+      let input: OwnedRepoInput;
+      try {
+        input = JSON.parse(Buffer.from(argv[1] ?? "", "base64").toString("utf8")) as OwnedRepoInput;
+      } catch {
+        deps.out(JSON.stringify({ ok: false, error: "invalid repo spec" }));
+        return 1;
+      }
+      const r = await deps.repoCreate(input);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
+    case "repo-fetch":
+    case "repo-branches":
+    case "repo-delete": {
+      const id = Number(argv[1]);
+      if (!Number.isInteger(id)) {
+        deps.out(JSON.stringify({ ok: false, error: "invalid repo id" }));
+        return 1;
+      }
+      const r = cmd === "repo-fetch"
+        ? await deps.repoFetch(id)
+        : cmd === "repo-branches"
+          ? await deps.repoBranches(id)
+          : await deps.repoDelete(id, argv.includes("--force"));
       deps.out(JSON.stringify(r));
       return r.ok ? 0 : 1;
     }
@@ -335,6 +430,25 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(r));
       return 0;
     }
+    case "skills-list":
+      deps.out(JSON.stringify({ ok: true, skills: deps.skillsList() }));
+      return 0;
+    case "plugins-list":
+      deps.out(JSON.stringify({ ok: true, plugins: await deps.pluginsList() }));
+      return 0;
+    case "plugins-install": {
+      let pluginId = "";
+      try {
+        pluginId = String(JSON.parse(Buffer.from(argv[1] ?? "", "base64").toString("utf8"))?.pluginId || "");
+      } catch {}
+      if (!pluginId) {
+        deps.out(JSON.stringify({ ok: false, error: "pluginId required" }));
+        return 1;
+      }
+      const r = await deps.pluginsInstall(pluginId);
+      deps.out(JSON.stringify(r));
+      return r.ok ? 0 : 1;
+    }
     case "stop": {
       const id = Number(argv[1]);
       if (!Number.isInteger(id)) {
@@ -358,15 +472,33 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(r));
       return r.ok ? 0 : 1;
     }
-    case "branches": {
-      const mirror = argv[1];
-      if (!mirror) {
-        deps.out(JSON.stringify({ ok: false, error: "branches: a mirror path is required" }));
+    case "paste-image": {
+      const id = Number(argv[1]);
+      const mime = String(argv[2] || "");
+      if (!Number.isInteger(id) || !mime) {
+        deps.out(JSON.stringify({ ok: false, error: "paste-image requires a task id and MIME type" }));
         return 1;
       }
-      const r = await deps.branches(mirror);
+      const r = await deps.pasteImage(id, mime, await deps.readStdin());
       deps.out(JSON.stringify(r));
       return r.ok ? 0 : 1;
+    }
+    case "doctor": {
+      if (argv[1] !== "legacy") {
+        deps.err("Usage: tdsp doctor legacy [--json]");
+        return 1;
+      }
+      const report = legacyOwnershipReport(deps.db);
+      if (argv.includes("--json")) deps.out(JSON.stringify(report));
+      else deps.out(
+        `Legacy ownership audit:\n` +
+          `  remote repos      ${report.remote_repos.length}\n` +
+          `  remote tasks      ${report.remote_tasks.length}\n` +
+          `  remote data paths ${report.remote_data_dirs.length}\n` +
+          `  orphan repos      ${report.orphan_repos.length}\n` +
+          `  orphan tasks      ${report.orphan_tasks.length}`,
+      );
+      return 0;
     }
     case "install": {
       const r = deps.install();
@@ -382,14 +514,18 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     case "update": {
       const r = await deps.update();
       if (!r.ok) {
-        deps.err(`update failed: ${r.error}`);
+        if (argv.includes("--json")) deps.out(JSON.stringify(r));
+        else deps.err(`update failed: ${r.error}`);
         return 1;
       }
-      deps.out(`tdsp updated: ${r.clone}\n  now at ${r.head}\nrestart the console to pick it up (re-run \`tdsp serve\`)`);
+      // The clone path is useful to the person running this node directly, but
+      // is not part of the cross-node update result consumed by a controller.
+      if (argv.includes("--json")) deps.out(JSON.stringify({ ok: true, head: r.head }));
+      else deps.out(`tdsp updated: ${r.clone}\n  now at ${r.head}\nrestart the console to pick it up (re-run \`tdsp serve\`)`);
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve|list|inspect-code|create-local|create|stop|resume|cleanup|delete-task|branches|providers-list|providers-test|providers-create|providers-delete|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|skills-list|plugins-list|plugins-install|doctor|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

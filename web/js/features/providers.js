@@ -13,6 +13,7 @@ const LS_KEY = "tdsp.providerId";   // remember the last-picked backend across o
 let providers = [];                  // cached list (id-DESC, from the server)
 let validated = false;               // green light: the current panel inputs passed the check
 let targetHostId = null;             // null = this controller; number = remote node
+let targetVersion = 0;                // invalidates responses from a previously-opened node modal
 
 function endpoint(path = "") {
   return targetHostId == null ? `/api/providers${path}` : `/api/nodes/${targetHostId}/providers${path}`;
@@ -24,6 +25,7 @@ function storageKey() {
 
 export function setProviderTarget(hostId) {
   targetHostId = hostId == null ? null : Number(hostId);
+  targetVersion++;
   providers = [];
   setValidated(false);
   paintSelect();
@@ -106,13 +108,17 @@ function panelBody() {
 
 // format + reachability probe (no save). Green unlocks the save button.
 export async function testProvider() {
+  const version = targetVersion;
+  const url = endpoint("/test");
   setStatus(t("provider.testing"), "testing");
   $("pv-test").disabled = true;
   try {
-    await api(endpoint("/test"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(panelBody()) });
+    await api(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(panelBody()) });
+    if (version !== targetVersion) return;
     setStatus(t("provider.reachable"), "ok");
     setValidated(true);
   } catch (e) {
+    if (version !== targetVersion) return;
     setStatus(e.message, "bad");
     setValidated(false);
   } finally {
@@ -122,8 +128,11 @@ export async function testProvider() {
 
 export async function addProvider() {
   if (!validated) return;   // the button is disabled, but keep the invariant explicit
+  const version = targetVersion;
+  const url = endpoint();
   try {
-    await api(endpoint(), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(panelBody()) });
+    await api(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(panelBody()) });
+    if (version !== targetVersion) return;
     await refreshProviders();
     const newest = providers[0];   // id-DESC → the one we just added
     if (newest) { Selects["t-provider"].set(newest.id); onProviderChange(newest.id); }
@@ -136,15 +145,21 @@ export async function addProvider() {
 }
 
 export async function delProvider(id) {
+  const version = targetVersion;
+  const url = endpoint(`/${id}`);
   try {
-    await api(endpoint(`/${id}`), { method: "DELETE" });
+    await api(url, { method: "DELETE" });
+    if (version !== targetVersion) return;
     await refreshProviders();
   } catch (e) { toast(e.message, "error"); }
 }
 
 // fetch + repaint both the picker and the manage list
 export async function refreshProviders() {
-  providers = await api(endpoint()).catch(() => []);
+  const version = targetVersion;
+  const next = await api(endpoint()).catch(() => []);
+  if (version !== targetVersion) return;
+  providers = next;
   paintSelect();
   renderList();
 }

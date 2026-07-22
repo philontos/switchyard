@@ -2,6 +2,7 @@
 // an in-memory sqlite, like schema.ts). The express routes in index.ts wrap
 // these and map the result to an HTTP status.
 import type Database from "better-sqlite3";
+import { getOwnedTask } from "../core/ownership.js";
 
 type DB = Database.Database;
 
@@ -15,7 +16,7 @@ export type RenameResult = { ok: true; title: string } | { error: "empty" | "not
 export function renameTask(db: DB, id: number, rawTitle: unknown): RenameResult {
   const title = String(rawTitle ?? "").trim();
   if (!title) return { error: "empty" };
-  if (!db.prepare("SELECT id FROM tasks WHERE id=?").get(id)) return { error: "notFound" };
+  if (!getOwnedTask(db, id)) return { error: "notFound" };
   db.prepare("UPDATE tasks SET title=? WHERE id=?").run(title, id);
   return { ok: true, title };
 }

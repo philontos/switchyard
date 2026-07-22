@@ -9,8 +9,9 @@ const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 function seed() {
   const db = new Database(":memory:");
   initSchema(db, opts);
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
   db.prepare(
-    "INSERT INTO repos (id,name,git_url,mirror_path,status) VALUES (1,'repo','git@example/repo','/mirror/repo.git','ready')",
+    "INSERT INTO repos (id,host_id,name,git_url,mirror_path,status) VALUES (1,1,'repo','git@example/repo','/mirror/repo.git','ready')",
   ).run();
   db.prepare(
     "INSERT INTO tasks (id,repo_id,base_branch,work_branch,title,worktree_path,session,status) " +
@@ -93,4 +94,22 @@ test("deleteTaskRecord refuses a retained worktree, then deletes after cleanup",
   assert.deepEqual(deleted, { ok: true });
   assert.equal(db.prepare("SELECT id FROM tasks WHERE id=7").get(), undefined);
   assert.deepEqual(manifests, [7]);
+});
+
+test("deleteTaskRecord leaves historical remote rows and manifests untouched", async () => {
+  const db = seed();
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (2,'B','dev@b','ssh','online')").run();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,mirror_path,status) VALUES (2,2,'remote','git@example/remote','/b/mirror','ready')").run();
+  db.prepare(
+    "INSERT INTO tasks (id,repo_id,base_branch,work_branch,title,worktree_path,session,status) " +
+      "VALUES (8,2,'main','feat/8','remote','/b/wt/8','tdsp-b-8','cleaned')",
+  ).run();
+  const removed: number[] = [];
+  const result = await deleteTaskRecord(
+    { db, exists: async () => false, removeManifest: (id) => { removed.push(id); } },
+    8,
+  );
+  assert.deepEqual(result, { ok: false, error: "notFound" });
+  assert.ok(db.prepare("SELECT id FROM tasks WHERE id=8").get());
+  assert.deepEqual(removed, []);
 });

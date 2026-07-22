@@ -3,8 +3,8 @@
 // land where server/skills/skills.ts scans them — the dispatcher's isolated
 // CLAUDE_CONFIG_DIR under ~/.task-dispatcher, so we never touch the user's
 // ~/.claude (which the dispatcher no longer scans anyway). All of this runs ON
-// THE CONTROLLER (not via a per-task Runner) — installs are a controller-side
-// operation.
+// THE CURRENT NODE (not via a per-task Runner). A controller targeting another
+// node invokes that node's tdsp verb; installation never writes across machines.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

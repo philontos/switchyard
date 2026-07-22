@@ -41,6 +41,7 @@ tmux 会话被误杀、主机重启或任务归档也不等于现场丢了：只
 
 - **舰队视图** —— 每个节点的仓库和任务经 ssh **现场读取**、按仓库分组；掉线或未安装的节点如实标注，绝不给你看过期数据。
 - **派发到任何地方** —— 选中远程节点的仓库直接派；任务在那个节点上创建并归它所有，你在控制台连接/围观/停止，全部经 ssh 转达。远程派发同样有即时的乐观加载卡片，和本机手感一致。
+- **一个节点，一份真相** —— 每个节点只保存并操作自己的仓库、任务、worktree、会话和 manifest。远端未安装 Switchyard 时只是一条 SSH 主机记录；仓库与任务操作会明确拒绝，不再降级成由控制端代管。
 - **一键装机** —— 控制台里点「安装 tdsp」，经 ssh 把代码和启动器装到远程机器上，装完即用。
 - **状态直通** —— running / ready / cloning / errored 各有状态灯；Claude 停在权限确认上等你时，Claude Code 的**原生 hook** 把卡片点成**黄灯**「该你了」——本机远程同一套机制。
 
@@ -111,8 +112,10 @@ task-dispatcher on http://10.10.0.3:4500
 | `tdsp list` | 以 JSON 打印本机任务 + 仓库 |
 | `tdsp create-local` | 在本机开一个裸 shell 任务 |
 | `tdsp create` | 在本机创建仓库任务（由控制端驱动） |
+| `tdsp repo-create` / `repo-fetch` / `repo-branches` / `repo-delete` | 操作本机自己的仓库目录（节点控制命令） |
 | `tdsp stop <id>` | 停止本机的一个任务 |
-| `tdsp branches` | 列出本机某个镜像的实时分支（供控制端派发时选择） |
+| `tdsp resume` / `cleanup` / `delete-task` | 操作本机自己的归档任务 |
+| `tdsp doctor legacy [--json]` | 只读审计旧版本在控制端留下的远端归属记录与失效归属引用 |
 | `tdsp install` | 用本机这份 clone 装好全局 `tdsp` |
 | `tdsp update` | 更新本机安装：对 `~/.task-dispatcher/src` 指向的 clone 执行 `git pull --ff-only` + `npm install`；重启 serve 生效 |
 

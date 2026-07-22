@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cancelCopyMode, ensureSessionOptions, pasteText, pasteSubmit, killSession, startSession, hasSession } from "./tmux.ts";
+import { cancelCopyMode, ensureSessionOptions, pasteText, pasteSubmit, killSession, startSession, startShellSession, hasSession } from "./tmux.ts";
 import type { Runner } from "../fleet/runner.ts";
 
 // Minimal Runner double that records every exec() call. The other interface
@@ -20,10 +20,17 @@ function fakeRunner(exec?: Runner["exec"]) {
     async exists() { return false; },
     async rmrf() {},
     async putDir() {},
-    ptySpec(file: string, args: string[]) { return { file, args }; },
   } as unknown as Runner;
   return { runner, calls };
 }
+
+test("session creation refuses a remote command runner", async () => {
+  const { runner, calls } = fakeRunner();
+  (runner as any).kind = "ssh";
+  await assert.rejects(() => startSession(runner, "tdsp-1-x", "/wt"), /node that owns/);
+  await assert.rejects(() => startShellSession(runner, "tdsp-2-shell", "/tmp"), /node that owns/);
+  assert.deepEqual(calls, []);
+});
 
 test("cancelCopyMode sends the copy-mode cancel command, never a literal key", async () => {
   const { runner, calls } = fakeRunner();
@@ -237,7 +244,6 @@ test("startSession(agent='kimi') falls back to ~/.kimi-code/bin/kimi when kimi i
     async exists() { return false; },
     async rmrf() {},
     async putDir() {},
-    ptySpec(file: string, args: string[]) { return { file, args }; },
   } as unknown as Runner;
   await startSession(runner, "tdsp-1-x", "/wt", null, { agent: "kimi" });
   assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [

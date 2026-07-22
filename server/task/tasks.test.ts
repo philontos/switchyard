@@ -10,6 +10,8 @@ const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 function seed() {
   const db = new Database(":memory:");
   initSchema(db, opts);
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,status) VALUES (1,1,'repo','git@example/repo','ready')").run();
   db.prepare(
     "INSERT INTO tasks (repo_id, base_branch, work_branch, title, worktree_path, session) VALUES (1,'m','feat/1-old','old','/wt/x','tdsp-1-r-old')",
   ).run();
@@ -49,4 +51,16 @@ test("renameTask rejects an empty/whitespace title and leaves the row unchanged"
 test("renameTask reports notFound for a missing task id", () => {
   const db = seed();
   assert.deepEqual(renameTask(db, 999, "whatever"), { error: "notFound" });
+});
+
+test("renameTask cannot mutate a historical task owned by another node", () => {
+  const db = seed();
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (2,'B','dev@b','ssh','online')").run();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,status) VALUES (2,2,'remote','git@example/remote','ready')").run();
+  db.prepare(
+    "INSERT INTO tasks (id,repo_id,base_branch,work_branch,title,worktree_path,session) " +
+      "VALUES (2,2,'main','feat/2','remote title','/b/wt','tdsp-b-2')",
+  ).run();
+  assert.deepEqual(renameTask(db, 2, "changed by A"), { error: "notFound" });
+  assert.equal((db.prepare("SELECT title FROM tasks WHERE id=2").get() as { title: string }).title, "remote title");
 });

@@ -12,6 +12,7 @@ import { readTaskManifests, adoptTaskManifests } from "./task/taskmanifest.js";
 import { syncTaskManifest } from "./http/context.js";
 import { createApp } from "./http/app.js";
 import { attachWs } from "./http/ws.js";
+import { listOwnedTasks } from "./core/ownership.js";
 
 // ensure child processes (git/tmux/glab/pty) find Homebrew/usr-local binaries
 // regardless of how the server was launched (a stripped PATH otherwise breaks
@@ -34,7 +35,7 @@ syncReposManifest();                // bootstrap repos.json from the current cat
 // tasks present locally), then backfill manifests for every task we own so the
 // on-disk catalog mirrors the table.
 adoptTaskManifests(db, readTaskManifests(DATA_DIR));
-for (const { id } of db.prepare("SELECT id FROM tasks").all() as { id: number }[]) syncTaskManifest(id);
+for (const { id } of listOwnedTasks(db)) syncTaskManifest(id);
 
 const PORT = Number(process.env.PORT || 4500);
 // Bind loopback by default — the web terminal is a live shell, so don't expose

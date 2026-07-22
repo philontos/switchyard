@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
-import { parsePreviewHost, sanitizePreviewHeaders, rewriteLocation, createPreviewMiddleware, handlePreviewUpgrade, tcpProbe, createForwardRegistry } from "./preview.js";
+import { parsePreviewHost, sanitizePreviewHeaders, rewriteLocation, createPreviewMiddleware, handlePreviewUpgrade, tcpProbe } from "./preview.js";
 
 // parsePreviewHost is the gate: it both classifies a request as a preview AND
 // pins it to one (task, port). Anything it doesn't recognize must fall through
@@ -223,43 +223,4 @@ test("tcpProbe: true when a port is listening, false when it isn't", async () =>
   assert.equal(await tcpProbe("127.0.0.1", port, 1000), true);
   await new Promise<void>((r) => srv.close(() => r()));
   assert.equal(await tcpProbe("127.0.0.1", port, 1000), false);
-});
-
-// --- ssh -L forward registry: at most one forward per (host, remotePort),
-// reused across requests, torn down after idle. spawn is injected. ---
-
-test("forward registry: spawns once per (host,port) and reuses the local port", async () => {
-  let spawns = 0;
-  const reg = createForwardRegistry(async (_t, remotePort) => { spawns++; return { localPort: 40000 + remotePort, close() {} }; }, 10000);
-  const a = await reg.acquire({ id: 1, target: "h" }, 5173);
-  const b = await reg.acquire({ id: 1, target: "h" }, 5173);
-  assert.equal(a, 45173);
-  assert.equal(b, 45173);
-  assert.equal(spawns, 1);
-});
-
-test("forward registry: distinct (host,port) keys each get their own forward", async () => {
-  let spawns = 0;
-  const reg = createForwardRegistry(async () => { spawns++; return { localPort: 40000 + spawns, close() {} }; }, 10000);
-  await reg.acquire({ id: 1, target: "h" }, 5173);
-  await reg.acquire({ id: 2, target: "h2" }, 5173); // different host
-  await reg.acquire({ id: 1, target: "h" }, 3000);  // different port
-  assert.equal(spawns, 3);
-});
-
-test("forward registry: tears the forward down after idle", async () => {
-  let closed = false;
-  const reg = createForwardRegistry(async () => ({ localPort: 41000, close() { closed = true; } }), 20);
-  await reg.acquire({ id: 1, target: "h" }, 5173);
-  await new Promise((r) => setTimeout(r, 70));
-  assert.equal(closed, true);
-});
-
-test("forward registry: a failed spawn isn't cached (next acquire retries)", async () => {
-  let attempts = 0;
-  const reg = createForwardRegistry(async () => { attempts++; if (attempts === 1) throw new Error("ssh down"); return { localPort: 42000, close() {} }; }, 10000);
-  await assert.rejects(() => reg.acquire({ id: 1, target: "h" }, 5173));
-  const p = await reg.acquire({ id: 1, target: "h" }, 5173); // retries, succeeds
-  assert.equal(p, 42000);
-  assert.equal(attempts, 2);
 });

@@ -1,8 +1,8 @@
 // Per-task manifest: <dataDir>/tasks/<id>/task.json on the machine the task runs
 // on. THIS is the durable, edge-resident truth — co-located with the tmux session
-// and worktree it describes, so a node owns its own tasks and any controller that
-// reaches the machine (or the machine itself, sitting down later) can reconstruct
-// the catalog and adopt a wiped/empty DB from what's actually on disk.
+// and worktree it describes, so a node can reconstruct its own catalog and adopt
+// a wiped/empty DB from what's actually on its disk. Controllers never adopt a
+// remote node's manifest.
 //
 // Like manifest.ts (repos.json) and tasks.ts, the file-shape functions are pure
 // and the adopt helper takes a DB handle, so everything is testable against an
@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import type { Task } from "../core/db.js";
+import { getOwnedRepo, localHostId } from "../core/ownership.js";
 
 type DB = Database.Database;
 
@@ -78,13 +79,28 @@ const TASK_COLS = [
  */
 export function adoptTaskManifests(db: DB, manifests: TaskManifest[]): number {
   const have = new Set((db.prepare("SELECT id FROM tasks").all() as { id: number }[]).map((r) => r.id));
+  const ownerId = localHostId(db);
   const cols = TASK_COLS.join(", ");
   const placeholders = TASK_COLS.map(() => "?").join(", ");
   const insert = db.prepare(`INSERT INTO tasks (${cols}) VALUES (${placeholders})`);
   let adopted = 0;
   for (const m of manifests) {
-    const t = m.task as unknown as Record<string, unknown>;
+    // Never rewrite the read manifest object while interpreting legacy defaults.
+    const t = { ...(m.task as unknown as Record<string, unknown>) };
     if (typeof t?.id !== "number" || have.has(t.id)) continue;
+    const kind = t.kind == null ? "repo" : String(t.kind);
+    if (kind === "local") {
+      // A legacy local manifest without host_id is still local; a manifest that
+      // explicitly names another host is controller-owned remote residue and is
+      // intentionally left on disk for the legacy auditor/migration tooling.
+      if (ownerId == null || (t.host_id != null && Number(t.host_id) !== ownerId)) continue;
+      if (t.host_id == null) t.host_id = ownerId;
+    } else {
+      // Repo manifests are adoptable only when the referenced repo is already in
+      // this node's own catalog. A remote controller's repo row is never enough.
+      const repoId = Number(t.repo_id);
+      if (!Number.isInteger(repoId) || !getOwnedRepo(db, repoId)) continue;
+    }
     insert.run(...TASK_COLS.map((c) => {
       if (c === "agent" && t[c] == null) return "claude";
       return (t[c] ?? null) as unknown;

@@ -10,6 +10,7 @@ import { skillsLine } from "../skills/skills.js";
 import { agentCaps, type AgentKind } from "../session/agent.js";
 import type Database from "better-sqlite3";
 import type { Task } from "../core/db.js";
+import { getOwnedTask } from "../core/ownership.js";
 
 type DB = Database.Database;
 
@@ -93,7 +94,7 @@ export type StopResult = { ok: true } | { ok: false; error: "notFound" };
  * kept — same as the existing archive action.
  */
 export async function stopTask(env: StopTaskEnv, id: number): Promise<StopResult> {
-  const task = env.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task | undefined;
+  const task = getOwnedTask(env.db, id);
   if (!task) return { ok: false, error: "notFound" };
   await env.killSession(task.session);
   env.db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(id);
@@ -120,10 +121,8 @@ export interface RepoRef {
 export interface RepoTaskEnv {
   db: DB;
   ns: string;
-  // Persist the task's durable record. Injected (not a hardcoded local write) so
-  // the caller owns the policy: the CLI verb writes to its own data dir (it IS the
-  // owner); the HTTP route passes the ownership-gated syncTaskManifest so a task
-  // orchestrated on a remote machine isn't manifested on the controller.
+  // Persist the task's durable record. Both the CLI verb and HTTP route execute
+  // on the owner and inject their node-local manifest writer.
   writeManifest(id: number): void | Promise<void>;
   // Preflight the requested skill keys against the owner's sources.
   resolveSkills(keys: string[]): { found: SkillRef[]; missing: string[] };

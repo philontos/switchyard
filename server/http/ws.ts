@@ -10,10 +10,11 @@ import { attachCommand } from "../session/attach.js";
 import { parsePreviewHost, handlePreviewUpgrade } from "../preview/preview.js";
 import { resolvePreviewUpstream } from "./preview.js";
 import { db, Task, Host } from "../core/db.js";
-import { runnerFor, localRunner, type Runner } from "../fleet/runner.js";
+import { transportRunnerFor, localRunner, type CommandRunner } from "../fleet/runner.js";
 import { cancelCopyMode, ensureSessionOptions, pasteSubmit } from "../session/tmux.js";
 import { tr, langFromQuery } from "../core/i18n.js";
-import { taskHost, getHost, SSH_BIN, MOSH_BIN, TMUX_BIN, SESSION_RE } from "./context.js";
+import { getHost, SSH_BIN, MOSH_BIN, TMUX_BIN, SESSION_RE } from "./context.js";
+import { listOwnedTasks } from "../core/ownership.js";
 
 const wss = new WebSocketServer({ noServer: true });
 
@@ -26,12 +27,13 @@ wss.on("connection", async (ws, req) => {
   // lives: local tmux, or ssh/mosh into the remote and attach there. node-pty
   // spawns the client locally; the shell/tmux/files all live ON that machine.
   if (!session || !SESSION_RE.test(session)) { ws.close(1008, "invalid target"); return; }
-  const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(session) as Task | undefined;
-  // A fleet session lives on another node and isn't in THIS controller's db. The
+  const task = listOwnedTasks(db).find((candidate) => candidate.session === session) as Task | undefined;
+  // A fleet session lives on another node and isn't in THIS node's db. The
   // client (rendering it under that node) passes ?host=<id>, so we can still
   // ssh-attach to it. The host must be a known remote — never trust the hint to
-  // reach an arbitrary box. Falls back to the task's own host for local sessions.
-  let host = task ? taskHost(task) : undefined;
+  // reach an arbitrary box. Any task found in this DB query is owner-local and
+  // therefore never resolves a remote transport from historical host metadata.
+  let host: Host | undefined;
   if (!task) {
     const hintId = Number(url.searchParams.get("host"));
     if (Number.isInteger(hintId)) host = getHost.get(hintId) as Host | undefined;
@@ -39,7 +41,7 @@ wss.on("connection", async (ws, req) => {
   const { file, args, label } = attachCommand(host, session, { ssh: SSH_BIN, mosh: MOSH_BIN, tmux: TMUX_BIN });
   // the session whose copy/scroll mode we cancel on attach, so this client lands
   // on the live prompt no matter what mode a previous client left the pane in.
-  const cancelRunner: Runner = host ? runnerFor(host) : localRunner;
+  const cancelRunner: CommandRunner = host ? transportRunnerFor(host) : localRunner;
   const cancelSession = session;
 
   // multiple clients can attach independently (tmux/ssh both handle this)

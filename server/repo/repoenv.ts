@@ -1,10 +1,7 @@
 // Wire createRepoTask's seams (prepare worktree contents, start session, clean up)
-// to a concrete machine's Runner + skill library. Shared by the HTTP route (A
-// dispatching, with the target host's Runner) AND the `tdsp create` verb (a node
-// dispatching on itself, with its local Runner) — one orchestration, two front
-// doors. The manifest-write policy is injected so each caller decides where the
-// durable record lands (the owning node writes locally; the controller's route
-// passes its ownership-gated writer).
+// to the owning node's local Runner + skill library. Both the node's HTTP route
+// and its `tdsp create` verb use this builder locally; a controller reaches it by
+// invoking the target node's verb, never by supplying a RemoteRunner.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,34 +11,14 @@ import { agentCaps } from "../session/agent.js";
 import { hookSettingsJson } from "../skills/hooks.js";
 import { resolveSkills, defaultSources } from "../skills/skills.js";
 import type { Runner } from "../fleet/runner.js";
-import type { RepoTaskEnv, RepoRef } from "../task/createtask.js";
+import type { RepoTaskEnv } from "../task/createtask.js";
 import type Database from "better-sqlite3";
 
 type DB = Database.Database;
 
-/**
- * Register a repo ON this node, keyed by its mirror path — the repo-registration
- * sink. When A dispatches a repo task to a node, the node records the repo in its
- * OWN db (owned by its local host) so it can own and display the task. Idempotent:
- * a repeated dispatch of the same repo (same mirror) reuses the one row. The mirror
- * itself already lives on the node (A creates it at repo-registration time).
- */
-export function repoFindOrCreate(db: DB, spec: { mirror: string; name: string; git_url: string; default_branch?: string }): RepoRef {
-  const existing = db.prepare("SELECT id, name, mirror_path FROM repos WHERE mirror_path = ?").get(spec.mirror) as RepoRef | undefined;
-  if (existing) {
-    if (spec.default_branch) db.prepare("UPDATE repos SET default_branch=? WHERE id=?").run(spec.default_branch, existing.id);
-    return existing;
-  }
-  const localHost = db.prepare("SELECT id FROM hosts WHERE kind='local'").get() as { id: number } | undefined;
-  const info = db
-    .prepare("INSERT INTO repos (host_id, name, git_url, default_branch, mirror_path, status) VALUES (?,?,?,?,?,'ready')")
-    .run(localHost?.id ?? null, spec.name, spec.git_url, spec.default_branch || "main", spec.mirror);
-  return { id: Number(info.lastInsertRowid), name: spec.name, mirror_path: spec.mirror };
-}
-
 // The worktree-setup step bound to a machine's Runner: create the worktree, deliver
 // each skill into it, inject the per-task hooks, and keep both out of git status.
-// `ns` scopes the local temp path so two controllers sharing a box don't collide.
+// `ns` scopes the local temp path so two Switchyard instances sharing a box do not collide.
 function setupWorktreeOn(runner: Runner, ns: string): RepoTaskEnv["setupWorktree"] {
   return async ({ id, mirror, worktree, workBranch, baseBranch, skills, agent }) => {
     // create the worktree from the base branch's latest origin tip (falls back to
@@ -70,8 +47,8 @@ function setupWorktreeOn(runner: Runner, ns: string): RepoTaskEnv["setupWorktree
     if (caps.injectHooks) {
       // inject per-task hooks so the session reports when it's blocked on a
       // permission prompt (yellow light): the hook touches/removes <wt>/.claude/waiting,
-      // which the dispatcher reads back via runner.exists — same on the local box and
-      // on remotes. Deliver settings.local.json through putDir (overlays the .claude
+      // which this owning node reads back locally. Deliver settings.local.json
+      // through putDir (overlays the .claude
       // skills/ already there); keep both injected paths out of the repo's git status.
       const hooksTmp = path.join(os.tmpdir(), `tdsp-hooks-${ns}-${id}`, ".claude");
       fs.mkdirSync(hooksTmp, { recursive: true });
@@ -91,8 +68,7 @@ export interface RepoEnvOpts {
   db: DB;
   ns: string;
   runner: Runner;
-  /** Persist the task's durable record (owner writes locally; the HTTP route
-   *  passes its ownership-gated writer). */
+  /** Persist the task's durable record on the owning node. */
   writeManifest: (id: number) => void | Promise<void>;
 }
 
@@ -100,6 +76,9 @@ export interface RepoEnvOpts {
  *  skill library. Skills resolve from THIS machine's sources — a node injects its
  *  own curated set, which is the edge-autonomy intent. */
 export function buildRepoTaskEnv(opts: RepoEnvOpts): RepoTaskEnv {
+  if (opts.runner.kind !== "local") {
+    throw new Error("Repository task environments must be built on the owning node");
+  }
   return {
     db: opts.db,
     ns: opts.ns,

@@ -4,24 +4,37 @@
 // (server scans ~/.task-dispatcher, never the user's ~/.claude).
 import { $, api } from "../core/dom.js";
 import { toast, showLoading, hideLoading } from "../core/feedback.js";
+import { state } from "../core/state.js";
 
 let available = [];   // [{pluginId,name,description,marketplace,installed}]
+let targetHostId = null;
+let loadVersion = 0;
+
+function endpoint(path) {
+  const host = state.hostsById[targetHostId];
+  return host && host.kind !== "local" ? `/api/nodes/${host.id}/plugins${path}` : `/api/plugins${path}`;
+}
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 export function openSkillsModal() {
+  targetHostId = state.activeHostId;
   $("skills-modal").style.display = "flex";
   $("sk-filter").value = "";
   loadAvailablePlugins();
 }
-export function closeSkillsModal() { $("skills-modal").style.display = "none"; }
+export function closeSkillsModal() { loadVersion++; $("skills-modal").style.display = "none"; }
 
 async function loadAvailablePlugins() {
+  const version = ++loadVersion;
   $("sk-list").innerHTML = `<div class="pg-state"><span class="pg-spin"></span>${t("skill.loading")}</div>`;
   try {
-    available = await api("/api/plugins/available");
+    const next = await api(endpoint("/available"));
+    if (version !== loadVersion) return;
+    available = next;
     renderList("");
   } catch (e) {
+    if (version !== loadVersion) return;
     $("sk-list").innerHTML = `<div class="pg-state">${t("skill.loadFailed")}</div>`;
   }
 }
@@ -47,7 +60,7 @@ export async function installPluginUI(i) {
   if (!p) return;
   showLoading(t("skill.installing"));
   try {
-    await api("/api/plugins/install", {
+    await api(endpoint("/install"), {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ pluginId: p.pluginId }),
     });

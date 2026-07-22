@@ -45,22 +45,30 @@ test("missing root is skipped, not thrown", () => {
 });
 
 test("defaultSources scans the dispatcher-local plugin cache (install target)", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "home-"));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "data-"));
   // a skill as it would land after a dispatcher-local `claude plugin install`
-  mkSkill(path.join(home, ".task-dispatcher", "claude-config", "plugins", "cache", "claude-plugins-official", "demo", "1.0.0", "skills"),
+  mkSkill(path.join(dataDir, "claude-config", "plugins", "cache", "claude-plugins-official", "demo", "1.0.0", "skills"),
     "demoskill", "from a dispatcher-local install");
-  const e = scanSkills(defaultSources(home)).find(s => s.name === "demoskill");
+  const e = scanSkills(defaultSources(dataDir, dataDir)).find(s => s.name === "demoskill");
   assert.ok(e, "demoskill discovered");
   assert.equal(e.source, "dispatcher");
 });
 
 test("defaultSources does NOT scan the user's ~/.claude (only the private library)", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "home-"));
+  const dataDir = path.join(home, ".task-dispatcher", "instance");
   mkSkill(path.join(home, ".claude", "skills"), "personal", "user-level skill");        // claude finds this natively
-  mkSkill(path.join(home, ".task-dispatcher", "skills"), "private", "dispatcher lib");   // only this is scanned
-  const names = scanSkills(defaultSources(home)).map(s => s.name);
+  mkSkill(path.join(dataDir, "skills"), "private", "dispatcher lib");   // only this is scanned
+  const names = scanSkills(defaultSources(dataDir, path.join(home, ".task-dispatcher"))).map(s => s.name);
   assert.ok(names.includes("private"), "private library skill is scanned");
   assert.ok(!names.includes("personal"), "~/.claude skills are NOT scanned");
+});
+
+test("defaultSources retains the old un-namespaced skill root as a fallback", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "base-"));
+  const dataDir = path.join(base, "instance");
+  mkSkill(path.join(base, "skills"), "legacy", "legacy shared skill");
+  assert.ok(scanSkills(defaultSources(dataDir, base)).some((skill) => skill.name === "legacy"));
 });
 
 test("skillsLine lists names, empty when none", () => {

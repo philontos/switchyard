@@ -17,7 +17,6 @@ function fakeRunner() {
     exec: async (file: string, args: string[]) => { calls.push({ file, args }); return ""; },
     async mkdirp() {}, async exists() { return false; }, async rmrf() {},
     async putDir() {}, async putFile() {},
-    ptySpec(file: string, args: string[]) { return { file, args }; },
   } as unknown as Runner;
   return { runner, calls };
 }

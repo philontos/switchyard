@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
--- remote machines reachable over ssh/mosh; a pure terminal entry (L1),
--- no git/worktree involved — everything runs ON the remote host.
+-- registered machines reachable over ssh/mosh. Business operations are sent to
+-- the target's Switchyard command surface; paths/tasks/repos stay in its own DB.
 CREATE TABLE IF NOT EXISTS hosts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,

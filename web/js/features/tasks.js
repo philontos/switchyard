@@ -27,6 +27,7 @@ function normalizeAgent(kind) {
 // this UI. Providers belong to the node that will run the task: local catalog for
 // local tasks, remote catalog through tdsp for bootstrapped remote nodes.
 let modalProviderAvailable = true;
+let dispatchOptionsVersion = 0;
 // when set, the dispatch modal is in "node mode": dispatch to a remote node's OWN
 // repo (surfaced via the fleet) instead of a controller-registered repo.
 let nodeTask = null;   // { hostId, repo } or null
@@ -120,15 +121,14 @@ function applyAgentUI() {
 export function openTaskModal(repoId) {
   const repo = state.repos.find(r => r.id === repoId && r.status === "ready");
   if (!repo) return toast(t("toast.repoNotReady"), "error");
+  nodeTask = null;
   taskRepoId = repoId;
   $("tm-repo").textContent = repo.name;
   $("t-title").value = ""; $("t-prompt").value = "";   // fresh form each open
   $("prov-panel").style.display = "none";              // collapse the manage panel
-  const host = state.hostsById[repo.host_id];
-  const providerTarget = host?.kind === "local" ? null : host?.tdsp_bin ? host.id : undefined;
-  modalProviderAvailable = providerTarget !== undefined;
-  setProviderTarget(providerTarget ?? null);
-  $("t-provider-sec").style.display = modalProviderAvailable ? "" : "none";
+  modalProviderAvailable = true;
+  setProviderTarget(null);
+  $("t-provider-sec").style.display = "";
   // the agent picker shows for local AND remote repos — agent is a task property
   // that travels to whichever node runs it.
   // selectAgent() runs applyAgentUI, so it must come AFTER the provider-sec base
@@ -149,6 +149,8 @@ export function closeTaskModal() {
   const modal = $("task-modal");
   if (modal.contains(document.activeElement)) document.activeElement.blur();
   modal.style.display = "none";
+  dispatchOptionsVersion++;
+  branchReq?.abort();
   nodeTask = null;
 }
 // Cancel paths (取消 button / backdrop / Esc) additionally consume the sheet's
@@ -161,7 +163,7 @@ export function cancelTaskModal() { closeTaskModal(); sheetCancelled(); }
 // here. Branches are listed live by the node itself (its mirror is over there);
 // everything else (title/prompt/skills) is the same as a local dispatch.
 export function openNodeTaskModal(hostId, repoId) {
-  const repo = state.fleet[hostId]?.repos?.find(r => r.id === repoId);
+  const repo = state.fleet[hostId]?.repos?.find(r => r.id === repoId && (!r.status || r.status === "ready"));
   if (!repo) return toast(t("toast.repoNotReady"), "error");
   nodeTask = { hostId, repo };
   taskRepoId = null;
@@ -191,7 +193,7 @@ async function loadNodeBranches(hostId, repo) {
   const ctl = branchReq = new AbortController();
   Selects["t-base"].setLoading(t("task.loadingBranches"));
   try {
-    const branches = await api(`/api/nodes/${hostId}/branches?mirror=${encodeURIComponent(repo.mirror_path)}`, { signal: ctl.signal });
+    const branches = await api(`/api/nodes/${hostId}/repos/${repo.id}/branches`, { signal: ctl.signal });
     Selects["t-base"].setOptions(branches.map(b => ({ value: b, label: b })), repo.default_branch);
   } catch (e) {
     if (e.name === "AbortError") return;
@@ -204,14 +206,13 @@ async function loadNodeBranches(hostId, repo) {
 // runs claude (or anything) themselves. hostId picks the machine (omit → local).
 // Deliberately bare-bones for a fast start; repo/branch/worktree/prompt
 // all live in the richer repo dispatch flow instead.
-export async function addLocalTask(hostId) {
+export async function addLocalTask() {
   const tmpId = nextTmpId();
-  const hid = hostId != null ? hostId : localHostId();
+  const hid = localHostId();
   openPending(tmpId, t("term.creating"), "", t("local.starting"));
   addPendingCard(tmpId, { kind: "local", repoId: null, hostId: hid, title: t("term.creating"), agent: "claude" });
   try {
-    const body = hostId != null ? JSON.stringify({ host_id: hostId }) : "{}";
-    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body });
+    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     dropPendingCard(tmpId);          // the real card replaces the placeholder
     await loadTasks();
     settlePending(tmpId, r.id);
@@ -232,7 +233,7 @@ export async function addNodeShell(hostId) {
   openPending(tmpId, t("term.creating"), "", t("local.starting"));
   addPendingCard(tmpId, { kind: "local", repoId: null, hostId, title: t("term.creating"), agent: "claude" });
   try {
-    const r = await api("/api/tasks/local", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ host_id: hostId }) });
+    const r = await api(`/api/nodes/${hostId}/tasks/local`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     dropPendingCard(tmpId);          // the real fleet card replaces the placeholder
     await loadFleet();
     settleNodePending(tmpId, hostId, r.id);
@@ -248,9 +249,13 @@ export async function addNodeShell(hostId) {
 // extra-skill checkboxes for the dispatch modal; reset each open. Dispatch works
 // fine even if this fails to load (just no skills offered).
 async function loadDispatchOptions() {
+  const version = ++dispatchOptionsVersion;
+  const targetHostId = nodeTask?.hostId ?? null;
   $("t-skills").innerHTML = "";
   try {
-    const skills = await api("/api/skills");
+    const endpoint = targetHostId != null ? `/api/nodes/${targetHostId}/skills` : "/api/skills";
+    const skills = await api(endpoint);
+    if (version !== dispatchOptionsVersion) return;
     $("t-skills").innerHTML = skills.length
       ? skills.map(s => `<label class="skopt"><input type="checkbox" value="${s.key}"> ${s.name} <span class="sksrc">${s.source}</span></label>`).join("")
       : `<div class="muted">${t("skill.none")}</div>`;
@@ -286,8 +291,7 @@ async function addNodeTask() {
   const external = selectedAgent !== "claude";
   const providerShown = $("t-provider-sec").style.display !== "none";
   const body = {
-    mirror: repo.mirror_path, name: repo.name, git_url: repo.git_url,
-    default_branch: repo.default_branch,
+    repo_id: repo.id,
     base: Selects["t-base"].value, title: $("t-title").value.trim(),
     prompt: $("t-prompt").value,
     // non-Claude agents carry a model and no Switchyard-injected skills.

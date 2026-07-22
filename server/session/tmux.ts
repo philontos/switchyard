@@ -1,11 +1,11 @@
-import { Runner } from "../fleet/runner.js";
+import type { CommandRunner } from "../fleet/runner.js";
 import { agentArgv, type AgentKind } from "./agent.js";
 
-async function tmux(runner: Runner, args: string[]): Promise<string> {
+async function tmux(runner: CommandRunner, args: string[]): Promise<string> {
   return runner.exec("tmux", args);
 }
 
-async function kimiBinary(runner: Runner): Promise<string> {
+async function kimiBinary(runner: CommandRunner): Promise<string> {
   const script = "command -v kimi 2>/dev/null || { p=\"$HOME/.kimi-code/bin/kimi\"; [ -x \"$p\" ] && printf '%s\\n' \"$p\"; }";
   const out = (await runner.exec("sh", ["-c", script]).catch(() => "")).trim();
   return out.split("\n").find(Boolean) || "kimi";
@@ -17,7 +17,7 @@ function absGitPath(cwd: string, p: string): string {
   return `${cwd.replace(/\/+$/, "")}/${s.replace(/^\.\//, "")}`;
 }
 
-async function gitPath(runner: Runner, cwd: string, flag: "--git-dir" | "--git-common-dir"): Promise<string | null> {
+async function gitPath(runner: CommandRunner, cwd: string, flag: "--git-dir" | "--git-common-dir"): Promise<string | null> {
   try {
     return (await runner.exec("git", ["-C", cwd, "rev-parse", "--path-format=absolute", flag])).trim();
   } catch {
@@ -30,7 +30,7 @@ async function gitPath(runner: Runner, cwd: string, flag: "--git-dir" | "--git-c
   }
 }
 
-async function extraWritableGitDirs(runner: Runner, cwd: string, agent: AgentKind): Promise<string[]> {
+async function extraWritableGitDirs(runner: CommandRunner, cwd: string, agent: AgentKind): Promise<string[]> {
   if (agent !== "codex" && agent !== "kimi") return [];
   const dirs = await Promise.all([
     gitPath(runner, cwd, "--git-dir"),
@@ -47,8 +47,8 @@ async function extraWritableGitDirs(runner: Runner, cwd: string, agent: AgentKin
  * command that sets them on the claude process itself. Used to point claude at
  * an alternate model backend (ANTHROPIC_BASE_URL / _AUTH_TOKEN / _MODEL …).
  * Empty/blank values are dropped; each `K=V` is one argv element, so values
- * with spaces need no quoting here (the Runner re-quotes every arg for a remote
- * shell). Returns [] when there's nothing to inject, so the default launch is
+ * with spaces need no shell quoting here. Returns [] when there is nothing to
+ * inject, so the default launch is
  * byte-for-byte unchanged.
  */
 function envPrefix(env?: Record<string, string>): string[] {
@@ -56,6 +56,10 @@ function envPrefix(env?: Record<string, string>): string[] {
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `${k}=${v}`);
   return pairs.length ? ["env", ...pairs] : [];
+}
+
+function requireOwnerNode(runner: CommandRunner): void {
+  if (runner.kind !== "local") throw new Error("Sessions must be created by the node that owns them");
 }
 
 /**
@@ -66,12 +70,13 @@ function envPrefix(env?: Record<string, string>): string[] {
  * How to launch/resume each agent lives in agentArgv — this stays agent-agnostic.
  */
 export async function startSession(
-  runner: Runner,
+  runner: CommandRunner,
   session: string,
   cwd: string,
   prompt?: string | null,
   opts?: { continue?: boolean; env?: Record<string, string>; agent?: AgentKind; model?: string | null },
 ) {
+  requireOwnerNode(runner);
   // resume reattaches to the prior conversation (agents key it by cwd). The
   // original opening prompt is NOT re-sent — the conversation already has it.
   // The env prefix (provider) goes BEFORE the agent argv so the vars land on the
@@ -95,7 +100,8 @@ export async function startSession(
  * runs claude (or anything) themselves — deliberately more general than
  * auto-launching claude.
  */
-export async function startShellSession(runner: Runner, session: string, cwd: string) {
+export async function startShellSession(runner: CommandRunner, session: string, cwd: string) {
+  requireOwnerNode(runner);
   await tmux(runner, ["new-session", "-d", "-s", session, "-c", cwd]);
   await ensureSessionOptions(runner, session);
 }
@@ -121,14 +127,14 @@ export async function startShellSession(runner: Runner, session: string, cwd: st
  * Set these on every dispatcher-owned session and again when attaching an older
  * session. Each command stays best-effort for older tmux versions.
  */
-export async function ensureSessionOptions(runner: Runner, session: string) {
+export async function ensureSessionOptions(runner: CommandRunner, session: string) {
   // keep the pane around if the agent/shell exits so the user can read the result
   await tmux(runner, ["set-option", "-t", session, "remain-on-exit", "on"]).catch(() => {});
   await tmux(runner, ["set-option", "-t", session, "mouse", "on"]).catch(() => {});
   await tmux(runner, ["set-window-option", "-t", session, "window-size", "latest"]).catch(() => {});
 }
 
-export async function hasSession(runner: Runner, session: string): Promise<boolean> {
+export async function hasSession(runner: CommandRunner, session: string): Promise<boolean> {
   if (!session || !session.trim()) return false;
   try {
     // "=" forces exact match — otherwise tmux prefix-matches and "tdsp-1" would be
@@ -140,7 +146,7 @@ export async function hasSession(runner: Runner, session: string): Promise<boole
   }
 }
 
-export async function killSession(runner: Runner, session: string) {
+export async function killSession(runner: CommandRunner, session: string) {
   // An empty target makes tmux kill the CURRENT/most-recent session — so a task
   // whose session was never set (a failed dispatch stores "") would, on cleanup,
   // tear down whatever session you're actively using. Never let "" reach tmux.
@@ -157,7 +163,7 @@ export async function killSession(runner: Runner, session: string) {
  * is NOT in a mode tmux just errors and inserts nothing — unlike a literal `q`,
  * which would be typed into claude's prompt. Best-effort, so errors are ignored.
  */
-export async function cancelCopyMode(runner: Runner, session: string) {
+export async function cancelCopyMode(runner: CommandRunner, session: string) {
   await tmux(runner, ["send-keys", "-t", session, "-X", "cancel"]).catch(() => {});
 }
 
@@ -166,7 +172,7 @@ export async function cancelCopyMode(runner: Runner, session: string) {
  * named buffer keeps the user's paste buffers untouched; -d removes it after.
  * No trailing newline, so it never auto-submits — the user adds text and Enters.
  */
-export async function pasteText(runner: Runner, session: string, text: string) {
+export async function pasteText(runner: CommandRunner, session: string, text: string) {
   await tmux(runner, ["set-buffer", "-b", "tdsp-paste", "--", text]);
   await tmux(runner, ["paste-buffer", "-t", session, "-b", "tdsp-paste", "-p", "-d"]);
 }
@@ -176,13 +182,13 @@ export async function pasteText(runner: Runner, session: string, text: string) {
  * the browser's attach client. Pasting handles arbitrary Unicode/newlines as one
  * input; send-keys Enter then submits it as a real terminal Enter.
  */
-export async function pasteSubmit(runner: Runner, session: string, text: string) {
+export async function pasteSubmit(runner: CommandRunner, session: string, text: string) {
   if (text) await pasteText(runner, session, text);
   await tmux(runner, ["send-keys", "-t", session, "Enter"]);
 }
 
 /** List all dispatcher-owned tmux sessions (named task-<id>). */
-export async function listSessions(runner: Runner): Promise<string[]> {
+export async function listSessions(runner: CommandRunner): Promise<string[]> {
   try {
     const out = await tmux(runner, ["list-sessions", "-F", "#{session_name}"]);
     return out.split("\n").map((s) => s.trim()).filter((s) => /^(tdsp|task)-([a-z0-9]+-)?\d+(-[a-z0-9-]+)?$/.test(s));
