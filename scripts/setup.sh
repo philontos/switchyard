@@ -168,7 +168,11 @@ install_all() {
   echo "${B}安装全局 tdsp 命令…${N}"
   (cd "$ROOT" && npm run -s tdsp -- install)
   echo
-  echo "${G}全部装好。启动:${N}${B} tdsp serve ${N}${G}；日后更新代码:${N}${B} tdsp update${N}"
+  echo "${G}全部装好。下一步:${N}"
+  echo "  ${B}tdsp serve${N}"
+  echo "  打开 ${B}http://127.0.0.1:4500${N}，点击「连接设备」；网页会继续检查"
+  echo "  Tailscale、手机二维码、常在线状态，以及可选的第二台电脑 / SSH。"
+  echo "${G}日后更新代码:${N}${B} tdsp update${N}"
 }
 
 # 环境本来就绪（~/.zshenv 无需改动）

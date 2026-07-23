@@ -96,6 +96,17 @@ test("initSchema on a fresh DB never creates a presets table", () => {
   assert.equal(presets, undefined);
 });
 
+test("initSchema creates onboarding evidence storage without a completion flag", () => {
+  const db = new Database(":memory:");
+  initSchema(db, opts(false));
+  const table = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='onboarding_events'",
+  ).get() as { name: string } | undefined;
+  assert.equal(table?.name, "onboarding_events");
+  const cols = (db.prepare("PRAGMA table_info(onboarding_events)").all() as { name: string }[]).map((c) => c.name);
+  assert.deepEqual(cols, ["kind", "detail", "occurred_at"]);
+});
+
 test("path migration runs only when didMigrate is true", () => {
   const seed = (db: Database.Database) =>
     db.prepare(

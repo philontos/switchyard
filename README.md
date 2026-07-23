@@ -47,7 +47,7 @@ Every machine on your network is a first-class node:
 
 ## Mobile
 
-On narrow screens the UI switches to a full touch experience. **Recommended: open it in Safari → Share → "Add to Home Screen" → check "Open as Web App"** — it runs standalone (no browser chrome, dark launch background, no white flashes), and from then on the console is one tap from your home screen, as close to a native app as it gets.
+On narrow screens the UI switches to a full touch experience. The desktop's **Connect devices** guide creates a private phone URL and QR code; scan it after signing the phone into the same Tailscale account. **Recommended: open it in Safari → Share → "Add to Home Screen" → check "Open as Web App"** — it runs standalone (no browser chrome, dark launch background, no white flashes), and from then on the console is one tap from your home screen, as close to a native app as it gets.
 
 <p align="center">
   <img src="docs/screenshots/mobile-board.png" alt="Mobile task list" width="32%">
@@ -70,7 +70,9 @@ git clone <repo-url> switchyard && cd switchyard
 tdsp serve           # → http://localhost:4500
 ```
 
-> `setup.sh` does three things in order: ① **preflight** — verifies `claude` / `kimi` / `tmux` / `git` are reachable from a non-interactive zsh (tasks are launched by exactly that kind of shell, which reads only `~/.zshenv`; a missing command kills the pane), idempotently writing any missing PATH dirs into `~/.zshenv`; ② `npm install` (4 runtime deps, zero build); ③ installs the global `tdsp` command (`~/.task-dispatcher/src` points at this clone, launcher linked at `~/.local/bin/tdsp` — if `tdsp` isn't found, put `~/.local/bin` on your PATH). `--check` inspects only — writes and installs nothing.
+Open `http://127.0.0.1:4500` and click **Connect devices**. The web onboarding derives every step from the live machine state: Tailscale install/sign-in/private HTTPS, AC power and idle sleep, a phone QR, then optional discovery and SSH for another computer. A missing remote step never blocks local use.
+
+> `setup.sh` does three things in order: ① **preflight** — verifies `claude` / `kimi` / `tmux` / `git` are reachable from a non-interactive zsh (tasks are launched by exactly that kind of shell, which reads only `~/.zshenv`; a missing command kills the pane), idempotently writing any missing PATH dirs into `~/.zshenv`; ② `npm install` (runtime dependencies, zero build); ③ installs the global `tdsp` command (`~/.task-dispatcher/src` points at this clone, launcher linked at `~/.local/bin/tdsp` — if `tdsp` isn't found, put `~/.local/bin` on your PATH). `--check` inspects only — writes and installs nothing.
 
 From here on, everything is `tdsp`:
 
@@ -91,7 +93,9 @@ task-dispatcher on http://10.10.0.3:4500
 
 ## Private access with Tailscale
 
-Tailscale is an optional system networking layer, not an npm dependency. Install its [official client](https://tailscale.com/download) on the computers and phone, sign them into the same tailnet, then run:
+Tailscale is an optional system networking layer, not an npm dependency. The normal path is `tdsp serve` → open the local console → **Connect devices**. The guide detects the [official client](https://tailscale.com/download), sign-in and Serve permission, presents exactly the next action, configures Switchyard's private HTTPS listener, and verifies the result. Installing the system client and authenticating the user's account remain explicit OS/browser steps.
+
+The equivalent CLI shortcut is:
 
 ```sh
 tdsp serve --tailscale
@@ -101,7 +105,7 @@ Switchyard stays bound to `127.0.0.1:4500`; `tailscale serve` publishes that bac
 
 The layers stay deliberately thin:
 
-- **Phone → console:** HTTPS/WebSocket through Tailscale Serve. Open the printed URL and add it to the home screen.
+- **Phone → console:** HTTPS/WebSocket through Tailscale Serve. The guide shows a QR only after that private route is live, and marks the phone ready after Safari successfully opens it under the same Tailscale login.
 - **Machine A → machine B:** click `+` in the machine rail, then **Discover devices**. Switchyard keeps online peers owned by the same Tailscale login and probes compatible nodes. **Connect** exchanges stable instance ids, exact tdsp paths, and one profile-owned Ed25519 key in each direction, then registers both nodes. There is no pairing code and no personal SSH key is reused or replaced.
 - **Actual control:** the node protocol remains `ssh B tdsp …`. Tailscale supplies discovery, identity, and reachability; SSH supplies commands, terminals, and file transport. Each peer key gets one marked line in `~/.ssh/authorized_keys`. If SSH/Remote Login is still off, the relationship is retained as **SSH not ready** and turns online after the OS service is enabled.
 - **Route choice:** Tailscale automatically tries direct WireGuard, then a configured peer relay, then DERP. Inspect the route instead of guessing:
@@ -110,6 +114,8 @@ The layers stay deliberately thin:
 tdsp network status
 tdsp network diagnose <peer-name-or-100.x-ip>
 ```
+
+The same guide checks whether the development machine will remain reachable. On macOS, **Keep awake while running** starts a reversible, PID-scoped `caffeinate` assertion on AC power: the display may still turn off, and the assertion disappears when Switchyard exits. Closing a MacBook is a separate hardware/OS condition; the guide reports the current clamshell capability but does not bypass macOS sleep protections. Keep the machine plugged in and use Apple's supported closed-display conditions when lid-closed operation is required.
 
 For a strict-NAT pair whose DERP path is too far away, a nearby VPS can be a [Tailscale peer relay](https://tailscale.com/docs/features/peer-relay). The VPS needs Tailscale 1.86+, a reachable UDP port, and a narrowly scoped tailnet grant; it does **not** need to run Switchyard:
 
@@ -202,6 +208,7 @@ server/                REST API + /pty WebSocket; the tdsp CLI; git / tmux / pty
   task/                task lifecycle (create/manifest/rename) + the tdsp node-local API (cli.ts)
   fleet/               remote hosts: runners, bootstrap, liveness, cross-node fleet view
   network/             Tailscale status, private Serve publishing, route diagnosis, peer-relay setup
+  onboarding/          live network/phone/power/fleet readiness and safe always-on actions
   session/             tmux sessions, pty spawn, attach command, agent launch args (claude / codex / kimi)
   skills/              skill scan/resolve, plugin install, hook settings
   preview/             the preview reverse-proxy engine

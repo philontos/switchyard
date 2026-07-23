@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn as spawnChild } from "node:child_process";
+import QRCode from "qrcode";
 import { db, Repo, Task, Host, Provider } from "../core/db.js";
 import { renameTask } from "../task/tasks.js";
 import { removeWorktree } from "../repo/git.js";
@@ -53,7 +54,7 @@ import {
   isCodeInspectRequest,
   type CodeInspectRequest,
 } from "../codeview/codeview.js";
-import { tailscaleStatus } from "../network/tailscale.js";
+import { setupTailscale, tailscaleStatus } from "../network/tailscale.js";
 import {
   descriptorMatchesPeer,
   discoveryPorts,
@@ -66,6 +67,12 @@ import {
   upsertTailscaleHost,
 } from "../network/peering.js";
 import { authorizeSwitchyardKey, removeSwitchyardKey } from "../network/ssh-identity.js";
+import {
+  onboardingPorts,
+  readOnboardingStatus,
+  recordMobileCheckin,
+} from "../onboarding/status.js";
+import { setKeepAwake } from "../onboarding/power.js";
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -185,6 +192,100 @@ async function trustedPeerRequest(req: Request, res: Response) {
   }
   return status;
 }
+
+// ---------- first-run / device onboarding ----------
+// Status is evidence-backed and re-derived on every request: a successful
+// historical wizard click can never hide a stopped VPN, removed Serve route,
+// disabled SSH service, or unreachable peer.
+app.get("/api/onboarding/status", async (_req, res) => {
+  res.setHeader("cache-control", "no-store");
+  try {
+    res.json(await readOnboardingStatus(db));
+  } catch (error: any) {
+    res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+// Idempotently take the one safe automated network action: join/start
+// Tailscale when possible and configure one private Serve listener. Installation,
+// browser login, HTTPS consent and OS Remote Login remain explicit user actions.
+app.post("/api/onboarding/network/setup", async (req, res) => {
+  res.setHeader("cache-control", "no-store");
+  const { localPort, httpsPort: defaultHttpsPort } = onboardingPorts();
+  const requested = req.body?.https_port == null ? defaultHttpsPort : Number(req.body.https_port);
+  if (!Number.isInteger(requested) || requested < 1 || requested > 65535) {
+    return res.status(400).json({ error: "https_port must be an integer between 1 and 65535" });
+  }
+  try {
+    const result = await setupTailscale({ localPort, httpsPort: requested });
+    if (result.ok) {
+      process.env.TDSP_TAILSCALE_SERVE = "1";
+      process.env.TDSP_TAILSCALE_PORT = String(result.httpsPort);
+      if (result.url) process.env.TDSP_TAILSCALE_URL = result.url;
+    }
+    const onboarding = await readOnboardingStatus(db);
+    const payload = {
+      ok: result.ok,
+      error: result.error || null,
+      auth_url: result.status.authUrl,
+      consent_url: result.serveConsentUrl || null,
+      onboarding,
+    };
+    return result.ok ? res.json(payload) : res.status(409).json(payload);
+  } catch (error: any) {
+    res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+app.post("/api/onboarding/power/keep-awake", async (req, res) => {
+  if (typeof req.body?.enabled !== "boolean") {
+    return res.status(400).json({ error: "enabled must be a boolean" });
+  }
+  try {
+    setKeepAwake(db, req.body.enabled);
+    res.json({ ok: true, onboarding: await readOnboardingStatus(db) });
+  } catch (error: any) {
+    res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+app.get("/api/onboarding/mobile-qr.svg", async (_req, res) => {
+  res.setHeader("cache-control", "no-store");
+  try {
+    let baseUrl = process.env.TDSP_TAILSCALE_URL || null;
+    if (!baseUrl) baseUrl = (await readOnboardingStatus(db)).network.serve.url;
+    if (!baseUrl) {
+      return res.status(409).type("text/plain").send("Tailscale Serve is not ready");
+    }
+    const target = new URL(baseUrl);
+    target.searchParams.set("onboarding", "mobile");
+    const svg = await QRCode.toString(target.toString(), {
+      type: "svg",
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 256,
+      color: { dark: "#1a1613", light: "#ffffff" },
+    });
+    res.type("image/svg+xml").send(svg);
+  } catch (error: any) {
+    res.status(500).type("text/plain").send(String(error?.message || error));
+  }
+});
+
+// A QR arrival is accepted only through Tailscale Serve under this node's own
+// login. The stored row is merely evidence ("verified at"), not authentication
+// and not a substitute for current network checks.
+app.post("/api/onboarding/mobile/check-in", async (req, res) => {
+  res.setHeader("cache-control", "no-store");
+  const status = await trustedPeerRequest(req, res);
+  if (!status) return;
+  const login = req.get("tailscale-user-login") || status.self?.loginName || "";
+  recordMobileCheckin(db, {
+    login,
+    userAgent: req.get("user-agent") || "",
+  });
+  res.json({ ok: true, verified_at: new Date().toISOString() });
+});
 
 // Minimal same-user descriptor. This endpoint is available only through a
 // loopback-backed Tailscale Serve route; spoofable direct/LAN header traffic is

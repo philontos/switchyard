@@ -20,6 +20,17 @@ import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } f
 import { initCodeView, openRepoCode, openTaskCode, closeCodeView, repaintCodeView, isCodeViewOpen } from "./features/codeview.js";
 import { initReorder } from "./features/reorder.js";
 import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./features/providers.js";
+import {
+  closeOnboardingModal,
+  copyOnboardingPhoneUrl,
+  initOnboarding,
+  onboardingNetworkAction,
+  openDiscoveryFromOnboarding,
+  openOnboardingModal,
+  refreshOnboarding,
+  repaintOnboarding,
+  setOnboardingKeepAwake,
+} from "./features/onboarding.js";
 
 let selfUpdating = false;
 async function updateSelf() {
@@ -63,6 +74,9 @@ Object.assign(window, {
   openDiscoveryModal, closeDiscoveryModal, openManualHostModal, discoverNodes, connectDiscoveredAt,
   toggleRepo, toggleArchived, toggleHostMenu, bootstrapHost, connectNode, stopNodeTask,
   removeNodeWt, resumeNodeTask, deleteNodeTask, addNodeShell, updateHost,
+  // first-run / remote-access onboarding
+  openOnboardingModal, closeOnboardingModal, refreshOnboarding, onboardingNetworkAction,
+  setOnboardingKeepAwake, copyOnboardingPhoneUrl, openDiscoveryFromOnboarding,
   // local controller
   updateSelf,
   // skills (official-plugin install)
@@ -105,6 +119,7 @@ I18N.onChange = () => {
   if (pv) { pv.ph = t("provider.default"); }
   repaintProviders();   // re-localize the "Anthropic 默认" option + manage list
   repaintCodeView();
+  repaintOnboarding();
   loadRepos();
   loadHosts();
   loadTasks();
@@ -151,6 +166,7 @@ $("t-provider").dataset.ph = t("provider.default");   // model-backend picker
 csMount("t-provider", onProviderChange);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
 Promise.allSettled([loadRepos(), loadHosts(), loadTasks(), refreshProviders()]).then(() => { dismissBoot(); syncReadWaiting(); });
+initOnboarding();             // independent: slow VPN/DNS checks never block the local dashboard
 setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
 setInterval(async () => { await loadTasks(); syncReadWaiting(); }, 4000);
 setInterval(loadHosts, 5000);   // refresh machine liveness dots
@@ -160,6 +176,7 @@ setInterval(loadFleet, 15000);  // refresh each node's live task count (slower �
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
 $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") cancelTaskModal(); });
 $("host-modal").addEventListener("click", e => { if (e.target.id === "host-modal") closeHostModal(); });
+$("onboarding-modal").addEventListener("click", e => { if (e.target.id === "onboarding-modal") closeOnboardingModal(); });
 $("discovery-modal").addEventListener("click", e => { if (e.target.id === "discovery-modal") closeDiscoveryModal(); });
 $("skills-modal").addEventListener("click", e => { if (e.target.id === "skills-modal") closeSkillsModal(); });
 document.addEventListener("keydown", e => {
@@ -167,7 +184,7 @@ document.addEventListener("keydown", e => {
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
   if (isCodeViewOpen()) { closeCodeView(); return; }
   if ($("dialog").style.display === "flex") closeDialog(null);
-  else { closeRepoModal(); cancelTaskModal(); closeHostModal(); closeDiscoveryModal(); closeSkillsModal(); }
+  else { closeRepoModal(); cancelTaskModal(); closeHostModal(); closeOnboardingModal(); closeDiscoveryModal(); closeSkillsModal(); }
 });
 // poll repos so cloning -> ready (and clone errors) show up without manual refresh
 setInterval(() => { if (state.repos.some(r => r.status === "cloning")) loadRepos(); }, 2000);

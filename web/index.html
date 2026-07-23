@@ -21,7 +21,7 @@
 </head>
 <body>
 <div id="boot"><div class="spinner"></div></div>
-<header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true" /><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true" /></a><span style="flex:1"></span><button id="self-update" class="sec icon-btn" onclick="updateSelf()" data-i18n-title="system.updateTitle" aria-label="Update"><span class="sync-icon" aria-hidden="true"></span></button><button id="skills-btn" class="sec" data-i18n="skill.manage" onclick="openSkillsModal()"></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
+<header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true" /><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true" /></a><span style="flex:1"></span><button id="onboarding-btn" class="sec onboarding-nav" onclick="openOnboardingModal()"><span id="onboarding-nav-dot" class="onboarding-nav-dot pending" aria-hidden="true"></span><span class="onboarding-nav-label" data-i18n="onboarding.nav"></span></button><button id="self-update" class="sec icon-btn" onclick="updateSelf()" data-i18n-title="system.updateTitle" aria-label="Update"><span class="sync-icon" aria-hidden="true"></span></button><button id="skills-btn" class="sec" data-i18n="skill.manage" onclick="openSkillsModal()"></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
   <div id="m-list" class="list"></div>
@@ -193,6 +193,24 @@
     </div>
     <div id="r-status" class="repo-modal-status" aria-live="polite"></div>
     <div class="hint" style="margin-top:10px" data-i18n="repo.hint"></div>
+  </div>
+</div>
+
+<div id="onboarding-modal" class="modal-bg" style="display:none">
+  <div class="modal onboarding-modal">
+    <div class="onboarding-head">
+      <div>
+        <div class="onboarding-kicker" data-i18n="onboarding.kicker"></div>
+        <h2 data-i18n="onboarding.title"></h2>
+        <div class="hint" data-i18n="onboarding.subtitle"></div>
+      </div>
+      <button class="onboarding-close" type="button" onclick="closeOnboardingModal()" data-i18n-title="dialog.cancel" aria-label="Close">×</button>
+    </div>
+    <div id="onboarding-body" class="onboarding-body" aria-live="polite"></div>
+    <div class="onboarding-footer">
+      <button class="sec" type="button" onclick="refreshOnboarding()" data-i18n="onboarding.recheck"></button>
+      <button class="primary" type="button" onclick="closeOnboardingModal()" data-i18n="onboarding.continue"></button>
+    </div>
   </div>
 </div>
 

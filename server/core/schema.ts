@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS providers (
   small_fast_model TEXT,          -- ANTHROPIC_SMALL_FAST_MODEL (background/title model)
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Evidence produced by onboarding checks. This stores facts such as the last
+-- successful mobile Safari check-in, never credentials or a cached "completed"
+-- flag; current readiness is always re-derived from live system state.
+CREATE TABLE IF NOT EXISTS onboarding_events (
+  kind TEXT PRIMARY KEY,
+  detail TEXT,
+  occurred_at TEXT DEFAULT (datetime('now'))
+);
 `;
 
 /** Add a column if it's missing — backfills schema drift on pre-existing DBs. */
