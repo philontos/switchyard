@@ -607,9 +607,6 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    box) at the terminal edge, so it can never propagate up and scroll the whole
    page sideways when the cursor reaches the right edge. */
 #term { flex: 1; min-height: 0; position: relative; overflow: hidden; overflow: clip; contain: layout paint; }
-/* manual preview-port box in the term bar (opens t<task>-<port>.localhost in a new tab) */
-.prev-port { width: 64px; flex: none; margin: 0; padding: 2px 7px; font-size: 12px; }
-.prev-btn { flex: none; width: auto; margin: 0; padding: 2px 9px; font-size: 13px; line-height: 1.2; }
 .term-pane { position: absolute; inset: 0; min-width: 0; min-height: 0;
   overflow: hidden; overflow: clip; contain: layout paint; }
 /* fitPane (terminal.js) sizes the grid from the pane's content box minus the
@@ -906,7 +903,7 @@ a { color: var(--accent-bar); }
     transform: translateX(2px) rotate(45deg);
   }
   #term-back:active { background: var(--surface-2); }
-  #term-attach, .term-claude, .prev-port, .prev-btn { display: none; }
+  #term-attach, .term-claude { display: none; }
   #term-title { flex: 1; max-width: none; font-size: 13px; text-align: left; padding-right: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ===== 阅读 / Reading view (mobile only) =========================================
