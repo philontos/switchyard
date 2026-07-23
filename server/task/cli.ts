@@ -12,6 +12,13 @@ import type { OwnedRepoFailure, OwnedRepoInput, OwnedRepoResult } from "../repo/
 import type { PasteImageResult } from "./paste-service.js";
 import { legacyOwnershipReport } from "../core/ownership.js";
 import { listOwnedRepos, listOwnedTasks } from "../core/ownership.js";
+import type {
+  TailscaleDiagnosis,
+  TailscalePeerRelayResult,
+  TailscaleSetupOptions,
+  TailscaleSetupResult,
+  TailscaleStatus,
+} from "../network/tailscale.js";
 export { CODE_VIEW_CAPABILITY } from "../codeview/codeview.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
@@ -277,8 +284,21 @@ export interface CliDeps {
   skillsList: () => unknown[];
   pluginsList: () => Promise<unknown[]>;
   pluginsInstall: (pluginId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
-  // set up THIS machine's global tdsp from its clone (symlink src + wrapper)
-  install: () => { src: string; binPath: string; localBin: string; clone: string };
+  // Set up THIS machine's canonical tdsp, or a side-by-side isolated profile.
+  install: (profile?: string) => {
+    src: string;
+    binPath: string;
+    localBin: string;
+    clone: string;
+    profile?: string;
+    dataDir?: string;
+  };
+  networkStatus: () => Promise<TailscaleStatus>;
+  networkSetup: (options: TailscaleSetupOptions) => Promise<TailscaleSetupResult>;
+  networkDiagnose: (peer: string) => Promise<TailscaleDiagnosis>;
+  networkOff: (httpsPort: number, expectedLocalPort: number) => Promise<{ ok: boolean; error?: string }>;
+  networkRelayEnable: (port: number, staticEndpoints: string[]) => Promise<TailscalePeerRelayResult>;
+  networkRelayDisable: () => Promise<TailscalePeerRelayResult>;
   // pull the machine's install (the clone behind ~/.task-dispatcher/src) to the
   // latest code and refresh its deps; a running serve picks it up on next start
   update: () => Promise<{ ok: true; clone: string; head: string } | { ok: false; error: string }>;
@@ -288,6 +308,9 @@ export interface ServeOpts {
   host?: string;
   hosts?: string[];
   hostCidr?: string;
+  port?: number;
+  tailscale?: boolean;
+  tailscaleHttpsPort?: number;
 }
 
 // Minimal flag parser: supports `--key value` and `--key=value`. Bare flags
@@ -304,6 +327,31 @@ function parseFlags(args: string[]): Record<string, string> {
   return out;
 }
 
+function parsePort(value: string | undefined, fallback: number): number | null {
+  if (value == null || value === "") return fallback;
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+function networkStatusText(status: TailscaleStatus): string {
+  const lines = [
+    `Tailscale: ${status.state}`,
+    status.self?.dnsName ? `  node  ${status.self.dnsName}` : "",
+    status.self?.ips?.length ? `  IP    ${status.self.ips.join(", ")}` : "",
+    status.tailnet ? `  net   ${status.tailnet}` : "",
+    status.health.length ? `  health ${status.health.join("; ")}` : "",
+    status.error ? `  error ${status.error}` : "",
+  ].filter(Boolean);
+  if (status.peers.length) {
+    lines.push("  peers");
+    for (const peer of status.peers) {
+      const address = peer.dnsName || peer.ips[0] || peer.hostName;
+      lines.push(`    ${peer.online ? "●" : "○"} ${address}  ${peer.connection}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 /** Parse argv (after `tdsp`) and run the verb. Returns a process exit code. */
 export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   const [cmd] = argv;
@@ -317,13 +365,123 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
             .filter(Boolean)
         : undefined;
       const hostCidr = f["host-cidr"] ?? f.cidr ?? f.wireguard ?? f.wg;
+      const tailscale = Object.prototype.hasOwnProperty.call(f, "tailscale");
+      const port = parsePort(f.port, Number(process.env.PORT || 4500));
+      const tailscaleHttpsPort = tailscale
+        ? parsePort(f["tailscale-port"] ?? f["https-port"], 443)
+        : undefined;
+      if (port == null || (tailscale && tailscaleHttpsPort == null)) {
+        deps.err("serve: ports must be integers between 1 and 65535");
+        return 1;
+      }
       try {
-        await deps.serve({ host: f.host || undefined, hosts, hostCidr });
+        await deps.serve({
+          host: f.host || undefined,
+          hosts,
+          hostCidr,
+          port,
+          tailscale,
+          tailscaleHttpsPort: tailscaleHttpsPort ?? undefined,
+        });
       } catch (e: any) {
         deps.err(String(e?.message || e));
         return 1;
       }
       return 0;
+    }
+    case "network": {
+      const action = argv[1];
+      const f = parseFlags(argv.slice(2));
+      const json = argv.includes("--json");
+      if (action === "status") {
+        const status = await deps.networkStatus();
+        deps.out(json ? JSON.stringify(status) : networkStatusText(status));
+        return status.state === "running" ? 0 : 1;
+      }
+      if (action === "setup") {
+        const localPort = parsePort(f.port ?? f["local-port"], 4500);
+        const httpsPort = parsePort(f["https-port"] ?? f["tailscale-port"], 443);
+        if (localPort == null || httpsPort == null) {
+          deps.err("network setup: ports must be integers between 1 and 65535");
+          return 1;
+        }
+        const result = await deps.networkSetup({ localPort, httpsPort });
+        if (json) deps.out(JSON.stringify(result));
+        else if (result.ok) {
+          deps.out(`Tailscale access ready:\n  ${result.url || "(MagicDNS name unavailable)"}\n  → http://127.0.0.1:${localPort}`);
+        } else {
+          deps.err(`Tailscale setup failed: ${result.error || result.status.error || "unknown error"}`);
+        }
+        return result.ok ? 0 : 1;
+      }
+      if (action === "diagnose") {
+        const peer = argv[2] && !argv[2].startsWith("--") ? argv[2] : "";
+        if (!peer) {
+          deps.err("Usage: tdsp network diagnose <peer> [--json]");
+          return 1;
+        }
+        const result = await deps.networkDiagnose(peer);
+        if (json) deps.out(JSON.stringify(result));
+        else if (result.ok) {
+          deps.out(
+            `Tailscale route to ${result.peer}:\n` +
+              `  ${result.connection}${result.via ? ` via ${result.via}` : ""}` +
+              `${result.latencyMs != null ? ` · ${result.latencyMs} ms median` : ""}\n` +
+              `  UDP ${result.udp == null ? "unknown" : result.udp ? "available" : "blocked"}` +
+              `${result.nearestDerp ? ` · nearest DERP ${result.nearestDerp}` : ""}`,
+          );
+        } else {
+          deps.err(`Tailscale diagnosis failed: ${result.error || "peer unreachable"}`);
+        }
+        return result.ok ? 0 : 1;
+      }
+      if (action === "off") {
+        const httpsPort = parsePort(f["https-port"] ?? f["tailscale-port"], 443);
+        const localPort = httpsPort == null
+          ? null
+          : parsePort(f.port ?? f["local-port"], httpsPort === 443 ? 4500 : httpsPort);
+        if (httpsPort == null || localPort == null) {
+          deps.err("network off: ports must be integers between 1 and 65535");
+          return 1;
+        }
+        const result = await deps.networkOff(httpsPort, localPort);
+        if (json) deps.out(JSON.stringify(result));
+        else if (result.ok) deps.out(`Tailscale Serve listener on :${httpsPort} removed`);
+        else deps.err(`Tailscale Serve cleanup failed: ${result.error || "unknown error"}`);
+        return result.ok ? 0 : 1;
+      }
+      if (action === "relay") {
+        const relayAction = argv[2];
+        if (relayAction === "enable") {
+          const port = parsePort(f.port, 40000);
+          if (port == null) {
+            deps.err("network relay enable: port must be an integer between 1 and 65535");
+            return 1;
+          }
+          const endpoints = (f["static-endpoints"] || "").split(",").map((value) => value.trim()).filter(Boolean);
+          const result = await deps.networkRelayEnable(port, endpoints);
+          if (json) deps.out(JSON.stringify(result));
+          else if (result.ok) {
+            deps.out(
+              `Peer relay listener ready on UDP :${port}\n` +
+                "Tailnet admin action still required: grant selected source devices " +
+                "`tailscale.com/cap/relay` access to this relay node.",
+            );
+          } else deps.err(`Peer relay setup failed: ${result.error || "unknown error"}`);
+          return result.ok ? 0 : 1;
+        }
+        if (relayAction === "disable") {
+          const result = await deps.networkRelayDisable();
+          if (json) deps.out(JSON.stringify(result));
+          else if (result.ok) deps.out("Peer relay listener disabled");
+          else deps.err(`Peer relay cleanup failed: ${result.error || "unknown error"}`);
+          return result.ok ? 0 : 1;
+        }
+        deps.err("Usage: tdsp network relay <enable [--port 40000]|disable> [--json]");
+        return 1;
+      }
+      deps.err("Usage: tdsp network <status|setup|diagnose <peer>|off|relay> [--json]");
+      return 1;
     }
     case "list":
       deps.out(JSON.stringify(await taskListPayload(deps.db, deps.liveness)));
@@ -501,13 +659,20 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     case "install": {
-      const r = deps.install();
+      const f = parseFlags(argv.slice(1));
+      const profile = f.profile?.trim() || undefined;
+      if (profile && !/^[a-z0-9][a-z0-9-]{0,31}$/.test(profile)) {
+        deps.err("install: profile must be 1-32 lowercase letters, numbers, or hyphens");
+        return 1;
+      }
+      const r = deps.install(profile);
       deps.out(
-        `tdsp installed:\n` +
+        `${profile ? `tdsp profile "${profile}" installed` : "tdsp installed"}:\n` +
           `  code   ${r.src} -> ${r.clone}\n` +
+          (r.dataDir ? `  data   ${r.dataDir}\n` : "") +
           `  command ${r.binPath}\n` +
           `  on PATH ${r.localBin}  (ensure ~/.local/bin is on your PATH)\n` +
-          `now: type \`tdsp list\` here, or reach this machine from another with \`ssh <host> ${r.binPath} list\``,
+          `now: type \`${profile ? `tdsp-${profile}` : "tdsp"} list\` here, or reach this machine from another with \`ssh <host> ${r.binPath} list\``,
       );
       return 0;
     }
@@ -525,7 +690,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|skills-list|plugins-list|plugins-install|doctor|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve|network|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|skills-list|plugins-list|plugins-install|doctor|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

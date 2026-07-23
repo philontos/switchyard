@@ -11,7 +11,7 @@ import path from "node:path";
 import { runCli } from "./task/cli.js";
 import { db, type Provider, type Task } from "./core/db.js";
 import { NS, DATA_DIR, ROOT } from "./core/paths.js";
-import { applyInstall } from "./fleet/bootstrap.js";
+import { applyInstall, applyProfileInstall } from "./fleet/bootstrap.js";
 import { localRunner } from "./fleet/runner.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions } from "./session/tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./task/createtask.js";
@@ -28,6 +28,14 @@ import { syncReposManifest } from "./repo/manifest.js";
 import { pasteImageIntoOwnedTask } from "./task/paste-service.js";
 import { defaultSources, scanSkills } from "./skills/skills.js";
 import { installPlugin, listAvailable } from "./skills/plugins.js";
+import {
+  configureTailscalePeerRelay,
+  diagnoseTailscale,
+  disableTailscalePeerRelay,
+  disableTailscaleServe,
+  setupTailscale,
+  tailscaleStatus,
+} from "./network/tailscale.js";
 
 // Ensure child processes (tmux/git/claude) find Homebrew binaries regardless of
 // how tdsp was launched — a bare non-interactive ssh PATH otherwise can't resolve
@@ -92,6 +100,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
   err: (s) => process.stderr.write(s + "\n"),
   serve: async (opts) => {
     process.env.TDSP_RESTART_ARGS = JSON.stringify(process.argv.slice(2));
+    if (opts?.port) process.env.PORT = String(opts.port);
     if (opts?.hosts?.length) process.env.HOSTS = opts.hosts.join(",");
     else if (opts?.host) process.env.HOST = opts.host;
 
@@ -102,6 +111,20 @@ process.exitCode = await runCli(process.argv.slice(2), {
       const hosts = [...new Set(["127.0.0.1", hostIp, ...(process.env.HOSTS || "").split(",").filter(Boolean)])];
       process.env.HOSTS = hosts.join(",");
       delete process.env.HOST;
+    }
+
+    if (opts?.tailscale) {
+      // Keep the app loopback-only and let Tailscale Serve own tailnet TLS. The
+      // dedicated listener is additive: no Funnel and no reset of other routes.
+      delete process.env.HOST;
+      delete process.env.HOSTS;
+      const localPort = opts.port ?? Number(process.env.PORT || 4500);
+      const result = await setupTailscale({
+        localPort,
+        httpsPort: opts.tailscaleHttpsPort ?? localPort,
+      });
+      if (!result.ok) throw new Error(`serve: ${result.error || result.status.error || "Tailscale setup failed"}`);
+      process.stdout.write(`Switchyard on ${result.url || `Tailscale HTTPS :${result.httpsPort}`}\n`);
     }
 
     await import("./index.js");
@@ -226,16 +249,25 @@ process.exitCode = await runCli(process.argv.slice(2), {
   pasteImage: (id, mime, bytes) => pasteImageIntoOwnedTask(db, localRunner, NS, id, mime, bytes),
   readStdin,
   // set up THIS machine's global tdsp from its clone (point src here + the wrapper)
-  install: () => {
-    const p = applyInstall(os.homedir(), ROOT);
-    return { src: p.src, binPath: p.binPath, localBin: p.localBin, clone: ROOT };
+  install: (profile) => {
+    const p = profile
+      ? applyProfileInstall(os.homedir(), ROOT, profile)
+      : applyInstall(os.homedir(), ROOT);
+    return {
+      src: p.src,
+      binPath: p.binPath,
+      localBin: p.localBin,
+      clone: ROOT,
+      profile: p.profile,
+      dataDir: p.dataDir,
+    };
   },
   // pull the canonical install (the clone behind ~/.task-dispatcher/src) to the
   // latest code and refresh deps. --ff-only so a locally-diverged clone fails
   // loud instead of silently merging; a running serve keeps the old code until
   // it's restarted.
   update: async () => {
-    const src = path.join(os.homedir(), ".task-dispatcher", "src");
+    const src = process.env.TDSP_SOURCE_DIR || path.join(os.homedir(), ".task-dispatcher", "src");
     let clone: string;
     try {
       clone = fs.realpathSync(src);
@@ -269,4 +301,10 @@ process.exitCode = await runCli(process.argv.slice(2), {
       return { ok: false as const, error: String(error?.message || error) };
     }
   },
+  networkStatus: () => tailscaleStatus(),
+  networkSetup: (options) => setupTailscale(options),
+  networkDiagnose: (peer) => diagnoseTailscale(peer),
+  networkOff: (httpsPort, expectedLocalPort) => disableTailscaleServe(httpsPort, expectedLocalPort),
+  networkRelayEnable: (port, staticEndpoints) => configureTailscalePeerRelay(port, staticEndpoints),
+  networkRelayDisable: () => disableTailscalePeerRelay(),
 });

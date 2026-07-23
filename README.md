@@ -76,16 +76,72 @@ From here on, everything is `tdsp`:
 
 ```sh
 tdsp serve                            # start the console (loopback only, :4500)
-PORT=8080 tdsp serve                  # different port
+tdsp serve --port 8080                # different port
+tdsp serve --tailscale                # loopback backend + private tailnet HTTPS
 tdsp serve --host-cidr 10.10.0.0/24   # also bind this machine's IP inside that range
 tdsp update                           # update: pull latest code + refresh deps; rerun tdsp serve to apply
 ```
 
-`--host-cidr` is for private overlays like WireGuard / Tailscale: with your phone and computer on the same range, the phone opens the printed address and gets the full console (pair it with "Add to Home Screen"):
+`--host-cidr` remains available for an existing WireGuard/private LAN. With your phone and computer on the same range, the phone opens the printed address and gets the full console:
 
 ```
 task-dispatcher on http://127.0.0.1:4500
 task-dispatcher on http://10.10.0.3:4500
+```
+
+## Private access with Tailscale
+
+Tailscale is an optional system networking layer, not an npm dependency. Install its [official client](https://tailscale.com/download) on the computers and phone, sign them into the same tailnet, then run:
+
+```sh
+tdsp serve --tailscale
+```
+
+Switchyard stays bound to `127.0.0.1:4500`; `tailscale serve` publishes that backend at the printed `https://<machine>.<tailnet>.ts.net` URL (HTTPS/WSS, tailnet only). Switchyard never enables Funnel and never resets unrelated Serve routes. The first run may open Tailscale's HTTPS-consent page.
+
+The layers stay deliberately thin:
+
+- **Phone → console:** HTTPS/WebSocket through Tailscale Serve. Open the printed URL and add it to the home screen.
+- **Machine A → machine B:** the existing node protocol remains `ssh B tdsp …`; use B's MagicDNS name or `100.x` address as the SSH target. Tailscale supplies reachability, while SSH still supplies command authentication.
+- **Route choice:** Tailscale automatically tries direct WireGuard, then a configured peer relay, then DERP. Inspect the route instead of guessing:
+
+```sh
+tdsp network status
+tdsp network diagnose <peer-name-or-100.x-ip>
+```
+
+For a strict-NAT pair whose DERP path is too far away, a nearby VPS can be a [Tailscale peer relay](https://tailscale.com/docs/features/peer-relay). The VPS needs Tailscale 1.86+, a reachable UDP port, and a narrowly scoped tailnet grant; it does **not** need to run Switchyard:
+
+```sh
+sudo tailscale set --relay-server-port=40000
+# or, when tdsp is installed and can manage tailscaled:
+tdsp network relay enable --port 40000
+# then grant selected source devices tailscale.com/cap/relay access to this VPS
+tdsp network diagnose <peer>            # should settle on peer-relay
+```
+
+Use `tdsp network relay disable` on the VPS to remove only that relay listener. Use `tdsp network off --https-port 443` to remove only Switchyard's default Serve listener.
+
+### Side-by-side canary (does not touch a live `:4500`)
+
+An isolated profile has its own sqlite, namespace, mirrors, worktrees, SSH sockets, launcher, and port while sharing only this checkout:
+
+```sh
+npm run -s tdsp -- install --profile tailscale-test
+~/.task-dispatcher/profiles/tailscale-test/bin/tdsp \
+  serve --port 14500 --tailscale --tailscale-port 14500
+```
+
+If the tailnet owner has not enabled Serve HTTPS yet, the command prints a one-time consent URL and exits without binding anything. Until that is approved, an explicit HTTP canary still tests the Tailscale underlay while binding only this node's `100.64.0.0/10` address:
+
+```sh
+tdsp-tailscale-test serve --port 14500 --host-cidr 100.64.0.0/10
+```
+
+On another machine, check out the same branch and run the same two commands. In **New machine**, enter its Tailscale MagicDNS SSH target and set the optional profile to `tailscale-test`; Switchyard verifies that exact remote profile before adding it. Neither side will invoke the canonical `tdsp` or open the canonical database. Clean up only the canary listener with:
+
+```sh
+tdsp-tailscale-test network off --https-port 14500 --port 14500
 ```
 
 ## Using it
@@ -108,7 +164,9 @@ Every machine runs the same `tdsp`; the controller invokes the one-shot verbs on
 
 | command | what it does |
 |---|---|
-| `tdsp serve` | start the web console (the persistent server); `--host-cidr <range>` also binds the private-overlay address |
+| `tdsp serve` | start the web console; `--port <port>` changes its loopback port, `--tailscale` privately publishes it with Tailscale Serve |
+| `tdsp network status` / `setup` / `diagnose` / `off` | inspect Tailscale, publish one loopback backend, identify direct/peer-relay/DERP routing, or remove one Serve listener |
+| `tdsp network relay enable` / `disable` | configure this machine's peer-relay UDP listener (the tailnet grant remains an explicit admin step) |
 | `tdsp list` | print this machine's tasks + repos as JSON |
 | `tdsp create-local` | open a bare shell task on this machine |
 | `tdsp create` | create a repo task on this machine (driven by the controller) |
@@ -116,12 +174,12 @@ Every machine runs the same `tdsp`; the controller invokes the one-shot verbs on
 | `tdsp stop <id>` | stop one of this machine's tasks |
 | `tdsp resume` / `cleanup` / `delete-task` | operate on one of this machine's archived tasks |
 | `tdsp doctor legacy [--json]` | read-only audit for controller-owned remote rows and broken ownership references left by older versions |
-| `tdsp install` | set up the global `tdsp` for this machine from its clone |
+| `tdsp install` | set up the global `tdsp`; `--profile <name>` creates a fully isolated side-by-side launcher |
 | `tdsp update` | update this machine's install: `git pull --ff-only` + `npm install` on the clone behind `~/.task-dispatcher/src`; restart serve to apply |
 
 ## Notes
 
-- **Security** — the service **binds loopback `127.0.0.1` only by default**, so the LAN can't reach it. Exposing it requires an explicit `HOST=0.0.0.0` (at which point the web terminal hands a shell to anyone who can reach the port — **add your own auth / reverse proxy, never expose it raw on the public internet**). Prefer either an ssh tunnel (`ssh -L 4500:localhost:4500 host`) or `tdsp serve --host-cidr <range>` to bind only your private overlay (WireGuard / Tailscale) address. Reaching other nodes uses your ssh keys (login = authorization); no new ports or protocols. Tokens are stored **in plaintext** in sqlite — local personal use only.
+- **Security** — the service **binds loopback `127.0.0.1` only by default**, so the LAN can't reach it. Prefer `tdsp serve --tailscale`: the app remains on loopback, Tailscale Serve terminates private tailnet HTTPS, and tailnet access rules still apply. An ssh tunnel (`ssh -L 4500:localhost:4500 host`) or an explicit `--host-cidr` binding also works. `HOST=0.0.0.0` hands a web terminal to anyone who can reach that port — **add your own authentication/reverse proxy and never expose it raw to the public internet**. Reaching other nodes uses SSH keys or Tailscale SSH policy. Tokens are stored **in plaintext** in sqlite — local personal use only.
 - **Terminal feel** — give claude full-screen rendering (`/tui fullscreen` in the session, or `{"tui":"fullscreen"}` in `~/.claude/settings.json`, per machine) to pin the input box, keep scrolling smooth, and stop horizontal jumping.
 
 ## Structure
@@ -140,6 +198,7 @@ server/                REST API + /pty WebSocket; the tdsp CLI; git / tmux / pty
   repo/                git mirrors, worktrees, per-task repo env
   task/                task lifecycle (create/manifest/rename) + the tdsp node-local API (cli.ts)
   fleet/               remote hosts: runners, bootstrap, liveness, cross-node fleet view
+  network/             Tailscale status, private Serve publishing, route diagnosis, peer-relay setup
   session/             tmux sessions, pty spawn, attach command, agent launch args (claude / codex / kimi)
   skills/              skill scan/resolve, plugin install, hook settings
   preview/             the preview reverse-proxy engine
@@ -151,6 +210,7 @@ scripts/setup.sh       one-shot machine setup: preflight (fix ~/.zshenv PATH for
 ~/.task-dispatcher/    per machine:
   src                  pointer to this machine's clone (real clone or symlink)
   bin/tdsp             the global launcher → src
+  profiles/<name>/     isolated canary launcher + source pointer + data root
   <namespace>/         this machine's own data: mirrors/ worktrees/ tasks/ dispatcher.db
 ```
 

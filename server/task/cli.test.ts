@@ -116,6 +116,8 @@ function fakeDeps(db: Database.Database) {
   const branchCalls: number[] = [];
   const providerCalls: any[] = [];
   const inspectCalls: any[] = [];
+  const installCalls: Array<string | undefined> = [];
+  const networkCalls: any[] = [];
   const deps: CliDeps = {
       db,
       out: (s: string) => {
@@ -192,8 +194,86 @@ function fakeDeps(db: Database.Database) {
       skillsList: () => [],
       pluginsList: async () => [],
       pluginsInstall: async () => ({ ok: true as const }),
-      install: () => ({ src: "/h/.task-dispatcher/src", binPath: "/h/.task-dispatcher/bin/tdsp", localBin: "/h/.local/bin/tdsp", clone: "/h/clone" }),
+      install: (profile?: string) => {
+        installCalls.push(profile);
+        return profile
+          ? {
+              src: `/h/.task-dispatcher/profiles/${profile}/src`,
+              binPath: `/h/.task-dispatcher/profiles/${profile}/bin/tdsp`,
+              localBin: `/h/.local/bin/tdsp-${profile}`,
+              dataDir: `/h/.task-dispatcher/profiles/${profile}/data`,
+              profile,
+              clone: "/h/clone",
+            }
+          : { src: "/h/.task-dispatcher/src", binPath: "/h/.task-dispatcher/bin/tdsp", localBin: "/h/.local/bin/tdsp", clone: "/h/clone" };
+      },
       update: async () => ({ ok: true as const, clone: "/h/clone", head: "abc1234 feat: latest" }),
+      networkStatus: async () => ({
+        available: true,
+        state: "running" as const,
+        version: "1.96.4",
+        binary: "/bin/tailscale",
+        backendState: "Running",
+        authUrl: null,
+        tailnet: "me@example.com",
+        magicDnsSuffix: "example.ts.net",
+        magicDnsEnabled: true,
+        certDomains: ["dev-a.example.ts.net"],
+        health: [],
+        self: {
+          id: "self",
+          hostName: "dev-a",
+          dnsName: "dev-a.example.ts.net",
+          os: "linux",
+          ips: ["100.1.2.3"],
+          online: true,
+          active: false,
+          connection: "idle" as const,
+          endpoint: null,
+          relay: "hkg",
+          peerRelay: null,
+        },
+        peers: [],
+        error: null,
+      }),
+      networkSetup: async (options: any) => {
+        networkCalls.push(["setup", options]);
+        const status = await deps.networkStatus();
+        return {
+          ok: true,
+          status,
+          localPort: options.localPort,
+          httpsPort: options.httpsPort,
+          url: `https://dev-a.example.ts.net:${options.httpsPort}`,
+        };
+      },
+      networkDiagnose: async (peer: string) => {
+        networkCalls.push(["diagnose", peer]);
+        return {
+          ok: true,
+          peer,
+          connection: "peer-relay" as const,
+          via: "100.9.9.9:40000:vni:1",
+          latencyMs: 8,
+          samples: [],
+          udp: true,
+          nearestDerp: "hkg",
+          pingOutput: "",
+          netcheckOutput: "",
+        };
+      },
+      networkOff: async (port: number, localPort: number) => {
+        networkCalls.push(["off", port, localPort]);
+        return { ok: true };
+      },
+      networkRelayEnable: async (port: number, endpoints: string[]) => {
+        networkCalls.push(["relay-enable", port, endpoints]);
+        return { ok: true, enabled: true, port, staticEndpoints: endpoints, output: "" };
+      },
+      networkRelayDisable: async () => {
+        networkCalls.push(["relay-disable"]);
+        return { ok: true, enabled: false, port: null, staticEndpoints: [], output: "" };
+      },
   };
   return {
     deps,
@@ -204,6 +284,8 @@ function fakeDeps(db: Database.Database) {
     branchCalls,
     providerCalls,
     inspectCalls,
+    installCalls,
+    networkCalls,
     get out() {
       return out;
     },
@@ -270,7 +352,43 @@ test("runCli serve passes explicit host and CIDR options", async () => {
   const code = await runCli(["serve", "--host", "127.0.0.1", "--host-cidr", "10.10.0.0/24"], f.deps);
   assert.equal(code, 0);
   assert.equal(f.served, true);
-  assert.deepEqual(f.serveOpts, { host: "127.0.0.1", hosts: undefined, hostCidr: "10.10.0.0/24" });
+  assert.deepEqual(f.serveOpts, {
+    host: "127.0.0.1",
+    hosts: undefined,
+    hostCidr: "10.10.0.0/24",
+    port: 4500,
+    tailscale: false,
+    tailscaleHttpsPort: undefined,
+  });
+});
+
+test("runCli serve passes an isolated port and Tailscale listener explicitly", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["serve", "--port", "14500", "--tailscale", "--tailscale-port", "15443"], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.serveOpts, {
+    host: undefined,
+    hosts: undefined,
+    hostCidr: undefined,
+    port: 14500,
+    tailscale: true,
+    tailscaleHttpsPort: 15443,
+  });
+});
+
+test("runCli serve --tailscale defaults to private HTTPS :443 over loopback :4500", async () => {
+  const f = fakeDeps(seed());
+  assert.equal(await runCli(["serve", "--tailscale"], f.deps), 0);
+  assert.equal(f.serveOpts.port, 4500);
+  assert.equal(f.serveOpts.tailscale, true);
+  assert.equal(f.serveOpts.tailscaleHttpsPort, 443);
+});
+
+test("runCli serve rejects invalid ports before starting", async () => {
+  const f = fakeDeps(seed());
+  assert.equal(await runCli(["serve", "--port", "70000"], f.deps), 1);
+  assert.equal(f.served, false);
+  assert.match(f.err, /port/i);
 });
 
 test("runCli rejects an unknown command with a usage hint on stderr and exits 1", async () => {
@@ -435,6 +553,44 @@ test("runCli install sets up the machine and reports the paths", async () => {
   assert.equal(code, 0);
   assert.match(f.out, /\.task-dispatcher\/src/);
   assert.match(f.out, /\.task-dispatcher\/bin\/tdsp/);
+});
+
+test("runCli install --profile creates and reports an isolated launcher", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["install", "--profile", "tailscale-test"], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.installCalls, ["tailscale-test"]);
+  assert.match(f.out, /profiles\/tailscale-test\/data/);
+  assert.match(f.out, /tdsp-tailscale-test/);
+});
+
+test("runCli install rejects an unsafe profile name", async () => {
+  const f = fakeDeps(seed());
+  assert.equal(await runCli(["install", "--profile", "../live"], f.deps), 1);
+  assert.deepEqual(f.installCalls, []);
+  assert.match(f.err, /profile/i);
+});
+
+test("runCli network setup, diagnose, and off use explicit ports and peer", async () => {
+  const f = fakeDeps(seed());
+  assert.equal(await runCli(["network", "status", "--json"], f.deps), 0);
+  assert.equal(JSON.parse(f.out).state, "running");
+
+  assert.equal(await runCli(["network", "setup", "--port", "14500", "--https-port", "15443"], f.deps), 0);
+  assert.equal(await runCli(["network", "diagnose", "dev-b", "--json"], f.deps), 0);
+  assert.equal(await runCli(["network", "off", "--https-port", "15443", "--port", "14500"], f.deps), 0);
+  assert.equal(await runCli([
+    "network", "relay", "enable", "--port", "40000",
+    "--static-endpoints", "203.0.113.8:40000,203.0.113.9:40000",
+  ], f.deps), 0);
+  assert.equal(await runCli(["network", "relay", "disable"], f.deps), 0);
+  assert.deepEqual(f.networkCalls, [
+    ["setup", { localPort: 14500, httpsPort: 15443 }],
+    ["diagnose", "dev-b"],
+    ["off", 15443, 14500],
+    ["relay-enable", 40000, ["203.0.113.8:40000", "203.0.113.9:40000"]],
+    ["relay-disable"],
+  ]);
 });
 
 test("runCli update pulls the install and reports the new head", async () => {

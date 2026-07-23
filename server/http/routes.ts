@@ -17,7 +17,7 @@ import { asAgentKind } from "../session/agent.js";
 import { readTranscript } from "../session/transcript.js";
 import { syncReposManifest } from "../repo/manifest.js";
 import { removeTaskManifest } from "../task/taskmanifest.js";
-import { localRunner, transportRunnerFor, SSH_BASE_ARGS } from "../fleet/runner.js";
+import { localRunner, RemoteRunner, transportRunnerFor, SSH_BASE_ARGS } from "../fleet/runner.js";
 import {
   aggregateNodes,
   NODE_CONTROL_CAPABILITY,
@@ -25,7 +25,7 @@ import {
   taskListPayload,
 } from "../task/cli.js";
 import { fleetTargets, type FleetTarget } from "../fleet/fleet.js";
-import { bootstrapMachine } from "../fleet/bootstrap.js";
+import { bootstrapMachine, validProfileName } from "../fleet/bootstrap.js";
 import { createLocalTask, createRepoTask, type RepoTaskEnv } from "../task/createtask.js";
 import { buildRepoTaskEnv } from "../repo/repoenv.js";
 import { probeHost } from "../fleet/liveness.js";
@@ -796,15 +796,51 @@ app.get("/api/hosts", (_req, res) => {
   res.json(hosts.map(({ data_dir: _dataDir, tdsp_bin: _tdspBin, ...host }) => host));
 });
 
-app.post("/api/hosts", (req, res) => {
+app.post("/api/hosts", async (req, res) => {
   const { name, target, kind } = req.body ?? {};
   if (!name || !target) return res.status(400).json({ error: "name and target required" });
   const k = kind === "mosh" ? "mosh" : "ssh";
-  const info = db.prepare("INSERT INTO hosts (name, target, kind) VALUES (?,?,?)")
-    .run(String(name).trim(), String(target).trim(), k);
+  const cleanTarget = String(target).trim();
+  const profile = typeof req.body?.profile === "string" ? req.body.profile.trim() : "";
+  let tdspBin: string | null = null;
+
+  // Advanced/canary path: the operator already installed an isolated profile on
+  // B. Verify that exact node API before recording B, so A can never silently
+  // fall back to B's canonical tdsp or controller-owned state.
+  if (profile) {
+    if (!validProfileName(profile)) {
+      return res.status(400).json({ error: "profile must be 1-32 lowercase letters, numbers, or hyphens" });
+    }
+    try {
+      const runner = new RemoteRunner(cleanTarget);
+      const home = (await runner.exec("sh", ["-c", 'printf %s "$HOME"'])).trim();
+      if (!home.startsWith("/")) throw new Error("remote home is unavailable");
+      tdspBin = path.posix.join(home, ".task-dispatcher", "profiles", profile, "bin", "tdsp");
+      const check = await runNodeCommand(
+        { kind: k, target: cleanTarget, tdsp_bin: tdspBin },
+        ["list", "--json"],
+        { timeoutMs: 30_000 },
+      );
+      const payload = parseNodeJson(check.stdout);
+      if (!check.ok || typeof payload?.schema_version !== "number") {
+        return res.status(409).json({
+          code: "profileUnavailable",
+          error: `Switchyard profile "${profile}" is not ready on the target; run tdsp install --profile ${profile} there first`,
+        });
+      }
+    } catch {
+      return res.status(409).json({
+        code: "profileUnavailable",
+        error: `could not reach Switchyard profile "${profile}" on the target`,
+      });
+    }
+  }
+
+  const info = db.prepare("INSERT INTO hosts (name, target, kind, tdsp_bin) VALUES (?,?,?,?)")
+    .run(String(name).trim(), cleanTarget, k, tdspBin);
   const id = Number(info.lastInsertRowid);
   probeHost(getHost.get(id) as Host); // probe right away so it goes online fast (fire-and-forget)
-  res.json({ id });
+  res.json({ id, profile: profile || null, ready: !!tdspBin });
 });
 
 // Run a shell script ON a machine via `ssh target sh -s`, fed over STDIN. This is

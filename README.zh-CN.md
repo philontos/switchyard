@@ -76,16 +76,72 @@ tdsp serve           # 启动 → http://localhost:4500
 
 ```sh
 tdsp serve                            # 启动控制台(只绑本机回环 :4500)
-PORT=8080 tdsp serve                  # 换端口
+tdsp serve --port 8080                # 换端口
+tdsp serve --tailscale                # 回环后端 + tailnet 私有 HTTPS
 tdsp serve --host-cidr 10.10.0.0/24   # 额外绑上落在该网段内的本机 IP
 tdsp update                           # 更新:拉最新代码 + 刷依赖,重跑 tdsp serve 生效
 ```
 
-`--host-cidr` 是给 WireGuard / Tailscale 这类私有组网用的：手机和电脑在同一个网段里，手机直接打开对应地址就是完整控制台（配合「添加到主屏幕」当 App 用）：
+已有 WireGuard / 私有局域网仍可继续用 `--host-cidr`：手机和电脑在同一个网段里，手机直接打开对应地址就是完整控制台：
 
 ```
 task-dispatcher on http://127.0.0.1:4500
 task-dispatcher on http://10.10.0.3:4500
+```
+
+## 用 Tailscale 私密接入
+
+Tailscale 是可选的系统网络层，不是 npm 依赖。先在电脑和手机安装 [Tailscale 官方客户端](https://tailscale.com/download)，登录同一个 tailnet，然后运行：
+
+```sh
+tdsp serve --tailscale
+```
+
+Switchyard 仍然只监听 `127.0.0.1:4500`；`tailscale serve` 把它发布到命令打印的 `https://<机器>.<tailnet>.ts.net`（HTTPS/WSS、仅 tailnet 内可达）。Switchyard 不会开启 Funnel，也不会 reset 其它 Serve 路由。首次使用可能会打开 Tailscale 的 HTTPS 授权页。
+
+各层职责保持很薄：
+
+- **手机 → 控制台：** 经 Tailscale Serve 访问 HTTPS/WebSocket；打开打印的地址，再添加到主屏幕。
+- **机器 A → 机器 B：** 节点协议仍是现有的 `ssh B tdsp …`；SSH 目标填 B 的 MagicDNS 名或 `100.x` 地址。Tailscale 只负责网络可达，SSH 继续负责命令认证。
+- **路径选择：** Tailscale 自动尝试 WireGuard 直连，再尝试已配置的 Peer Relay，最后才走 DERP。可以直接诊断，不必猜：
+
+```sh
+tdsp network status
+tdsp network diagnose <对端名称或100.x地址>
+```
+
+如果两端都在严格 NAT 后面、DERP 又绕得很远，可以把同城 VPS 配成 [Tailscale Peer Relay](https://tailscale.com/docs/features/peer-relay)。VPS 只需 Tailscale 1.86+、一个可达的 UDP 端口，以及精确限定范围的 tailnet grant；它**不需要**运行 Switchyard：
+
+```sh
+sudo tailscale set --relay-server-port=40000
+# 如果 VPS 也装了 tdsp 且有权限管理 tailscaled，也可以：
+tdsp network relay enable --port 40000
+# 然后在 tailnet 策略中，给选定源设备授予到这台 VPS 的 tailscale.com/cap/relay
+tdsp network diagnose <对端>            # 最终路径应显示 peer-relay
+```
+
+VPS 上运行 `tdsp network relay disable` 只关闭该中继监听；`tdsp network off --https-port 443` 只移除 Switchyard 默认的 Serve 监听。
+
+### 并行灰度环境（不碰现有 `:4500`）
+
+隔离 profile 拥有独立的 sqlite、namespace、mirror、worktree、SSH socket、启动器和端口，只共享当前 checkout：
+
+```sh
+npm run -s tdsp -- install --profile tailscale-test
+~/.task-dispatcher/profiles/tailscale-test/bin/tdsp \
+  serve --port 14500 --tailscale --tailscale-port 14500
+```
+
+如果 tailnet 管理员还没启用 Serve HTTPS，该命令会打印一次性授权地址并退出，不会绑定任何端口。授权前仍可用显式 HTTP 灰度方式测试 Tailscale 底层网络，而且只绑定这台节点的 `100.64.0.0/10` 地址：
+
+```sh
+tdsp-tailscale-test serve --port 14500 --host-cidr 100.64.0.0/10
+```
+
+另一台机器拉同一分支，也执行这两条命令。在「新建机器」里填它的 Tailscale MagicDNS SSH 目标，并把可选 profile 填成 `tailscale-test`；Switchyard 会先验证这个精确的远端 profile 再添加。两边都不会调用正式 `tdsp`，也不会打开正式数据库。只清理灰度 Serve 监听可运行：
+
+```sh
+tdsp-tailscale-test network off --https-port 14500 --port 14500
 ```
 
 ## 使用
@@ -108,7 +164,9 @@ task-dispatcher on http://10.10.0.3:4500
 
 | 命令 | 作用 |
 |---|---|
-| `tdsp serve` | 启动 web 控制台（常驻服务）；`--host-cidr <网段>` 加绑私有组网地址 |
+| `tdsp serve` | 启动 web 控制台；`--port <端口>` 修改回环端口，`--tailscale` 经 Tailscale Serve 私密发布 |
+| `tdsp network status` / `setup` / `diagnose` / `off` | 检查 Tailscale、发布一个回环后端、识别直连/Peer Relay/DERP 路径，或移除一个 Serve 监听 |
+| `tdsp network relay enable` / `disable` | 配置本机的 Peer Relay UDP 监听（tailnet grant 仍需管理员明确配置） |
 | `tdsp list` | 以 JSON 打印本机任务 + 仓库 |
 | `tdsp create-local` | 在本机开一个裸 shell 任务 |
 | `tdsp create` | 在本机创建仓库任务（由控制端驱动） |
@@ -116,12 +174,12 @@ task-dispatcher on http://10.10.0.3:4500
 | `tdsp stop <id>` | 停止本机的一个任务 |
 | `tdsp resume` / `cleanup` / `delete-task` | 操作本机自己的归档任务 |
 | `tdsp doctor legacy [--json]` | 只读审计旧版本在控制端留下的远端归属记录与失效归属引用 |
-| `tdsp install` | 用本机这份 clone 装好全局 `tdsp` |
+| `tdsp install` | 用本机这份 clone 装好全局 `tdsp`；`--profile <名称>` 创建完全隔离的并行启动器 |
 | `tdsp update` | 更新本机安装：对 `~/.task-dispatcher/src` 指向的 clone 执行 `git pull --ff-only` + `npm install`；重启 serve 生效 |
 
 ## 说明
 
-- **安全** —— 服务**默认只绑回环 `127.0.0.1`**，局域网碰不到。要暴露必须显式设 `HOST=0.0.0.0`（此时 web 终端等于把 shell 递给任何能摸到端口的人，**务必自加认证/反向代理——绝不裸奔公网**）。更推荐两种方式：ssh 隧道 `ssh -L 4500:localhost:4500 host`，或 `tdsp serve --host-cidr <网段>` 只绑私有组网（WireGuard / Tailscale）里的本机地址。访问其它节点用你的 ssh 密钥（登录即授权），不开新端口不加新协议。token 以**明文**存在 sqlite 里——仅限本地个人使用。
+- **安全** —— 服务**默认只绑回环 `127.0.0.1`**，局域网碰不到。优先用 `tdsp serve --tailscale`：应用仍在回环，Tailscale Serve 终止 tailnet 私有 HTTPS，tailnet 访问策略照常生效。也可用 ssh 隧道 `ssh -L 4500:localhost:4500 host`，或显式 `--host-cidr`。`HOST=0.0.0.0` 会把 web 终端交给任何能碰到端口的人，**务必自加认证/反向代理，绝不裸奔公网**。访问其它节点继续使用 SSH key 或 Tailscale SSH 策略。token 以**明文**存在 sqlite 里——仅限本地个人使用。
 - **终端手感** —— 给 claude 开全屏渲染（会话里 `/tui fullscreen`，或每台机器的 `~/.claude/settings.json` 加 `{"tui":"fullscreen"}`），输入框固定、滚动顺滑、不再横向跳动。
 
 ## 结构
@@ -140,6 +198,7 @@ server/                REST API + /pty WebSocket;tdsp CLI;git / tmux / pty / ssh
   repo/                git 镜像、worktree、每任务的 repo 环境
   task/                任务生命周期(创建/清单/改名) + tdsp 节点本地 API(cli.ts)
   fleet/               远程主机:runner、bootstrap、存活探测、跨节点舰队视图
+  network/             Tailscale 状态、私有 Serve 发布、路径诊断、Peer Relay 配置
   session/             tmux 会话、pty 派生、attach 命令、agent 启动参数(claude / codex / kimi)
   skills/              技能扫描/解析、插件安装、hook 设置
   preview/             预览反向代理引擎
@@ -151,6 +210,7 @@ scripts/setup.sh       预检:校验 agent CLI + git/tmux,修 ~/.zshenv 的 PATH
 ~/.task-dispatcher/    每台机器:
   src                  指向本机 clone 的指针(真 clone 或软链)
   bin/tdsp             全局启动器 → src
+  profiles/<name>/     隔离的灰度启动器 + 源码指针 + 数据根目录
   <namespace>/         本机自己的数据: mirrors/ worktrees/ tasks/ dispatcher.db
 ```
 

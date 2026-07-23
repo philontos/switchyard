@@ -505,10 +505,11 @@ export async function addHost() {
   const body = {
     name: $("h-name").value.trim(), target: $("h-target").value.trim(),
     kind: Selects["h-kind"].value,
+    profile: $("h-profile").value.trim(),
   };
   if (!body.name || !body.target) return toast(t("host.required"), "error");
   await api("/api/hosts", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
-  $("h-name").value = ""; $("h-target").value = "";
+  $("h-name").value = ""; $("h-target").value = ""; $("h-profile").value = "";
   closeHostModal();
   toast(t("host.added"), "success");
   loadHosts();
