@@ -13,6 +13,7 @@ import { db, type Provider, type Task } from "./core/db.js";
 import { NS, DATA_DIR, ROOT } from "./core/paths.js";
 import { ServeLifecycle, serveOptionsToArgs } from "./core/serve-lifecycle.js";
 import { applyInstall, applyProfileInstall } from "./fleet/bootstrap.js";
+import { uninstallProfile } from "./fleet/profile-uninstall.js";
 import { localRunner } from "./fleet/runner.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions } from "./session/tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./task/createtask.js";
@@ -37,6 +38,7 @@ import {
   setupTailscale,
   tailscaleStatus,
 } from "./network/tailscale.js";
+import { forgetOwnedServeRoute, recordOwnedServeRoute } from "./network/serve-ownership.js";
 
 // Ensure child processes (tmux/git/claude) find Homebrew binaries regardless of
 // how tdsp was launched — a bare non-interactive ssh PATH otherwise can't resolve
@@ -133,6 +135,10 @@ process.exitCode = await runCli(process.argv.slice(2), {
           httpsPort: launch.tailscaleHttpsPort ?? localPort,
         });
         if (!result.ok) throw new Error(`serve: ${result.error || result.status.error || "Tailscale setup failed"}`);
+        recordOwnedServeRoute(DATA_DIR, {
+          httpsPort: result.httpsPort,
+          localPort: result.localPort,
+        });
         // The HTTP app uses these only to publish/probe the tailnet-private
         // well-known node endpoint. They are set after Serve succeeds, so a plain
         // LAN/loopback launch can never pretend to be an authenticated peer.
@@ -284,6 +290,15 @@ process.exitCode = await runCli(process.argv.slice(2), {
       dataDir: p.dataDir,
     };
   },
+  uninstall: (profile, purge) =>
+    uninstallProfile(
+      profile,
+      { purge },
+      {
+        home: os.homedir(),
+        networkOff: (httpsPort, localPort) => disableTailscaleServe(httpsPort, localPort),
+      },
+    ),
   // pull the canonical install (the clone behind ~/.task-dispatcher/src) to the
   // latest code and refresh deps. --ff-only so a locally-diverged clone fails
   // loud instead of silently merging; a running serve keeps the old code until
@@ -324,9 +339,27 @@ process.exitCode = await runCli(process.argv.slice(2), {
     }
   },
   networkStatus: () => tailscaleStatus(),
-  networkSetup: (options) => setupTailscale(options),
+  networkSetup: async (options) => {
+    const result = await setupTailscale(options);
+    if (result.ok) {
+      recordOwnedServeRoute(DATA_DIR, {
+        httpsPort: result.httpsPort,
+        localPort: result.localPort,
+      });
+    }
+    return result;
+  },
   networkDiagnose: (peer) => diagnoseTailscale(peer),
-  networkOff: (httpsPort, expectedLocalPort) => disableTailscaleServe(httpsPort, expectedLocalPort),
+  networkOff: async (httpsPort, expectedLocalPort) => {
+    const result = await disableTailscaleServe(httpsPort, expectedLocalPort);
+    if (result.ok) {
+      forgetOwnedServeRoute(DATA_DIR, {
+        httpsPort,
+        localPort: expectedLocalPort,
+      });
+    }
+    return result;
+  },
   networkRelayEnable: (port, staticEndpoints) => configureTailscalePeerRelay(port, staticEndpoints),
   networkRelayDisable: () => disableTailscalePeerRelay(),
 });

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   ServeLifecycle,
+  serveOptionsFromCommand,
   serveOptionsToArgs,
   serveOptionsToCommand,
 } from "./serve-lifecycle.ts";
@@ -81,6 +82,23 @@ test("serve options have one stable restart argv and display command", () => {
     serveOptionsToCommand(options),
     "tdsp serve --host 127.0.0.1 --host-cidr 10.10.0.0/24 --port 14500 --tailscale --tailscale-port 15443",
   );
+});
+
+test("pre-lifecycle serve command recovery understands the supported launch flags", () => {
+  assert.deepEqual(
+    serveOptionsFromCommand(
+      "node /app/server/tdsp.ts serve --host-cidr 10.10.0.0/24 --port=14500 --tailscale --tailscale-port 15443",
+    ),
+    {
+      hostCidr: "10.10.0.0/24",
+      port: 14500,
+      tailscale: true,
+      tailscaleHttpsPort: 15443,
+    },
+  );
+  assert.deepEqual(serveOptionsFromCommand("node /app/server/tdsp.ts serve"), { port: 4500 });
+  assert.equal(serveOptionsFromCommand("node /app/server/tdsp.ts list"), null);
+  assert.equal(serveOptionsFromCommand("node /app/server/tdsp.ts serve --port nope"), null);
 });
 
 test("claim records starting, markReady records running, and release preserves restart config", () => {
@@ -214,13 +232,13 @@ test("a new start atomically retires a dead process record", () => {
   }
 });
 
-test("a pre-lifecycle tdsp process using this instance can be reported and stopped once", async () => {
+test("a pre-lifecycle tdsp process is reported and its launch options survive the one-time stop", async () => {
   const f = fixture();
   try {
     const dataDir = path.join(f.root, "default");
     fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(path.join(dataDir, "dispatcher.db"), "");
-    const command = "node /switchyard/server/tdsp.ts serve --port 4500";
+    const command = "node /switchyard/server/tdsp.ts serve --port 14500 --tailscale --tailscale-port 15443";
     f.processes.set(77, { alive: true, command });
     const legacy = () => f.processes.get(77)?.alive ? [{ pid: 77, command }] : [];
     const manager = f.lifecycle(dataDir, 202, 100, legacy);
@@ -229,6 +247,7 @@ test("a pre-lifecycle tdsp process using this instance can be reported and stopp
     assert.equal(status.state, "legacy");
     assert.equal(status.running, true);
     assert.equal(status.pid, 77);
+    assert.deepEqual(status.options, { port: 14500, tailscale: true, tailscaleHttpsPort: 15443 });
     assert.throws(() => manager.claim({ port: 4500 }), /already running without a lifecycle record/i);
 
     const result = await manager.stop();
@@ -236,6 +255,7 @@ test("a pre-lifecycle tdsp process using this instance can be reported and stopp
     assert.equal(result.stopped, true);
     assert.deepEqual(f.signals, [[77, "SIGTERM"]]);
     assert.equal(manager.status().state, "stopped");
+    assert.deepEqual(manager.status().options, { port: 14500, tailscale: true, tailscaleHttpsPort: 15443 });
   } finally {
     f.cleanup();
   }

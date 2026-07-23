@@ -55,6 +55,7 @@ import {
   type CodeInspectRequest,
 } from "../codeview/codeview.js";
 import { setupTailscale, tailscaleStatus } from "../network/tailscale.js";
+import { recordOwnedServeRoute } from "../network/serve-ownership.js";
 import {
   descriptorMatchesPeer,
   discoveryPorts,
@@ -224,6 +225,10 @@ app.post("/api/onboarding/network/setup", async (req, res) => {
   try {
     const result = await setupTailscale({ localPort, httpsPort: requested });
     if (result.ok) {
+      recordOwnedServeRoute(DATA_DIR, {
+        httpsPort: result.httpsPort,
+        localPort: result.localPort,
+      });
       process.env.TDSP_TAILSCALE_SERVE = "1";
       process.env.TDSP_TAILSCALE_PORT = String(result.httpsPort);
       if (result.url) process.env.TDSP_TAILSCALE_URL = result.url;

@@ -90,6 +90,48 @@ function normalizedOptions(options: ServeOptions): ServeOptions {
   };
 }
 
+function commandFlag(command: string, names: string[]): string | undefined {
+  const group = names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const match = command.match(
+    new RegExp(`(?:^|\\s)--(?:${group})(?:=|\\s+)(?:"([^"]*)"|'([^']*)'|([^\\s]+))`),
+  );
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
+function validPort(value: string | undefined, fallback: number): number | null {
+  if (value == null || value === "") return fallback;
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+/**
+ * Recover the stable serve options from a pre-lifecycle process command. This
+ * intentionally understands only tdsp's small serve flag surface; malformed or
+ * ambiguous commands return null instead of being guessed at.
+ */
+export function serveOptionsFromCommand(command: string): ServeOptions | null {
+  if (!/(?:^|\s)serve(?:\s|$)/.test(command)) return null;
+  const port = validPort(commandFlag(command, ["port"]), 4500);
+  if (port == null) return null;
+  const tailscale = /(?:^|\s)--tailscale(?:\s|$)/.test(command);
+  const tailscaleHttpsPort = tailscale
+    ? validPort(commandFlag(command, ["tailscale-port", "https-port"]), 443)
+    : undefined;
+  if (tailscale && tailscaleHttpsPort == null) return null;
+  const hostsValue = commandFlag(command, ["hosts"]);
+  const hosts = hostsValue
+    ? hostsValue.split(",").map((host) => host.trim()).filter(Boolean)
+    : undefined;
+  return normalizedOptions({
+    host: commandFlag(command, ["host"]),
+    hosts,
+    hostCidr: commandFlag(command, ["host-cidr", "cidr", "wireguard", "wg"]),
+    port,
+    tailscale,
+    tailscaleHttpsPort: tailscaleHttpsPort ?? undefined,
+  });
+}
+
 function shellDisplay(value: string): string {
   return /^[a-zA-Z0-9_./:@,+-]+$/.test(value)
     ? value
@@ -274,6 +316,18 @@ export class ServeLifecycle {
     return isServeConfig(value) ? value : null;
   }
 
+  private saveConfig(options: ServeOptions, savedAt = this.now().toISOString()): ServeConfig {
+    const normalized = normalizedOptions(options);
+    const config: ServeConfig = {
+      schema: 1,
+      savedAt,
+      options: normalized,
+      command: serveOptionsToCommand(normalized),
+    };
+    atomicWriteJson(this.configPath, config, this.makeToken());
+    return config;
+  }
+
   private ownsProcess(record: ServeRecord): boolean {
     const inspected = this.inspectProcess(record.pid);
     return inspected.alive && inspected.command.includes(record.processTitle);
@@ -339,6 +393,7 @@ export class ServeLifecycle {
       const legacy = activeDirExists ? [] : this.legacyProcesses();
       if (legacy.length) {
         const exact = legacy.length === 1 ? legacy[0] : null;
+        const recovered = exact ? serveOptionsFromCommand(exact.command) : null;
         return {
           state: "legacy",
           running: true,
@@ -347,7 +402,7 @@ export class ServeLifecycle {
           pid: exact?.pid ?? null,
           startedAt: null,
           readyAt: null,
-          options: config ? normalizedOptions(config.options) : null,
+          options: config ? normalizedOptions(config.options) : recovered,
           command: exact?.command ?? null,
           message: exact
             ? "running from before lifecycle tracking was installed; stop it once, then start it again to make restart available"
@@ -452,13 +507,7 @@ export class ServeLifecycle {
     const readyAt = this.now().toISOString();
     const running: ServeRecord = { ...current, state: "running", readyAt };
     atomicWriteJson(this.statePath, running, record.token);
-    const config: ServeConfig = {
-      schema: 1,
-      savedAt: readyAt,
-      options: normalizedOptions(running.options),
-      command: running.command,
-    };
-    atomicWriteJson(this.configPath, config, record.token);
+    this.saveConfig(running.options, readyAt);
   }
 
   release(token: string): void {
@@ -484,6 +533,10 @@ export class ServeLifecycle {
         };
       }
       const target = legacy[0];
+      if (!this.readConfig()) {
+        const recovered = serveOptionsFromCommand(target.command);
+        if (recovered) this.saveConfig(recovered);
+      }
       try {
         this.signalProcess(target.pid, "SIGTERM");
       } catch (error: any) {

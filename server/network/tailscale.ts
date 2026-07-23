@@ -487,17 +487,18 @@ export async function disableTailscaleServe(
   httpsPort = 443,
   expectedLocalPort = 4500,
   command: TailscaleCommand = systemTailscaleCommand(),
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; reason?: "invalid" | "status" | "mismatch" | "command" }> {
   if (!validPort(httpsPort) || !validPort(expectedLocalPort)) {
-    return { ok: false, error: "ports must be integers between 1 and 65535" };
+    return { ok: false, reason: "invalid", error: "ports must be integers between 1 and 65535" };
   }
   const existing = await servePortStatus(httpsPort, command);
-  if (!existing.ok) return existing;
+  if (!existing.ok) return { ...existing, reason: "status" };
   if (!existing.listener.configured) return { ok: true };
   const target = `http://127.0.0.1:${expectedLocalPort}`;
   if (!listenerMatches(existing.listener, target)) {
     return {
       ok: false,
+      reason: "mismatch",
       error:
         `Tailscale HTTPS :${httpsPort} does not point exclusively to ${target}; ` +
         "refusing to remove somebody else's Serve/Funnel route",
@@ -505,7 +506,11 @@ export async function disableTailscaleServe(
   }
   const result = await command(["serve", "--yes", `--https=${httpsPort}`, "off"], 30_000);
   if (result.ok) return { ok: true };
-  return { ok: false, error: [result.stderr, result.stdout].filter(Boolean).join("\n").trim() || "tailscale serve off failed" };
+  return {
+    ok: false,
+    reason: "command",
+    error: [result.stderr, result.stdout].filter(Boolean).join("\n").trim() || "tailscale serve off failed",
+  };
 }
 
 /**

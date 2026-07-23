@@ -195,6 +195,15 @@ npm run -s tdsp -- install --profile canary
 
 This is useful for testing networking without touching a live `:4500` instance.
 
+To remove it, stop that profile first and uninstall it from any remaining `tdsp` launcher:
+
+```sh
+tdsp-canary serve stop
+tdsp uninstall --profile canary
+```
+
+The default is recoverable: Switchyard moves the complete profile to `~/.task-dispatcher/uninstalled-profiles/` and removes only its matching `tdsp-canary` symlink. Add `--purge` only when you intentionally want to permanently delete its database, mirrors, worktrees, and configuration. A saved Tailscale Serve route is removed only when it still points to that profile's exact local port.
+
 </details>
 
 ## Command reference
@@ -212,6 +221,7 @@ This is useful for testing networking without touching a live `:4500` instance.
 | `tdsp stop/resume/cleanup/delete-task` | Operate on this node's task lifecycle |
 | `tdsp doctor legacy [--json]` | Read-only audit for remote state left by older releases |
 | `tdsp install [--profile name]` | Install a launcher/profile without starting its server |
+| `tdsp uninstall --profile name [--purge]` | Safely archive, or explicitly purge, one stopped profile |
 | `tdsp update` | Fast-forward the installed checkout and refresh dependencies |
 
 ## Security notes

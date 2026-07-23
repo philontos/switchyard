@@ -222,6 +222,7 @@ test("disableTailscaleServe refuses to remove a listener it does not own", async
   };
   const disabled = await disableTailscaleServe(443, 4500, command);
   assert.equal(disabled.ok, false);
+  assert.equal(disabled.reason, "mismatch");
   assert.match(disabled.error || "", /refusing/i);
   assert.deepEqual(calls, [["serve", "status", "--json"]]);
 });
