@@ -129,6 +129,7 @@ function fakeDeps(db: Database.Database) {
   const providerCalls: any[] = [];
   const inspectCalls: any[] = [];
   const installCalls: Array<string | undefined> = [];
+  const uninstallCalls: Array<[string, boolean]> = [];
   const networkCalls: any[] = [];
   const deps: CliDeps = {
       db,
@@ -227,6 +228,17 @@ function fakeDeps(db: Database.Database) {
             }
           : { src: "/h/.task-dispatcher/src", binPath: "/h/.task-dispatcher/bin/tdsp", localBin: "/h/.local/bin/tdsp", clone: "/h/clone" };
       },
+      uninstall: async (profile: string, purge: boolean) => {
+        uninstallCalls.push([profile, purge]);
+        return {
+          ok: true,
+          profile,
+          purged: purge,
+          archivedAt: purge ? null : `/h/.task-dispatcher/uninstalled-profiles/${profile}-stamp`,
+          launcherRemoved: true,
+          networkRoutesRemoved: 1,
+        };
+      },
       update: async () => ({ ok: true as const, clone: "/h/clone", head: "abc1234 feat: latest" }),
       networkStatus: async () => ({
         available: true,
@@ -307,6 +319,7 @@ function fakeDeps(db: Database.Database) {
     providerCalls,
     inspectCalls,
     installCalls,
+    uninstallCalls,
     networkCalls,
     get out() {
       return out;
@@ -674,6 +687,7 @@ test("runCli install --profile creates and reports an isolated launcher", async 
   assert.match(f.out, /profiles\/tailscale-test\/data/);
   assert.match(f.out, /tdsp-tailscale-test/);
   assert.match(f.out, /tdsp-tailscale-test serve --port <unused-port>/);
+  assert.match(f.out, /tdsp uninstall --profile tailscale-test/);
 });
 
 test("runCli install rejects an unsafe profile name", async () => {
@@ -681,6 +695,52 @@ test("runCli install rejects an unsafe profile name", async () => {
   assert.equal(await runCli(["install", "--profile", "../live"], f.deps), 1);
   assert.deepEqual(f.installCalls, []);
   assert.match(f.err, /profile/i);
+});
+
+test("runCli uninstall removes only an explicitly named profile and reports the recovery archive", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["uninstall", "--profile", "tailscale-test"], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.uninstallCalls, [["tailscale-test", false]]);
+  assert.match(f.out, /uninstalled-profiles\/tailscale-test-stamp/);
+  assert.match(f.out, /tdsp-tailscale-test removed/);
+  assert.match(f.out, /Tailscale Serve route/);
+});
+
+test("runCli uninstall --purge explicitly requests permanent profile deletion", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["uninstall", "--profile=tailscale-test", "--purge", "--json"], f.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(f.uninstallCalls, [["tailscale-test", true]]);
+  assert.equal(JSON.parse(f.out).purged, true);
+});
+
+test("runCli uninstall refuses the canonical install, unsafe names, and unknown arguments", async () => {
+  for (const argv of [
+    ["uninstall"],
+    ["uninstall", "--profile", "../default"],
+    ["uninstall", "--profile", "canary", "extra"],
+    ["uninstall", "--profile", "canary", "--force"],
+  ]) {
+    const f = fakeDeps(seed());
+    assert.equal(await runCli(argv, f.deps), 1, argv.join(" "));
+    assert.deepEqual(f.uninstallCalls, [], argv.join(" "));
+    assert.match(f.err, /uninstall|profile|unexpected|unknown/i);
+  }
+});
+
+test("runCli uninstall surfaces a running-profile refusal without mutating anything else", async () => {
+  const f = fakeDeps(seed());
+  f.deps.uninstall = async (profile) => ({
+    ok: false,
+    profile,
+    error: "running",
+    message: `profile "${profile}" is still running; run tdsp-${profile} serve stop first`,
+    pid: 123,
+  });
+  const code = await runCli(["uninstall", "--profile", "canary"], f.deps);
+  assert.equal(code, 1);
+  assert.match(f.err, /serve stop/);
 });
 
 test("runCli network setup, diagnose, and off use explicit ports and peer", async () => {

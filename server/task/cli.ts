@@ -24,6 +24,7 @@ import type {
   ServeStatus,
   ServeStopResult,
 } from "../core/serve-lifecycle.js";
+import type { ProfileUninstallResult } from "../fleet/profile-uninstall.js";
 export { CODE_VIEW_CAPABILITY } from "../codeview/codeview.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
@@ -300,6 +301,7 @@ export interface CliDeps {
     profile?: string;
     dataDir?: string;
   };
+  uninstall: (profile: string, purge: boolean) => Promise<ProfileUninstallResult>;
   networkStatus: () => Promise<TailscaleStatus>;
   networkSetup: (options: TailscaleSetupOptions) => Promise<TailscaleSetupResult>;
   networkDiagnose: (peer: string) => Promise<TailscaleDiagnosis>;
@@ -370,6 +372,46 @@ function parseServeFlags(args: string[]): { ok: true; flags: Record<string, stri
     flags[key] = value;
   }
   return { ok: true, flags };
+}
+
+function parseUninstallFlags(
+  args: string[],
+): { ok: true; profile: string; purge: boolean; json: boolean } | { ok: false; error: string } {
+  let profile = "";
+  let purge = false;
+  let json = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--purge") {
+      purge = true;
+      continue;
+    }
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (arg === "--profile" || arg.startsWith("--profile=")) {
+      const value = arg === "--profile" ? args[++i] : arg.slice("--profile=".length);
+      if (!value || value.startsWith("--")) {
+        return { ok: false, error: "uninstall: --profile requires a value" };
+      }
+      profile = value;
+      continue;
+    }
+    return {
+      ok: false,
+      error: arg.startsWith("--")
+        ? `uninstall: unknown option: ${arg}`
+        : `uninstall: unexpected positional argument: ${arg}`,
+    };
+  }
+  if (!profile) {
+    return {
+      ok: false,
+      error: "uninstall: --profile is required; the canonical tdsp installation is never removed by this command",
+    };
+  }
+  return { ok: true, profile, purge, json };
 }
 
 function serveStatusText(status: ServeStatus): string {
@@ -789,8 +831,48 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
           `  on PATH ${r.localBin}  (ensure ~/.local/bin is on your PATH)\n` +
           `  state  installed only (no server was started)\n` +
           `next: start with \`${command} serve${profile ? " --port <unused-port>" : ""}\`, then check \`${command} serve status\`\n` +
+          (profile ? `remove: stop it, then run \`tdsp uninstall --profile ${profile}\`\n` : "") +
           `remote check: \`ssh <host> ${r.binPath} list\``,
       );
+      return 0;
+    }
+    case "uninstall": {
+      const parsed = parseUninstallFlags(argv.slice(1));
+      if (!parsed.ok) {
+        deps.err(`${parsed.error}\nUsage: tdsp uninstall --profile <name> [--purge] [--json]`);
+        return 1;
+      }
+      if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(parsed.profile)) {
+        deps.err("uninstall: profile must be 1-32 lowercase letters, numbers, or hyphens");
+        return 1;
+      }
+      const result = await deps.uninstall(parsed.profile, parsed.purge);
+      if (parsed.json) {
+        deps.out(JSON.stringify(result));
+        return result.ok ? 0 : 1;
+      }
+      if (!result.ok) {
+        deps.err(`uninstall failed: ${result.message || result.error || "unknown error"}`);
+        return 1;
+      }
+      const lines = [
+        result.alreadyAbsent
+          ? `tdsp profile "${parsed.profile}" is already uninstalled`
+          : `tdsp profile "${parsed.profile}" uninstalled`,
+        result.alreadyAbsent
+          ? ""
+          : result.purged
+            ? "  data     permanently deleted (--purge)"
+            : result.archivedAt
+              ? `  data     archived at ${result.archivedAt}`
+              : "",
+        result.launcherRemoved ? `  command  tdsp-${parsed.profile} removed` : "",
+        result.networkRoutesRemoved
+          ? `  network  removed ${result.networkRoutesRemoved} Tailscale Serve route${result.networkRoutesRemoved === 1 ? "" : "s"}`
+          : "",
+        ...(result.warnings || []).map((warning) => `  warning  ${warning}`),
+      ].filter(Boolean);
+      deps.out(lines.join("\n"));
       return 0;
     }
     case "update": {
@@ -807,7 +889,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve [status|stop|restart]|network|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|skills-list|plugins-list|plugins-install|doctor|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve [status|stop|restart]|network|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|skills-list|plugins-list|plugins-install|doctor|install|uninstall|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }
