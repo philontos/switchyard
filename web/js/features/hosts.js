@@ -103,7 +103,10 @@ export function connectNode(hostId, taskId) {
   state.lastTaskByHost[hostId] = paneId;
   const host = state.hostsById[hostId];
   const attach = host ? `ssh ${host.target} tmux attach -t ${tk.session}` : `tmux attach -t ${tk.session}`;
-  openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, attach, paneId, "", tk.agent);
+  const codeTarget = tk.kind !== "local" && tk.hasWorktree && state.fleet[hostId]?.capabilities?.includes("code-view-v1")
+    ? { id: tk.id, nodeId: hostId }
+    : null;
+  openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, attach, paneId, "", tk.agent, codeTarget);
   renderList();
 }
 
@@ -205,12 +208,8 @@ function fleetCard(hostId, tk) {
   const resumeBtn = lifecycle.resumable
     ? `<button class="t-resume" title="${t("task.resumeTitle")}" onclick="event.stopPropagation();resumeNodeTask(${hostId},${tk.id})">⟳ ${t("task.resume")}</button>`
     : "";
-  const codeBtn = tk.kind !== "local" && tk.hasWorktree && state.fleet[hostId]?.capabilities?.includes("code-view-v1")
-    ? `<button class="card-code" title="${t("code.open")}" aria-label="${t("code.open")}" onclick="event.stopPropagation();openTaskCode(${tk.id},${hostId})"><span class="code-ico" aria-hidden="true"></span></button>`
-    : "";
   const open = lifecycle.connectable ? ` clickable" onclick="connectNode(${hostId},${tk.id})` : "";
-  return `<div class="card task task-${agent}${codeBtn ? " has-code" : ""}${open}" data-pane="${paneId}">
-      ${codeBtn}
+  return `<div class="card task task-${agent}${open}" data-pane="${paneId}">
       <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
       <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname">${tk.title}</span></div>
       ${meta}
