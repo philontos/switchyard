@@ -545,12 +545,13 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   display: inline-flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent;
   border-radius: 6px; color: var(--faint); font-size: 13px; line-height: 1; }
 .card-x:hover { background: #f8514914; color: var(--red); }
-.card-x.stop { color: color-mix(in srgb, var(--faint) 68%, var(--surface));
-  border-color: color-mix(in srgb, var(--red) 28%, var(--border)); }
-.stop-ico { display: block; width: 9px; height: 9px; border: 1.25px solid currentColor; border-radius: 1.5px; background: transparent; }
+.card-x.stop { color: color-mix(in srgb, var(--faint) 68%, var(--surface)); }
+.stop-ico { display: block; width: 9px; height: 9px;
+  border: 1.25px solid color-mix(in srgb, var(--red) 45%, var(--border));
+  border-radius: 1.5px; background: transparent; }
 .card-x.stop:hover { color: color-mix(in srgb, var(--red-text) 45%, var(--faint));
-  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
-  border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+.card-x.stop:hover .stop-ico { border-color: color-mix(in srgb, var(--red) 62%, var(--border)); }
 /* drag-to-reorder (reorder.js): repo task cards carry data-repo. touch-action:pan-y
    lets the browser own VERTICAL scrolling (so a swipe over a card still scrolls the
    list — `none` here silently killed touch-scroll, since cards blanket the list),

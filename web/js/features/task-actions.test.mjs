@@ -18,6 +18,8 @@ test("task code action lives at the right edge of the tmux bar, not on cards", (
   assert.match(terminal, /openCodeView\(target\.id, target\.nodeId\)/);
 });
 
-test("stop action keeps a restrained dark-red border", () => {
-  assert.match(css, /\.card-x\.stop\s*\{[^}]*border-color:\s*color-mix\(in srgb, var\(--red\) 28%, var\(--border\)\);/s);
+test("stop glyph gets the dark-red outline without framing the whole button", () => {
+  const buttonRule = css.match(/\.card-x\.stop\s*\{([^}]*)\}/)?.[1] || "";
+  assert.doesNotMatch(buttonRule, /border(?:-color)?\s*:/);
+  assert.match(css, /\.stop-ico\s*\{[^}]*border:\s*1\.25px solid color-mix\(in srgb, var\(--red\) 45%, var\(--border\)\);/s);
 });
