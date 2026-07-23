@@ -9,6 +9,7 @@
     "start": "tsx server/index.ts",
     "tdsp": "tsx server/tdsp.ts",
     "test": "node --import tsx --test \"server/**/*.test.ts\" \"web/**/*.test.mjs\"",
+    "screenshots:readme": "node scripts/readme-demo/capture.mjs",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },
   "dependencies": {
