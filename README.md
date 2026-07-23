@@ -2,156 +2,243 @@
   <img src="web/assets/switchyard-wordmark.png" alt="Switchyard" width="360">
 </p>
 
-<p align="center">English | <a href="README.zh-CN.md">简体中文</a></p>
+<p align="center">English · <a href="README.zh-CN.md">简体中文</a></p>
 
-> A web console that turns "handing a coding task to an AI" into dealing out a card. Every task is a **real, interactive Claude Code, Codex, or Kimi Code** running in its own git worktree + tmux session; you drop into that terminal from the browser, watch it work, and take over anytime. Tasks run in parallel without stepping on each other, every machine on your network is a first-class node — dispatch, watch, and wrap up from one page. And your phone gets the full experience: add it to your home screen and it's an app.
-
-<p align="center">
-  <img src="docs/screenshots/desktop-board.png" alt="Desktop overview: task board grouped by repo on the left, a real Claude Code terminal on the right" width="100%">
-</p>
-
-## One repo, N parallel worktree tasks
-
-The core loop is repo-centric: register a repo (`+repo` — GitHub / GitLab, cloned on registration), then deal tasks against it. **Every task** automatically gets an **independent git worktree + work branch + tmux session**, cut from the base branch you pick — each agent works in its own directory, overwriting nothing, interrupting nobody. Want three features moving at once? Dispatch three cards against the same repo and review them one by one (archive / clean up / delete).
-
-Tasks are hosted by tmux on the machine — **the web page is just a viewfinder**: close the browser and the task keeps running; open it from another device and the session is right where it was. You can also `tmux attach` from your own terminal and share the very same session, and TUI interactions — permission prompts, slash commands — work as-is in the web terminal.
-
-A killed tmux session, host reboot, or archived task does not mean its working state is lost: as long as its worktree remains, one click resumes it with the same CLI, model, and endpoint. The live terminal also accepts screenshots pasted from the clipboard; the image is stored on the task's local or remote machine and handed to the selected agent.
-
-> Aside: you can open a terminal without any repo — hit ＋ on the Shells group of the local machine or any remote node to get a bare tmux shell in a directory of your choice (quick debugging, one-off scripts), riding the same list / connect / archive flow as repo tasks.
-
-## Three agent CLIs × multiple models
-
-Pick the **agent CLI per task** — currently **Claude Code, Codex, and Kimi Code** — and they run side by side on the same board, cards colored by CLI. Local and remote are fully symmetric: whichever machine you dispatch to runs the CLI you picked; the task also remembers its model or endpoint when resumed.
+<h3 align="center">Turn your own computers into an always-on AI coding fleet.</h3>
 
 <p align="center">
-  <img src="docs/screenshots/dispatch-modal.png" alt="Dispatch modal: agent CLI + base branch + opening prompt + model backend" width="100%">
+  Dispatch Claude Code, Codex, or Kimi from your phone.<br>
+  Let the work continue in isolated environments, then come back to review or take over.
 </p>
-
-- **Claude Code** — full capability: skill injection (check off official plugin skills at dispatch; they're delivered straight into the task's worktree) and the permission **yellow light** (driven by a native hook, see below).
-- **Codex** — launched with on-request + danger-full-access, so it can push, reach the network, and run `gh`; optionally pin any model ID available to the machine's Codex installation, or leave it blank for the machine default.
-- **Kimi Code / Kimi K3** — launched as an interactive TUI with `--auto`, so Kimi Code handles routine tool approvals; it uses the Kimi account already signed in on that machine. Set a per-task model ID such as `k3` for [Kimi K3](https://www.kimi.com/code/docs/en/kimi-code/models.html) (subject to account access), or leave it blank for the Kimi Code default.
-- **Multiple model endpoints** — point Claude Code at any **Anthropic-compatible endpoint** (e.g. GLM): the same Claude Code TUI drives another vendor's model. When you add an endpoint, the server probes it exactly the way claude will call it at runtime — **it only saves on a green check**. Picked per task and remembered across dispatches; keys stay on the target node and are never propagated between nodes.
-
-> Current capability boundary: Switchyard's extra skill injection and permission-waiting yellow light are Claude Code-only. Codex and Kimi Code do not receive those skills or report permission-waiting state yet. All three CLIs support the live terminal, session resume, and image paste.
-
-## Fleet: many machines, one page
-
-Every machine on your network is a first-class node:
-
-- **Fleet view** — each node's repos and live tasks are read **live over ssh** and grouped by repo; a node that's offline or not yet set up says so — you never look at stale data.
-- **Dispatch anywhere** — pick a remote node's repo and dispatch; the task is created and owned on that node, and you connect / watch / stop it from your console, all relayed over ssh. Remote dispatches get the same instant optimistic loading card as local ones.
-- **One owner, one truth** — every node stores and operates only its own repos, tasks, worktrees, sessions, and manifests. A remote without Switchyard installed is view-only as an SSH host: task and repo actions are refused instead of falling back to controller-owned state.
-- **One-click bootstrap** — click "Install tdsp" on a machine and it's set up over ssh: code plus launcher, ready to use.
-- **State passthrough** — running / ready / cloning / errored each get a status dot; when a Claude session parks on a permission prompt waiting for you, a Claude Code **native hook** flips the card to a **yellow light** that says "your turn" — the same mechanism local and remote.
-
-## Mobile
-
-On narrow screens the UI switches to a full touch experience. **Recommended: open it in Safari → Share → "Add to Home Screen" → check "Open as Web App"** — it runs standalone (no browser chrome, dark launch background, no white flashes), and from then on the console is one tap from your home screen, as close to a native app as it gets.
 
 <p align="center">
-  <img src="docs/screenshots/mobile-board.png" alt="Mobile task list" width="32%">
-  <img src="docs/screenshots/mobile-reading.png" alt="Mobile reading mode: chat-style transcript with a Needs-you banner" width="32%">
-  <img src="docs/screenshots/mobile-dispatch-codex.png" alt="Dispatching a Codex task from the phone" width="32%">
+  <img src="docs/screenshots/desktop-board.png" alt="Switchyard desktop board with parallel tasks and a live Claude Code terminal" width="100%">
 </p>
 
-- **Master–detail views** — a task list page and a full-screen terminal page; tap a card to enter, swipe from the edge to go back (wired into browser history, so the iOS back gesture is native-smooth — even inside the live terminal).
-- **Read | Live modes** — **Read** renders transcripts for local Claude / Codex tasks as a chat stream: native scrolling, auto-tailing, tool calls folded — perfect for checking progress from the couch. When Claude needs your confirmation, a "Needs you" banner appears with a one-tap jump to **Live** — the real terminal, where you act. Remote-node and Kimi Code transcripts are not wired in yet, so those tasks currently open in the live terminal.
-- **Keyboard-glued input bar** — the input bar sits right above the iOS soft keyboard, supports multiple lines, and keeps a separate unsent draft per task, so switching tasks never leaks text.
-- **Touch polish** — no double-tap/pinch zoom, no accidental text selection, one-finger terminal scrolling with momentum, hover styles only on true hover devices.
+## What Switchyard is
 
-## Install & start (once per machine)
+Switchyard is a **local-first control plane for AI coding agents**. It runs on your development machine, gives every task a real git worktree and tmux session, and exposes the same working state to any browser you authorize.
 
-**Prerequisites:** Node 22+, `git` / `tmux`, and whichever signed-in agent CLIs you plan to use (`claude` / `codex` / `kimi`). The current `setup.sh` preflights both `claude` and `kimi`; to run Codex tasks, also make sure `codex` is reachable from a non-interactive shell. The setup helper currently targets zsh. Clone, then one command:
+- **Close the browser; the task keeps running.** tmux, not the page, owns the session.
+- **Run several tasks without collisions.** Every task has its own branch, worktree, and terminal.
+- **Move between laptop and phone without losing context.** Read progress, answer a prompt, or enter the live TUI.
+- **Use the agent that fits the task.** Claude Code, Codex, and Kimi Code—including a per-task model such as Kimi K3—can share one board.
+- **Add more computers without creating a central server.** Every machine remains a complete, independent Switchyard node and the sole owner of its own work.
+
+The network layer stays deliberately thin:
+
+```text
+phone / any browser ── private HTTPS ──► Switchyard on machine A
+                                                │
+                                                └── SSH control ──► Switchyard on machine B
+
+machine A owns: A's repos · database · worktrees · tmux sessions · agents
+machine B owns: B's repos · database · worktrees · tmux sessions · agents
+```
+
+Machine A can ask B to create or control a task, but B performs the operation and stores the result. A remote machine without Switchyard is never used as a compatibility shortcut and cannot receive tasks.
+
+## Quick start
+
+Install this once on every computer you want to use as a development machine.
+
+**Requirements:** Node.js 22+, `git`, `tmux`, and zsh. The current one-shot setup preflights both `claude` and `kimi`, so those two binaries must be installed and reachable; Codex is optional and must be checked separately if you plan to use it.
 
 ```sh
-git clone <repo-url> switchyard && cd switchyard
-./scripts/setup.sh   # one-shot setup: environment preflight + npm install + global tdsp (idempotent)
-tdsp serve           # → http://localhost:4500
+git clone https://github.com/philontos/switchyard.git
+cd switchyard
+./scripts/setup.sh
+tdsp serve
 ```
 
-> `setup.sh` does three things in order: ① **preflight** — verifies `claude` / `kimi` / `tmux` / `git` are reachable from a non-interactive zsh (tasks are launched by exactly that kind of shell, which reads only `~/.zshenv`; a missing command kills the pane), idempotently writing any missing PATH dirs into `~/.zshenv`; ② `npm install` (4 runtime deps, zero build); ③ installs the global `tdsp` command (`~/.task-dispatcher/src` points at this clone, launcher linked at `~/.local/bin/tdsp` — if `tdsp` isn't found, put `~/.local/bin` on your PATH). `--check` inspects only — writes and installs nothing.
+Then open [http://127.0.0.1:4500](http://127.0.0.1:4500). Local task dispatch is ready immediately.
 
-From here on, everything is `tdsp`:
+`setup.sh` checks the non-interactive shell used by tmux and SSH, installs npm dependencies, fixes missing Claude/Kimi PATH entries in `~/.zshenv`, and installs the global `tdsp` launcher. It is safe to run again; use `./scripts/setup.sh --check` for a read-only preflight. Before dispatching a Codex task, confirm `codex` is also visible from `zsh -c`.
 
-```sh
-tdsp serve                            # start the console (loopback only, :4500)
-PORT=8080 tdsp serve                  # different port
-tdsp serve --host-cidr 10.10.0.0/24   # also bind this machine's IP inside that range
-tdsp update                           # update: pull latest code + refresh deps; rerun tdsp serve to apply
-```
+### Make the machine reachable
 
-`--host-cidr` is for private overlays like WireGuard / Tailscale: with your phone and computer on the same range, the phone opens the printed address and gets the full console (pair it with "Add to Home Screen"):
+Click **Connect devices** in the top bar. This is a persistent status panel—not a disposable first-run wizard. It continually checks:
 
-```
-task-dispatcher on http://127.0.0.1:4500
-task-dispatcher on http://10.10.0.3:4500
-```
+1. private Tailscale HTTPS;
+2. whether the computer can stay awake while Switchyard runs;
+3. phone access and its QR code;
+4. optional discovery and SSH readiness for other computers.
 
-## Using it
+Each card is derived from live machine state and presents the next useful action. Incomplete remote setup never blocks local use.
 
-1. **Add a repo** — name + git url (GitHub / GitLab; supply a token for an https private repo, blank for SSH). It registers and clones; status goes `ready`.
-2. **Dispatch a task** — pick a repo → base branch → title + opening prompt → choose the agent (Claude Code / Codex / Kimi Code) → optionally pick Claude skills and an endpoint, or a Codex / Kimi model ID. Worktree created, session started.
-3. **Enter the terminal** — the right pane auto-connects; "Enter terminal" on a card reconnects anytime. You're talking to the real agent.
-4. **Wrap up** — archive (kill session, keep worktree) / clean up (kill session + delete worktree) / delete (remove the record).
+<p align="center">
+  <img src="docs/screenshots/onboarding.png" alt="Switchyard Connect devices guide checking private networking, power, and phone access" width="100%">
+</p>
 
-### Adding a remote machine
+## Connect a phone
 
-1. **Register it** — name + ssh target (e.g. `user@host`) in the console. A background prober shows its online status.
-2. **Install tdsp on it** — open the machine's ⚙ menu and click **Install tdsp**. One click over ssh: it clones the code there (or reuses a clone it already has) and installs the launcher.
-   - A machine that already runs its own console has a clone — run `npm run tdsp -- install` there once instead (reuses that clone, no second copy), then click Install in the console to register it as ready.
-3. **Use it** — the machine's repos and live tasks show up, grouped by repo. Dispatch onto **its** repos (＋ on the repo group) or open a shell on it (＋ on its Shells group).
+1. Install the official [Tailscale client](https://tailscale.com/download) on the computer and phone, then sign both into the same account.
+2. Open **Connect devices**. Switchyard checks sign-in and Tailscale Serve permission, then publishes its loopback server through private HTTPS.
+3. Scan the QR code with the phone and open it in Safari.
+4. Optional but recommended: Safari → Share → **Add to Home Screen** → **Open as Web App**.
 
-## tdsp commands
+The QR code appears only when the private route is usable. Switchyard does not enable Tailscale Funnel or expose the console to the public internet.
 
-Every machine runs the same `tdsp`; the controller invokes the one-shot verbs on a remote via `ssh <node> tdsp …`.
+## Connect another computer
 
-| command | what it does |
+Run the quick-start steps on that computer too, using the same Tailscale account. From either Switchyard page:
+
+1. click `+` in the machine rail;
+2. choose **Discover devices**;
+3. click **Connect** next to the discovered Switchyard node;
+4. enable SSH / Remote Login if the resulting status asks for it.
+
+<p align="center">
+  <img src="docs/screenshots/device-discovery.png" alt="Automatic discovery of Switchyard machines on the same Tailscale account" width="100%">
+</p>
+
+Connecting is bilateral: the nodes verify the same Tailscale owner, exchange stable node identities, exact `tdsp` paths, and dedicated profile-owned SSH keys, then register one another. This exchange can finish before the OS SSH service is enabled; **actual repo, task, terminal, and file operations require SSH** and turn online as soon as Remote Login is ready.
+
+| Layer | Responsibility |
 |---|---|
-| `tdsp serve` | start the web console (the persistent server); `--host-cidr <range>` also binds the private-overlay address |
-| `tdsp list` | print this machine's tasks + repos as JSON |
-| `tdsp create-local` | open a bare shell task on this machine |
-| `tdsp create` | create a repo task on this machine (driven by the controller) |
-| `tdsp repo-create` / `repo-fetch` / `repo-branches` / `repo-delete` | operate on this machine's own repo catalog (node-control verbs) |
-| `tdsp stop <id>` | stop one of this machine's tasks |
-| `tdsp resume` / `cleanup` / `delete-task` | operate on one of this machine's archived tasks |
-| `tdsp doctor legacy [--json]` | read-only audit for controller-owned remote rows and broken ownership references left by older versions |
-| `tdsp install` | set up the global `tdsp` for this machine from its clone |
-| `tdsp update` | update this machine's install: `git pull --ff-only` + `npm install` on the clone behind `~/.task-dispatcher/src`; restart serve to apply |
+| Tailscale | Private identity, reachability, route selection, and peer discovery |
+| HTTPS | Web access, readiness probes, and the initial bilateral connection |
+| SSH | Node commands, terminal transport, and file operations |
+| Switchyard on the target | The actual repo/task/worktree/tmux/agent operation and all persistent state |
 
-## Notes
+Manual SSH host entry remains available as an advanced fallback when automatic discovery is not appropriate.
 
-- **Security** — the service **binds loopback `127.0.0.1` only by default**, so the LAN can't reach it. Exposing it requires an explicit `HOST=0.0.0.0` (at which point the web terminal hands a shell to anyone who can reach the port — **add your own auth / reverse proxy, never expose it raw on the public internet**). Prefer either an ssh tunnel (`ssh -L 4500:localhost:4500 host`) or `tdsp serve --host-cidr <range>` to bind only your private overlay (WireGuard / Tailscale) address. Reaching other nodes uses your ssh keys (login = authorization); no new ports or protocols. Tokens are stored **in plaintext** in sqlite — local personal use only.
-- **Terminal feel** — give claude full-screen rendering (`/tui fullscreen` in the session, or `{"tui":"fullscreen"}` in `~/.claude/settings.json`, per machine) to pin the input box, keep scrolling smooth, and stop horizontal jumping.
+## The task loop
 
-## Structure
+1. **Register a repository.** Add a GitHub or GitLab URL; Switchyard creates a local mirror.
+2. **Dispatch a task.** Pick the target machine, repo, base branch, agent, optional model, and opening prompt.
+3. **Let it run.** Switchyard creates a work branch, isolated worktree, and tmux session on that target machine.
+4. **Check in only when useful.** Watch the terminal, read a mobile transcript, paste an image, answer a permission prompt, or attach with tmux.
+5. **Wrap up deliberately.** Archive the session while retaining its worktree, clean up both, or remove the record.
 
+<p align="center">
+  <img src="docs/screenshots/dispatch-modal.png" alt="Dispatching a Kimi K3 task into a new isolated worktree" width="100%">
+</p>
+
+A host reboot or killed tmux session does not destroy the working tree. As long as the worktree remains, **Resume** recreates the session with the saved agent, model, and endpoint. You can also create a repo-free shell from any node's **Shells** group for debugging and one-off commands.
+
+## Agents and models
+
+| Agent | Task configuration | Current Switchyard integration |
+|---|---|---|
+| **Claude Code** | Machine login or a validated Anthropic-compatible endpoint | Live terminal, resume, image paste, optional skill injection, native permission-waiting signal, local mobile transcript |
+| **Codex** | Machine login and optional model ID | Live terminal, resume, image paste, full-access launch, local mobile transcript |
+| **Kimi Code / Kimi K3** | Machine login and optional model ID such as `k3` | Interactive `--auto` terminal, resume, and image paste |
+
+The selected agent and model belong to the task and are preserved on resume. Provider credentials stay on the machine that runs the task and are not copied to peers.
+
+Current boundary: extra skill injection and the yellow “needs you” permission signal are Claude Code-only. Remote-node transcripts and Kimi transcripts do not yet have **Read** mode; those tasks open directly in the live terminal.
+
+## Built for the phone
+
+The narrow-screen UI is a full touch workflow, not a scaled-down desktop.
+
+<p align="center">
+  <img src="docs/screenshots/mobile-board.png" alt="Switchyard mobile task board" width="32%">
+  <img src="docs/screenshots/mobile-reading.png" alt="Switchyard mobile transcript with a Needs you action" width="32%">
+  <img src="docs/screenshots/mobile-dispatch-codex.png" alt="Dispatching a Codex task from a phone" width="32%">
+</p>
+
+- **Board → task navigation** integrates with browser history and the iOS edge-back gesture.
+- **Read | Live** switches between a native transcript and the real interactive terminal.
+- A **Needs you** banner jumps straight from a readable update to the waiting prompt.
+- The input bar follows the software keyboard, supports multiple lines, and keeps an independent unsent draft per task.
+- Touch scrolling, terminal momentum, selection, zoom, and standalone web-app launch behavior are tuned for mobile.
+
+## Networking and always-on behavior
+
+Switchyard binds only to `127.0.0.1:4500` by default. Tailscale is the recommended remote path, but it is an optional system dependency—not an npm package:
+
+```sh
+tdsp serve --tailscale                  # loopback app + private tailnet HTTPS
+tdsp network status                    # Tailscale identity and peers
+tdsp network diagnose <peer>           # direct, peer-relay, or DERP path
+tdsp network off --https-port 443       # remove only Switchyard's Serve route
 ```
-server/                REST API + /pty WebSocket; the tdsp CLI; git / tmux / pty / ssh Runner orchestration
-  index.ts             HTTP entry: build app + http server, attach WS, run boot, listen
-  tdsp.ts              the tdsp entrypoint (serve + one-shot verbs)
-  http/                the web layer — thin HTTP glue over the domain folders below
-    app.ts             assemble express: json → preview proxy → static → routes
-    routes.ts          every /api/* handler
-    ws.ts              upgrade routing + the pty/tmux terminal relay
-    preview.ts         dev-server reverse-proxy upstream resolution
-    context.ts         shared prepared statements + cross-cutting helpers
-  core/                paths, sqlite db + schema, migration, server i18n
-  repo/                git mirrors, worktrees, per-task repo env
-  task/                task lifecycle (create/manifest/rename) + the tdsp node-local API (cli.ts)
-  fleet/               remote hosts: runners, bootstrap, liveness, cross-node fleet view
-  session/             tmux sessions, pty spawn, attach command, agent launch args (claude / codex / kimi)
-  skills/              skill scan/resolve, plugin install, hook settings
-  preview/             the preview reverse-proxy engine
-web/                   board + xterm terminal (native ES Modules, no build)
-  js/main.js           entry — wires the modules, bridges inline onclick handlers
-  js/core/             shared infra: dom, state, feedback, dialog, select
-  js/features/         hosts, tasks, terminal, repos, providers, skills, reorder, mobile, reading
-scripts/setup.sh       one-shot machine setup: preflight (fix ~/.zshenv PATH for agent CLIs + git/tmux) + npm install + global tdsp
-~/.task-dispatcher/    per machine:
-  src                  pointer to this machine's clone (real clone or symlink)
-  bin/tdsp             the global launcher → src
-  <namespace>/         this machine's own data: mirrors/ worktrees/ tasks/ dispatcher.db
+
+Tailscale first attempts a WireGuard direct path, then an authorized peer relay, then DERP. Existing private networks remain supported:
+
+```sh
+tdsp serve --host-cidr 10.10.0.0/24     # bind the local IP inside an existing WireGuard/LAN range
 ```
 
-> The server and frontend each carry their own zh/en string dictionary (`server/core/i18n.ts`, `web/i18n.js`), the single source of truth for that layer. For the finer data model and node semantics, see the source comments.
+On macOS, **Keep awake while running** creates a reversible, PID-scoped `caffeinate` assertion on AC power. The display may still turn off, and the assertion disappears when Switchyard exits. Closed-lid operation remains subject to macOS and hardware requirements; the guide reports the current condition but does not bypass system protections.
+
+<details>
+<summary>Nearby VPS relay for strict NAT or a distant DERP route</summary>
+
+A VPS can run [Tailscale Peer Relay](https://tailscale.com/docs/features/peer-relay) without running Switchyard. It requires Tailscale 1.86+, a reachable UDP port, and a narrowly scoped tailnet grant:
+
+```sh
+sudo tailscale set --relay-server-port=40000
+# or, when tdsp is installed and authorized to manage tailscaled:
+tdsp network relay enable --port 40000
+tdsp network diagnose <peer>
+```
+
+Use `tdsp network relay disable` to remove only that listener.
+
+</details>
+
+<details>
+<summary>Run an isolated side-by-side test profile</summary>
+
+Profiles isolate their sqlite database, namespace, mirrors, worktrees, SSH keys and sockets, launcher, and port while sharing the current checkout:
+
+```sh
+npm run -s tdsp -- install --profile canary
+~/.task-dispatcher/profiles/canary/bin/tdsp \
+  serve --port 14500 --tailscale --tailscale-port 14500
+```
+
+This is useful for testing networking without touching a live `:4500` instance.
+
+</details>
+
+## Command reference
+
+| Command | Purpose |
+|---|---|
+| `tdsp serve [--port N] [--tailscale]` | Start the local console and optionally publish private HTTPS |
+| `tdsp serve --host-cidr CIDR` | Also bind this machine's address in an existing private range |
+| `tdsp network status/setup/diagnose/off` | Inspect or manage Switchyard's Tailscale path |
+| `tdsp list` | Print this node's repositories and tasks as JSON |
+| `tdsp create-local` | Create a bare tmux shell on this node |
+| `tdsp create` | Create a repository task on this node |
+| `tdsp repo-create/repo-fetch/repo-branches/repo-delete` | Operate on this node's repository catalog |
+| `tdsp stop/resume/cleanup/delete-task` | Operate on this node's task lifecycle |
+| `tdsp doctor legacy [--json]` | Read-only audit for remote state left by older releases |
+| `tdsp install [--profile name]` | Install the global launcher or an isolated profile |
+| `tdsp update` | Fast-forward the installed checkout and refresh dependencies |
+
+## Security notes
+
+- Treat the web terminal as shell access. Keep it on loopback, a private tailnet, a trusted private CIDR, or behind your own authenticated reverse proxy.
+- Do **not** publish `HOST=0.0.0.0` directly to the internet. Switchyard does not currently provide application-level multi-user authentication.
+- Repository tokens and provider keys are stored in plaintext in the node's local sqlite database. This release is intended for personal, trusted-machine use.
+- Switchyard creates dedicated marked SSH authorization entries for peers; it does not replace your personal SSH keys.
+- Each page renders only state owned by the selected node. An unavailable or unbootstrapped node is shown as such rather than falling back to controller-owned data.
+
+## Development
+
+```sh
+npm install
+npm test
+npm run screenshots:readme
+```
+
+The screenshot command starts the real web UI against a disposable mock server, drives the flows in headless Chrome, and writes deterministic, sanitized images to `docs/screenshots/`. It never opens a real Switchyard database or tmux session. Set `CHROME_BIN` if Chrome is not installed in its default location.
+
+The main code boundaries are:
+
+```text
+server/core/         paths, sqlite, schema, migration, i18n
+server/repo/         mirrors and task worktrees
+server/task/         node-local task lifecycle and CLI verbs
+server/session/      tmux, PTY, and Claude/Codex/Kimi launch arguments
+server/fleet/        SSH runners, bootstrap, liveness, and node views
+server/network/      Tailscale Serve, diagnosis, and peer relay
+server/onboarding/   live network, phone, power, and fleet readiness
+server/http/         REST, WebSocket, and preview routing
+web/js/features/     board, hosts, terminal, mobile, reading, and setup UI
+```

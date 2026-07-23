@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS providers (
   small_fast_model TEXT,          -- ANTHROPIC_SMALL_FAST_MODEL (background/title model)
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Evidence produced by onboarding checks. This stores facts such as the last
+-- successful mobile Safari check-in, never credentials or a cached "completed"
+-- flag; current readiness is always re-derived from live system state.
+CREATE TABLE IF NOT EXISTS onboarding_events (
+  kind TEXT PRIMARY KEY,
+  detail TEXT,
+  occurred_at TEXT DEFAULT (datetime('now'))
+);
 `;
 
 /** Add a column if it's missing — backfills schema drift on pre-existing DBs. */
@@ -103,6 +112,17 @@ function reconcileColumns(db: DB) {
   addColumn(db, "hosts", "status", "TEXT DEFAULT 'unknown'");  // online | offline | unknown
   addColumn(db, "hosts", "last_checked", "TEXT");
   addColumn(db, "hosts", "tdsp_bin", "TEXT");                  // absolute path to the node's tdsp wrapper (bootstrapped); null = not yet
+  // Stable peer identity + Tailscale-managed SSH transport. These fields are
+  // metadata only: repos/tasks/worktrees remain in the target node's own DB.
+  addColumn(db, "hosts", "node_id", "TEXT");                   // target Switchyard instance id (stable across network changes)
+  addColumn(db, "hosts", "tailscale_id", "TEXT");              // current Tailscale node id
+  addColumn(db, "hosts", "tailscale_dns", "TEXT");
+  addColumn(db, "hosts", "tailscale_ip", "TEXT");
+  addColumn(db, "hosts", "tailscale_user", "TEXT");
+  addColumn(db, "hosts", "ssh_port", "INTEGER DEFAULT 22");
+  addColumn(db, "hosts", "ssh_ready", "INTEGER");              // null=pending/unknown, 0=unavailable, 1=ready
+  addColumn(db, "hosts", "managed_ssh", "INTEGER DEFAULT 0");  // use this instance's dedicated peer key
+  addColumn(db, "hosts", "connection_source", "TEXT");         // manual | tailscale
   addColumn(db, "repos", "host_id", "INTEGER");                // which machine this repo lives on
   addColumn(db, "tasks", "skills", "TEXT DEFAULT '[]'");       // JSON: source:name actually delivered
   // repo-less local quick tasks (kind='local'): no mirror/worktree, repo_id=0,
@@ -116,6 +136,7 @@ function reconcileColumns(db: DB) {
   // | kimi), plus an optional non-Claude -m model. Backfills to 'claude'.
   addColumn(db, "tasks", "agent", "TEXT DEFAULT 'claude'");
   addColumn(db, "tasks", "agent_model", "TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS hosts_node_id_unique ON hosts(node_id) WHERE node_id IS NOT NULL");
 }
 
 /**

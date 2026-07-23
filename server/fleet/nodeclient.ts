@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { spawn } from "node:child_process";
 import type { Host } from "../core/db.js";
-import { SSH_BASE_ARGS } from "./runner.js";
+import { sshBaseArgs } from "./runner.js";
 
 function resolveSsh(): string {
   return ["/usr/bin/ssh", "/opt/homebrew/bin/ssh"].find((candidate) => fs.existsSync(candidate)) || "ssh";
@@ -22,7 +22,8 @@ export interface NodeCommandOptions {
   maxBuffer?: number;
 }
 
-export type NodeCommandHost = Pick<Host, "kind" | "target" | "tdsp_bin">;
+export type NodeCommandHost = Pick<Host, "kind" | "target" | "tdsp_bin">
+  & Partial<Pick<Host, "managed_ssh" | "ssh_port">>;
 
 /** POSIX single-quote for the remote shell (ssh joins argv into one command). */
 export function quoteNodeArg(value: string): string {
@@ -46,7 +47,11 @@ export function runNodeCommand(host: NodeCommandHost, args: string[], options: N
   const timeoutMs = options.timeoutMs ?? 120000;
   const maxBuffer = options.maxBuffer ?? 64 * 1024 * 1024;
   return new Promise((resolve) => {
-    const child = spawn(SSH_BIN, [...SSH_BASE_ARGS, host.target, remote], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(
+      SSH_BIN,
+      [...sshBaseArgs(host.managed_ssh === 1, host.ssh_port || 22), host.target, remote],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let stdoutSize = 0;

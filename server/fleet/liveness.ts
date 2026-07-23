@@ -8,10 +8,10 @@ import { sshProbe } from "./runner.js";
 export async function probeHost(host: Host) {
   if (host.kind === "local") return;
   try {
-    await sshProbe(host.target);
-    db.prepare("UPDATE hosts SET status='online', last_checked=datetime('now') WHERE id=?").run(host.id);
+    await sshProbe(host.target, host.managed_ssh === 1, host.ssh_port || 22);
+    db.prepare("UPDATE hosts SET status='online', ssh_ready=1, last_checked=datetime('now') WHERE id=?").run(host.id);
   } catch {
-    db.prepare("UPDATE hosts SET status='offline', last_checked=datetime('now') WHERE id=?").run(host.id);
+    db.prepare("UPDATE hosts SET status='offline', ssh_ready=0, last_checked=datetime('now') WHERE id=?").run(host.id);
   }
 }
 

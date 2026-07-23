@@ -13,6 +13,7 @@ import { syncTaskManifest } from "./http/context.js";
 import { createApp } from "./http/app.js";
 import { attachWs } from "./http/ws.js";
 import { listOwnedTasks } from "./core/ownership.js";
+import { restoreKeepAwake } from "./onboarding/power.js";
 
 // ensure child processes (git/tmux/glab/pty) find Homebrew/usr-local binaries
 // regardless of how the server was launched (a stripped PATH otherwise breaks
@@ -30,6 +31,7 @@ const app = createApp();
 
 if (DID_MIGRATE) repairWorktrees(); // fix git worktree links after the ./data move
 startLivenessLoop();                // background ssh probe of remote machines
+restoreKeepAwake(db);               // opt-in, PID-scoped AC keep-awake assertion
 syncReposManifest();                // bootstrap repos.json from the current catalog on boot
 // adopt any task manifests on disk this DB is missing (recover a wiped db / own
 // tasks present locally), then backfill manifests for every task we own so the

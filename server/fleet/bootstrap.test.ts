@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { discoverNode, renderWrapper, NODE_RUNGS, nodeLadderScript, installPlan, applyInstall, bootstrapMachine } from "./bootstrap.ts";
+import {
+  discoverNode,
+  renderWrapper,
+  NODE_RUNGS,
+  nodeLadderScript,
+  installPlan,
+  applyInstall,
+  profileInstallPlan,
+  applyProfileInstall,
+  bootstrapMachine,
+} from "./bootstrap.ts";
 
 // A fake probe simulates a machine: `works(script)` decides whether that rung's
 // shell snippet would resolve a node. The discovery ladder must pick the FIRST
@@ -79,6 +89,12 @@ test("renderWrapper places a manual override ahead of the auto rungs", () => {
   assert.ok(w.indexOf("/opt/custom/node/bin") < w.indexOf("fnm env"), "override is tried before fnm");
 });
 
+test("renderWrapper can pin an isolated data root before tdsp starts", () => {
+  const w = renderWrapper({ appDir: "/app", dataDir: "/home/me/.task-dispatcher/profiles/canary/data" });
+  assert.match(w, /export TDSP_SOURCE_DIR="\$APP"/);
+  assert.match(w, /export TASK_DISPATCHER_DATA_DIR='\/home\/me\/\.task-dispatcher\/profiles\/canary\/data'/);
+});
+
 test("nodeLadderScript is shared by the wrapper and bootstrap (same rungs)", () => {
   const s = nodeLadderScript();
   assert.match(s, /fnm env/);
@@ -114,6 +130,44 @@ test("applyInstall symlinks src→clone and writes an executable wrapper (real f
     const w = fs.readFileSync(p.binPath, "utf8");
     assert.match(w, /\.task-dispatcher\/src/, "APP points at the src pointer");
     assert.match(w, /exec node .*server\/tdsp\.ts/, "execs the app");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(clone, { recursive: true, force: true });
+  }
+});
+
+test("profileInstallPlan is isolated from every canonical install path", () => {
+  const p = profileInstallPlan("/home/me", "/clone", "tailscale-test");
+  assert.equal(p.src, "/home/me/.task-dispatcher/profiles/tailscale-test/src");
+  assert.equal(p.binPath, "/home/me/.task-dispatcher/profiles/tailscale-test/bin/tdsp");
+  assert.equal(p.localBin, "/home/me/.local/bin/tdsp-tailscale-test");
+  assert.equal(p.dataDir, "/home/me/.task-dispatcher/profiles/tailscale-test/data");
+  assert.match(p.wrapper, /TASK_DISPATCHER_DATA_DIR/);
+  assert.doesNotMatch(p.binPath, /\/\.task-dispatcher\/bin\/tdsp$/);
+});
+
+test("profileInstallPlan rejects path traversal and ambiguous names", () => {
+  for (const name of ["../live", "UPPER", "has space", "", "-leading"]) {
+    assert.throws(() => profileInstallPlan("/home/me", "/clone", name), /profile/i);
+  }
+});
+
+test("applyProfileInstall does not replace the canonical src or tdsp launcher", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tdsp-profile-home-"));
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), "tdsp-profile-clone-"));
+  const canonicalSrc = path.join(home, ".task-dispatcher", "src");
+  const canonicalBin = path.join(home, ".task-dispatcher", "bin", "tdsp");
+  fs.mkdirSync(path.dirname(canonicalSrc), { recursive: true });
+  fs.mkdirSync(path.dirname(canonicalBin), { recursive: true });
+  fs.writeFileSync(canonicalSrc, "keep-src");
+  fs.writeFileSync(canonicalBin, "keep-bin");
+  try {
+    const p = applyProfileInstall(home, clone, "canary");
+    assert.equal(fs.readFileSync(canonicalSrc, "utf8"), "keep-src");
+    assert.equal(fs.readFileSync(canonicalBin, "utf8"), "keep-bin");
+    assert.equal(fs.readlinkSync(p.src), path.resolve(clone));
+    assert.equal(fs.statSync(p.binPath).mode & 0o100, 0o100);
+    assert.match(fs.readFileSync(p.binPath, "utf8"), /TASK_DISPATCHER_DATA_DIR/);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(clone, { recursive: true, force: true });

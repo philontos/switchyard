@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn as spawnChild } from "node:child_process";
+import QRCode from "qrcode";
 import { db, Repo, Task, Host, Provider } from "../core/db.js";
 import { renameTask } from "../task/tasks.js";
 import { removeWorktree } from "../repo/git.js";
@@ -17,7 +18,7 @@ import { asAgentKind } from "../session/agent.js";
 import { readTranscript } from "../session/transcript.js";
 import { syncReposManifest } from "../repo/manifest.js";
 import { removeTaskManifest } from "../task/taskmanifest.js";
-import { localRunner, transportRunnerFor, SSH_BASE_ARGS } from "../fleet/runner.js";
+import { localRunner, RemoteRunner, transportRunnerFor, SSH_BASE_ARGS } from "../fleet/runner.js";
 import {
   aggregateNodes,
   NODE_CONTROL_CAPABILITY,
@@ -25,7 +26,7 @@ import {
   taskListPayload,
 } from "../task/cli.js";
 import { fleetTargets, type FleetTarget } from "../fleet/fleet.js";
-import { bootstrapMachine } from "../fleet/bootstrap.js";
+import { bootstrapMachine, validProfileName } from "../fleet/bootstrap.js";
 import { createLocalTask, createRepoTask, type RepoTaskEnv } from "../task/createtask.js";
 import { buildRepoTaskEnv } from "../repo/repoenv.js";
 import { probeHost } from "../fleet/liveness.js";
@@ -53,6 +54,25 @@ import {
   isCodeInspectRequest,
   type CodeInspectRequest,
 } from "../codeview/codeview.js";
+import { setupTailscale, tailscaleStatus } from "../network/tailscale.js";
+import {
+  descriptorMatchesPeer,
+  discoveryPorts,
+  isNodeDescriptor,
+  localNodeDescriptor,
+  probeSwitchyardPeer,
+  requestPeerJson,
+  sameLogin,
+  trustedServeIdentity,
+  upsertTailscaleHost,
+} from "../network/peering.js";
+import { authorizeSwitchyardKey, removeSwitchyardKey } from "../network/ssh-identity.js";
+import {
+  onboardingPorts,
+  readOnboardingStatus,
+  recordMobileCheckin,
+} from "../onboarding/status.js";
+import { setKeepAwake } from "../onboarding/power.js";
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -150,6 +170,260 @@ app.post("/api/system/update", async (_req, res) => {
     setTimeout(() => process.exit(0), 250).unref();
   } catch (e: any) {
     res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+// ---------- Tailscale node discovery + SSH pairing ----------
+function publicHost(host: Host) {
+  const { data_dir: _dataDir, tdsp_bin: _tdspBin, ...safe } = host;
+  return safe;
+}
+
+async function trustedPeerRequest(req: Request, res: Response) {
+  if (process.env.TDSP_TAILSCALE_SERVE !== "1") {
+    res.status(404).json({ error: "Tailscale node discovery is not enabled" });
+    return null;
+  }
+  const status = await tailscaleStatus();
+  const login = req.get("tailscale-user-login") || undefined;
+  if (!trustedServeIdentity(req.socket.remoteAddress, login, status)) {
+    res.status(403).json({ error: "the request is not from this node's Tailscale user" });
+    return null;
+  }
+  return status;
+}
+
+// ---------- first-run / device onboarding ----------
+// Status is evidence-backed and re-derived on every request: a successful
+// historical wizard click can never hide a stopped VPN, removed Serve route,
+// disabled SSH service, or unreachable peer.
+app.get("/api/onboarding/status", async (_req, res) => {
+  res.setHeader("cache-control", "no-store");
+  try {
+    res.json(await readOnboardingStatus(db));
+  } catch (error: any) {
+    res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+// Idempotently take the one safe automated network action: join/start
+// Tailscale when possible and configure one private Serve listener. Installation,
+// browser login, HTTPS consent and OS Remote Login remain explicit user actions.
+app.post("/api/onboarding/network/setup", async (req, res) => {
+  res.setHeader("cache-control", "no-store");
+  const { localPort, httpsPort: defaultHttpsPort } = onboardingPorts();
+  const requested = req.body?.https_port == null ? defaultHttpsPort : Number(req.body.https_port);
+  if (!Number.isInteger(requested) || requested < 1 || requested > 65535) {
+    return res.status(400).json({ error: "https_port must be an integer between 1 and 65535" });
+  }
+  try {
+    const result = await setupTailscale({ localPort, httpsPort: requested });
+    if (result.ok) {
+      process.env.TDSP_TAILSCALE_SERVE = "1";
+      process.env.TDSP_TAILSCALE_PORT = String(result.httpsPort);
+      if (result.url) process.env.TDSP_TAILSCALE_URL = result.url;
+    }
+    const onboarding = await readOnboardingStatus(db);
+    const payload = {
+      ok: result.ok,
+      error: result.error || null,
+      auth_url: result.status.authUrl,
+      consent_url: result.serveConsentUrl || null,
+      onboarding,
+    };
+    return result.ok ? res.json(payload) : res.status(409).json(payload);
+  } catch (error: any) {
+    res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+app.post("/api/onboarding/power/keep-awake", async (req, res) => {
+  if (typeof req.body?.enabled !== "boolean") {
+    return res.status(400).json({ error: "enabled must be a boolean" });
+  }
+  try {
+    setKeepAwake(db, req.body.enabled);
+    res.json({ ok: true, onboarding: await readOnboardingStatus(db) });
+  } catch (error: any) {
+    res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+app.get("/api/onboarding/mobile-qr.svg", async (_req, res) => {
+  res.setHeader("cache-control", "no-store");
+  try {
+    let baseUrl = process.env.TDSP_TAILSCALE_URL || null;
+    if (!baseUrl) baseUrl = (await readOnboardingStatus(db)).network.serve.url;
+    if (!baseUrl) {
+      return res.status(409).type("text/plain").send("Tailscale Serve is not ready");
+    }
+    const target = new URL(baseUrl);
+    target.searchParams.set("onboarding", "mobile");
+    const svg = await QRCode.toString(target.toString(), {
+      type: "svg",
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 256,
+      color: { dark: "#1a1613", light: "#ffffff" },
+    });
+    res.type("image/svg+xml").send(svg);
+  } catch (error: any) {
+    res.status(500).type("text/plain").send(String(error?.message || error));
+  }
+});
+
+// A QR arrival is accepted only through Tailscale Serve under this node's own
+// login. The stored row is merely evidence ("verified at"), not authentication
+// and not a substitute for current network checks.
+app.post("/api/onboarding/mobile/check-in", async (req, res) => {
+  res.setHeader("cache-control", "no-store");
+  const status = await trustedPeerRequest(req, res);
+  if (!status) return;
+  const login = req.get("tailscale-user-login") || status.self?.loginName || "";
+  recordMobileCheckin(db, {
+    login,
+    userAgent: req.get("user-agent") || "",
+  });
+  res.json({ ok: true, verified_at: new Date().toISOString() });
+});
+
+// Minimal same-user descriptor. This endpoint is available only through a
+// loopback-backed Tailscale Serve route; spoofable direct/LAN header traffic is
+// rejected by trustedServeIdentity.
+app.get("/.well-known/switchyard", async (req, res) => {
+  res.setHeader("cache-control", "no-store");
+  const status = await trustedPeerRequest(req, res);
+  if (!status) return;
+  try {
+    res.json(await localNodeDescriptor(status));
+  } catch (error: any) {
+    res.status(503).json({ error: String(error?.message || error) });
+  }
+});
+
+// The accepting half of a bilateral connection. The requester's Tailscale
+// identity is verified by Serve, then bound to the descriptor Tailscale already
+// reports for that peer before its key can enter authorized_keys.
+app.post("/api/network/handshake", async (req, res) => {
+  res.setHeader("cache-control", "no-store");
+  const status = await trustedPeerRequest(req, res);
+  if (!status) return;
+  const descriptor = req.body;
+  if (!isNodeDescriptor(descriptor)) {
+    return res.status(400).json({ error: "invalid Switchyard node descriptor" });
+  }
+  if (descriptor.instance_id === NS) {
+    return res.status(409).json({ error: "cannot connect a Switchyard instance to itself" });
+  }
+  const peer = status.peers.find((candidate) => candidate.id === descriptor.tailscale.id);
+  if (!peer || !peer.online || !status.self?.loginName
+      || !descriptorMatchesPeer(descriptor, peer, status.self.loginName)) {
+    return res.status(403).json({ error: "the descriptor does not match the authenticated Tailscale peer" });
+  }
+  try {
+    authorizeSwitchyardKey(descriptor.ssh.public_key, descriptor.instance_id);
+    const host = upsertTailscaleHost(db, descriptor);
+    // SSH readiness is deliberately a separate state. Key exchange/registration
+    // succeeds even when Remote Login is still disabled; the onboarding state
+    // machine can guide that one OS step later.
+    void probeHost(host).catch(() => {});
+    res.json({ ok: true, node: await localNodeDescriptor(status), host: publicHost(host) });
+  } catch (error: any) {
+    res.status(500).json({ error: String(error?.message || error) });
+  }
+});
+
+// Scan only online devices owned by the same Tailscale login. Non-Switchyard
+// devices remain visible as unavailable candidates so the future onboarding UI
+// has an honest place to offer installation.
+app.get("/api/network/discovery", async (_req, res) => {
+  res.setHeader("cache-control", "no-store");
+  if (process.env.TDSP_TAILSCALE_SERVE !== "1") {
+    return res.status(409).json({ code: "tailscaleServeRequired", error: "start Switchyard with tdsp serve --tailscale" });
+  }
+  const status = await tailscaleStatus();
+  const login = status.self?.loginName;
+  if (status.state !== "running" || !login) {
+    return res.status(409).json({ code: "tailscaleRequired", error: status.error || "Tailscale is not connected" });
+  }
+  const candidates = status.peers.filter((peer) => peer.online && sameLogin(peer.loginName, login));
+  const known = db.prepare("SELECT * FROM hosts WHERE kind!='local'").all() as Host[];
+  const ports = discoveryPorts();
+  const peers = await Promise.all(candidates.map(async (peer) => {
+    const probe = await probeSwitchyardPeer(peer, ports);
+    const valid = !!probe.descriptor && descriptorMatchesPeer(probe.descriptor, peer, login);
+    const descriptor = valid ? probe.descriptor : null;
+    const connected = known.some((host) =>
+      host.tailscale_id === peer.id || (!!descriptor && host.node_id === descriptor.instance_id),
+    );
+    return {
+      id: peer.id,
+      name: peer.hostName || peer.dnsName,
+      dns_name: peer.dnsName,
+      ip: peer.ips.find((ip) => ip.startsWith("100.")) || peer.ips[0] || null,
+      os: peer.os,
+      connection: peer.connection,
+      switchyard: !!descriptor,
+      compatible: !!descriptor,
+      connected,
+      serve_port: descriptor?.tailscale.serve_port ?? probe.port,
+      error: descriptor ? null : (valid ? null : probe.error || "Switchyard was not found"),
+    };
+  }));
+  res.json({
+    ok: true,
+    self: {
+      id: status.self?.id,
+      name: status.self?.hostName,
+      login_name: login,
+    },
+    peers,
+  });
+});
+
+// One click on A: re-resolve B from the live Tailscale map, have B record A and
+// authorize A's dedicated key, then mirror B's returned descriptor into A.
+app.post("/api/network/connect", async (req, res) => {
+  res.setHeader("cache-control", "no-store");
+  if (process.env.TDSP_TAILSCALE_SERVE !== "1") {
+    return res.status(409).json({ code: "tailscaleServeRequired", error: "start Switchyard with tdsp serve --tailscale" });
+  }
+  const peerId = typeof req.body?.peer_id === "string" ? req.body.peer_id : "";
+  if (!peerId) return res.status(400).json({ error: "peer_id required" });
+  const status = await tailscaleStatus();
+  const login = status.self?.loginName;
+  const peer = status.peers.find((candidate) => candidate.id === peerId);
+  if (status.state !== "running" || !login || !peer || !peer.online || !sameLogin(peer.loginName, login)) {
+    return res.status(404).json({ error: "the Tailscale peer is not online under this user" });
+  }
+  try {
+    const probe = await probeSwitchyardPeer(peer, discoveryPorts());
+    if (!probe.ok || !probe.descriptor || !probe.port
+        || !descriptorMatchesPeer(probe.descriptor, peer, login)) {
+      return res.status(409).json({ code: "switchyardUnavailable", error: probe.error || "Switchyard is not available on this peer" });
+    }
+    if (probe.descriptor.instance_id === NS) {
+      return res.status(409).json({ error: "cannot connect a Switchyard instance to itself" });
+    }
+    const local = await localNodeDescriptor(status);
+    const handshake = await requestPeerJson(
+      peer,
+      probe.port,
+      "/api/network/handshake",
+      "POST",
+      local,
+    );
+    const remote = handshake.body?.node;
+    if (!handshake.ok || !isNodeDescriptor(remote)
+        || !descriptorMatchesPeer(remote, peer, login)) {
+      return res.status(502).json({ error: handshake.error || "peer handshake failed" });
+    }
+    authorizeSwitchyardKey(remote.ssh.public_key, remote.instance_id);
+    const host = upsertTailscaleHost(db, remote);
+    void probeHost(host).catch(() => {});
+    res.json({ ok: true, host: publicHost(host), bilateral: true, ssh_ready: host.ssh_ready });
+  } catch (error: any) {
+    res.status(500).json({ error: String(error?.message || error) });
   }
 });
 
@@ -793,18 +1067,54 @@ app.get("/api/hosts", (_req, res) => {
   // Local machine first. Filesystem/bootstrap coordinates stay server-side;
   // the browser only needs identity, transport label and liveness.
   const hosts = db.prepare("SELECT * FROM hosts ORDER BY (kind='local') DESC, id DESC").all() as Host[];
-  res.json(hosts.map(({ data_dir: _dataDir, tdsp_bin: _tdspBin, ...host }) => host));
+  res.json(hosts.map(publicHost));
 });
 
-app.post("/api/hosts", (req, res) => {
+app.post("/api/hosts", async (req, res) => {
   const { name, target, kind } = req.body ?? {};
   if (!name || !target) return res.status(400).json({ error: "name and target required" });
   const k = kind === "mosh" ? "mosh" : "ssh";
-  const info = db.prepare("INSERT INTO hosts (name, target, kind) VALUES (?,?,?)")
-    .run(String(name).trim(), String(target).trim(), k);
+  const cleanTarget = String(target).trim();
+  const profile = typeof req.body?.profile === "string" ? req.body.profile.trim() : "";
+  let tdspBin: string | null = null;
+
+  // Advanced/canary path: the operator already installed an isolated profile on
+  // B. Verify that exact node API before recording B, so A can never silently
+  // fall back to B's canonical tdsp or controller-owned state.
+  if (profile) {
+    if (!validProfileName(profile)) {
+      return res.status(400).json({ error: "profile must be 1-32 lowercase letters, numbers, or hyphens" });
+    }
+    try {
+      const runner = new RemoteRunner(cleanTarget);
+      const home = (await runner.exec("sh", ["-c", 'printf %s "$HOME"'])).trim();
+      if (!home.startsWith("/")) throw new Error("remote home is unavailable");
+      tdspBin = path.posix.join(home, ".task-dispatcher", "profiles", profile, "bin", "tdsp");
+      const check = await runNodeCommand(
+        { kind: k, target: cleanTarget, tdsp_bin: tdspBin },
+        ["list", "--json"],
+        { timeoutMs: 30_000 },
+      );
+      const payload = parseNodeJson(check.stdout);
+      if (!check.ok || typeof payload?.schema_version !== "number") {
+        return res.status(409).json({
+          code: "profileUnavailable",
+          error: `Switchyard profile "${profile}" is not ready on the target; run tdsp install --profile ${profile} there first`,
+        });
+      }
+    } catch {
+      return res.status(409).json({
+        code: "profileUnavailable",
+        error: `could not reach Switchyard profile "${profile}" on the target`,
+      });
+    }
+  }
+
+  const info = db.prepare("INSERT INTO hosts (name, target, kind, tdsp_bin, connection_source) VALUES (?,?,?,?, 'manual')")
+    .run(String(name).trim(), cleanTarget, k, tdspBin);
   const id = Number(info.lastInsertRowid);
   probeHost(getHost.get(id) as Host); // probe right away so it goes online fast (fire-and-forget)
-  res.json({ id });
+  res.json({ id, profile: profile || null, ready: !!tdspBin });
 });
 
 // Run a shell script ON a machine via `ssh target sh -s`, fed over STDIN. This is
@@ -877,6 +1187,9 @@ app.post("/api/hosts/:id/update", async (req, res) => {
 app.delete("/api/hosts/:id", (req, res) => {
   const host = getHost.get(req.params.id) as Host | undefined;
   if (host?.kind === "local") return res.status(409).json({ error: "cannot delete the local machine" });
+  if (host?.managed_ssh === 1 && host.node_id) {
+    try { removeSwitchyardKey(host.node_id); } catch {}
+  }
   db.prepare("DELETE FROM hosts WHERE id=?").run(req.params.id);
   res.json({ ok: true });
 });

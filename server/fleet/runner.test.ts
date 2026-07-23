@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { localRunner } from "./runner.ts";
+import { localRunner, sshBaseArgs, sshControlPath } from "./runner.ts";
 
 test("LocalRunner.putDir copies a directory tree", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pd-"));
@@ -33,4 +33,23 @@ test("LocalRunner.readText returns file contents, and null when missing", async 
   fs.writeFileSync(f, "abc123-de45-6789");
   assert.equal(await localRunner.readText(f), "abc123-de45-6789");
   assert.equal(await localRunner.readText(path.join(tmp, "nope")), null);
+});
+
+test("sshControlPath stays below macOS's unix-socket limit for deep profiles", () => {
+  const deep = "/Users/example/.task-dispatcher/profiles/tailscale-test/data/12345678";
+  const controlPath = sshControlPath(deep, 501);
+  if (process.platform !== "win32") {
+    assert.ok(Buffer.byteLength(controlPath) < 104, controlPath);
+    assert.match(controlPath, /^\/tmp\/tdsp-501-[a-f0-9]{12}-%C$/);
+    assert.notEqual(controlPath, sshControlPath(`${deep}-other`, 501));
+  }
+});
+
+test("managed SSH uses a separate mux plus a profile-owned identity and known_hosts", () => {
+  const args = sshBaseArgs(true);
+  assert.ok(args.includes("IdentitiesOnly=yes"));
+  assert.ok(args.includes("StrictHostKeyChecking=accept-new"));
+  assert.ok(args.some((arg) => arg.includes("network/ssh/id_ed25519")));
+  assert.ok(args.some((arg) => arg.includes("network/ssh/known_hosts")));
+  assert.notEqual(sshControlPath(undefined, 501, true), sshControlPath(undefined, 501, false));
 });

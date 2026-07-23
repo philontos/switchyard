@@ -35,6 +35,16 @@ test("initSchema on a fresh DB has worktree_path and the newer columns", () => {
   for (const c of ["worktree_path", "base_commit", "kind", "host_id", "cwd"]) assert.ok(cols.includes(c), `missing ${c}`);
 });
 
+test("initSchema adds stable peer identity and managed SSH state to hosts", () => {
+  const db = new Database(":memory:");
+  initSchema(db, opts(false));
+  const cols = (db.prepare("PRAGMA table_info(hosts)").all() as { name: string }[]).map((c) => c.name);
+  for (const c of [
+    "node_id", "tailscale_id", "tailscale_dns", "tailscale_ip", "tailscale_user",
+    "ssh_port", "ssh_ready", "managed_ssh", "connection_source",
+  ]) assert.ok(cols.includes(c), `missing hosts.${c}`);
+});
+
 // The agent axis: every task records which coding-agent CLI it runs (claude by
 // default, or another local agent) plus an optional non-Claude model. A row
 // inserted without naming an agent must default to 'claude'.
@@ -84,6 +94,17 @@ test("initSchema on a fresh DB never creates a presets table", () => {
   initSchema(db, opts(false));
   const presets = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='presets'").get();
   assert.equal(presets, undefined);
+});
+
+test("initSchema creates onboarding evidence storage without a completion flag", () => {
+  const db = new Database(":memory:");
+  initSchema(db, opts(false));
+  const table = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='onboarding_events'",
+  ).get() as { name: string } | undefined;
+  assert.equal(table?.name, "onboarding_events");
+  const cols = (db.prepare("PRAGMA table_info(onboarding_events)").all() as { name: string }[]).map((c) => c.name);
+  assert.deepEqual(cols, ["kind", "detail", "occurred_at"]);
 });
 
 test("path migration runs only when didMigrate is true", () => {

@@ -22,6 +22,9 @@ let hostsOrder = [];               // API order: local machine first. Active mac
 const collapsedRepos = new Set();  // collapsed repo groups (repo id) — read by renderList
 let archivedOpen = false;          // is the archived section expanded
 let menuHostId = null;             // remote machine whose ⚙ menu is open (null = none)
+let discoveredPeers = [];
+let discoveryLoading = false;
+const connectingPeers = new Set();
 // renderList buffer: the markup last written to #m-list (+ the host it was for). An
 // unchanged poll produces byte-identical markup, so we skip the DOM write — a 4s/5s
 // refresh then never restarts the breathing-dot animations or churns the list.
@@ -275,7 +278,7 @@ function renderRail(hosts, blocked) {
     return `<button class="rchip${h.id === state.activeHostId ? " active" : ""}" title="${title}" onclick="selectHost(${h.id})"><span class="rdot ${dotClass}"></span>${glyph}</button>`;
   };
   $("m-rail").innerHTML = hosts.map(icon).join("")
-    + `<button class="rchip add" title="${t("host.new")}" onclick="openHostModal()">＋</button>`;
+    + `<button class="rchip add" title="${t("discovery.title")}" onclick="openDiscoveryModal()">＋</button>`;
 }
 // duringAutoFollow: on mobile, tapping a machine chip must stay on the LIST view.
 // followHostTask re-attaches the dock to that machine's last task (to keep it
@@ -394,6 +397,8 @@ function renderListHtml() {
   if (!isLocal) {
     if (bootstrappingHosts.has(h.id)) {
       fleetRow = `<div class="mh-fleet">⏳ ${t("host.installing")}</div>`;
+    } else if (h.connection_source === "tailscale" && h.ssh_ready === 0) {
+      fleetRow = `<div class="mh-fleet off">⚠ ${t("host.sshPending")}</div>`;
     } else if (fl?.ok && fl.needsUpdate) {
       fleetRow = `<div class="mh-fleet off">⚠ ${t("host.outdated")}</div>`;
     } else if (fl?.ok) {
@@ -501,14 +506,100 @@ export function initHostMenuDismiss() {
 }
 export function openHostModal() { $("host-modal").style.display = "flex"; setTimeout(() => $("h-name").focus(), 30); }
 export function closeHostModal() { $("host-modal").style.display = "none"; }
+export function openDiscoveryModal() {
+  $("discovery-modal").style.display = "flex";
+  discoverNodes();
+}
+export function closeDiscoveryModal() { $("discovery-modal").style.display = "none"; }
+export function openManualHostModal() {
+  closeDiscoveryModal();
+  openHostModal();
+}
+
+function renderDiscovery() {
+  const box = $("discovery-list");
+  if (discoveryLoading) {
+    box.innerHTML = `<div class="discovery-state"><span class="discovery-spin"></span>${t("discovery.searching")}</div>`;
+    return;
+  }
+  if (!discoveredPeers.length) {
+    box.innerHTML = `<div class="discovery-state">${t("discovery.empty")}</div>`;
+    return;
+  }
+  box.innerHTML = discoveredPeers.map((peer, peerIndex) => {
+    const busy = connectingPeers.has(peer.id);
+    const stateText = peer.connected
+      ? t("discovery.connected")
+      : peer.switchyard ? t("discovery.ready") : t("discovery.notSwitchyard");
+    const stateClass = peer.connected ? "connected" : peer.switchyard ? "ready" : "muted";
+    const action = peer.connected
+      ? `<button disabled>${t("discovery.connected")}</button>`
+      : peer.switchyard
+        ? `<button class="primary" ${busy ? "disabled" : ""} onclick="connectDiscoveredAt(${peerIndex})">${busy ? t("discovery.connecting") : t("discovery.connect")}</button>`
+        : `<button disabled>${t("discovery.unavailable")}</button>`;
+    return `<div class="discovery-peer">
+      <div class="discovery-machine">🖥</div>
+      <div class="discovery-main">
+        <div class="discovery-name">${esc(peer.name)}</div>
+        <div class="discovery-address">${esc(peer.dns_name || peer.ip || "")}</div>
+        <div class="discovery-meta"><span class="discovery-dot ${peer.switchyard ? "on" : "off"}"></span>${esc(peer.os || "")}<span class="${stateClass}">${stateText}</span></div>
+      </div>
+      <div class="discovery-action">${action}</div>
+    </div>`;
+  }).join("");
+}
+
+export async function discoverNodes() {
+  if (discoveryLoading) return;
+  discoveryLoading = true;
+  renderDiscovery();
+  try {
+    const result = await api("/api/network/discovery");
+    discoveredPeers = result.peers || [];
+  } catch (error) {
+    discoveredPeers = [];
+    toast(String(error?.message || error), "error");
+  } finally {
+    discoveryLoading = false;
+    renderDiscovery();
+  }
+}
+
+export async function connectDiscovered(peerId) {
+  if (!peerId || connectingPeers.has(peerId)) return;
+  connectingPeers.add(peerId);
+  renderDiscovery();
+  try {
+    const result = await api("/api/network/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ peer_id: peerId }),
+    });
+    const peer = discoveredPeers.find(item => item.id === peerId);
+    if (peer) peer.connected = true;
+    toast(result.ssh_ready === 1 ? t("discovery.connectedToast") : t("discovery.connectedSshPending"), "success");
+    await loadHosts();
+    await loadFleet();
+  } catch (error) {
+    toast(String(error?.message || error), "error");
+  } finally {
+    connectingPeers.delete(peerId);
+    renderDiscovery();
+  }
+}
+export function connectDiscoveredAt(index) {
+  const peer = discoveredPeers[Number(index)];
+  if (peer) connectDiscovered(peer.id);
+}
 export async function addHost() {
   const body = {
     name: $("h-name").value.trim(), target: $("h-target").value.trim(),
     kind: Selects["h-kind"].value,
+    profile: $("h-profile").value.trim(),
   };
   if (!body.name || !body.target) return toast(t("host.required"), "error");
   await api("/api/hosts", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
-  $("h-name").value = ""; $("h-target").value = "";
+  $("h-name").value = ""; $("h-target").value = ""; $("h-profile").value = "";
   closeHostModal();
   toast(t("host.added"), "success");
   loadHosts();
