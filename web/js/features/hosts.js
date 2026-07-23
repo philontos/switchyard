@@ -25,6 +25,7 @@ let menuHostId = null;             // remote machine whose ⚙ menu is open (nul
 let discoveredPeers = [];
 let discoveryLoading = false;
 const connectingPeers = new Set();
+let selfUpdating = false;
 // renderList buffer: the markup last written to #m-list (+ the host it was for). An
 // unchanged poll produces byte-identical markup, so we skip the DOM write — a 4s/5s
 // refresh then never restarts the breathing-dot animations or churns the list.
@@ -60,6 +61,29 @@ export async function updateHost(id) {
   } finally {
     bootstrappingHosts.delete(id);
     renderList();
+  }
+}
+
+// Updating this Switchyard instance belongs to the local machine, so its control
+// lives on the Local rail chip instead of in the global page header. Keep the
+// state here as renderRail is rebuilt by the liveness poll while an update runs.
+export async function updateSelf() {
+  if (selfUpdating) return;
+  selfUpdating = true;
+  rerender();
+  toast(t("system.updating"), "info");
+  try {
+    await api("/api/system/update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    toast(t("system.restarting"), "success");
+    setTimeout(() => location.reload(), 3500);
+  } catch (e) {
+    selfUpdating = false;
+    rerender();
+    toast(String(e?.message || e), "error");
   }
 }
 
@@ -274,7 +298,9 @@ function renderRail(hosts, blocked) {
     const dotClass = !online ? "off" : waiting ? "waiting" : "on";
     const base = h.kind === "local" ? t("host.local") : `${h.name} · ${h.target}`;
     const title = waiting ? `${base} ${t("host.blocked")}` : base;
-    return `<button class="rchip${h.id === state.activeHostId ? " active" : ""}" title="${title}" onclick="selectHost(${h.id})"><span class="rdot ${dotClass}"></span>${glyph}</button>`;
+    const chip = `<button class="rchip${h.id === state.activeHostId ? " active" : ""}" title="${title}" onclick="selectHost(${h.id})"><span class="rdot ${dotClass}"></span>${glyph}</button>`;
+    if (h.kind !== "local") return chip;
+    return `<div class="rchip-local">${chip}<button id="self-update" class="rchip-update${selfUpdating ? " updating" : ""}" title="${t("system.updateTitle")}" aria-label="${t("system.updateTitle")}" onclick="event.stopPropagation();updateSelf()" ${selfUpdating ? "disabled" : ""}><span class="sync-icon" aria-hidden="true"></span></button></div>`;
   };
   $("m-rail").innerHTML = hosts.map(icon).join("")
     + `<button class="rchip add" title="${t("discovery.title")}" onclick="openDiscoveryModal()">＋</button>`;

@@ -14,7 +14,7 @@ import { initMobile, isOn as isMobile, autoFollowing, enterTerminal, enterList, 
 import { initReading, reflectWaiting } from "./features/reading.js";
 import { state } from "./core/state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./features/repos.js";
-import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, removeNodeWt, resumeNodeTask, deleteNodeTask, delNodeRepo, updateHost, openDiscoveryModal, closeDiscoveryModal, openManualHostModal, discoverNodes, connectDiscoveredAt } from "./features/hosts.js";
+import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, removeNodeWt, resumeNodeTask, deleteNodeTask, delNodeRepo, updateHost, updateSelf, openDiscoveryModal, closeDiscoveryModal, openManualHostModal, discoverNodes, connectDiscoveredAt } from "./features/hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, cancelTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, addNodeShell, allTasks } from "./features/tasks.js";
 import { initCodeView, openRepoCode, openTaskCode, closeCodeView, repaintCodeView, isCodeViewOpen } from "./features/codeview.js";
 import { initReorder } from "./features/reorder.js";
@@ -30,30 +30,6 @@ import {
   repaintOnboarding,
   setOnboardingKeepAwake,
 } from "./features/onboarding.js";
-
-let selfUpdating = false;
-async function updateSelf() {
-  if (selfUpdating) return;
-  selfUpdating = true;
-  $("self-update").disabled = true;
-  $("self-update").classList.add("updating");
-  toast(t("system.updating"), "info");
-  try {
-    await fetch("/api/system/update", { method: "POST", headers: { "content-type": "application/json", "X-Lang": I18N.lang }, body: "{}" })
-      .then(async (r) => {
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.error || r.status);
-        return j;
-      });
-    toast(t("system.restarting"), "success");
-    setTimeout(() => location.reload(), 3500);
-  } catch (e) {
-    selfUpdating = false;
-    $("self-update").disabled = false;
-    $("self-update").classList.remove("updating");
-    toast(String(e?.message || e), "error");
-  }
-}
 
 // ---- inline-onclick bridge ----
 // Every function referenced by an onclick="…" attribute (static markup in
