@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR } from "../core/paths.js";
@@ -72,11 +73,26 @@ function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-// reuse one ssh connection per host — first connect sets up a master socket,
-// later commands/probes ride it (a few ms instead of a full handshake).
+// Reuse one SSH connection per host. Unix-domain socket paths are capped at
+// roughly 104 bytes on macOS; an isolated profile's DATA_DIR is intentionally
+// deep, so placing `cm-%C` below it makes every SSH command fail before dialing.
+// Hash the instance identity into a short /tmp path instead. /tmp is sticky and
+// OpenSSH creates an owner-only socket; uid + data-dir hash prevent cross-user
+// and cross-profile collisions.
+export function sshControlPath(
+  dataDir: string = DATA_DIR,
+  uid: string | number = typeof process.getuid === "function" ? process.getuid() : "user",
+): string {
+  if (process.platform === "win32") return path.join(dataDir, "cm-%C");
+  const scope = crypto.createHash("sha256").update(dataDir).digest("hex").slice(0, 12);
+  return `/tmp/tdsp-${uid}-${scope}-%C`;
+}
+
+// First connect sets up a master socket; later commands/probes ride it (a few
+// milliseconds instead of a full handshake).
 const SSH_MUX = [
   "-o", "ControlMaster=auto",
-  "-o", `ControlPath=${path.join(DATA_DIR, "cm-%C")}`,
+  "-o", `ControlPath=${sshControlPath()}`,
   "-o", "ControlPersist=60s",
 ];
 const SSH_BATCH = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"];
