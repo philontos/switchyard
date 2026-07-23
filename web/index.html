@@ -196,6 +196,23 @@
   </div>
 </div>
 
+<div id="discovery-modal" class="modal-bg" style="display:none">
+  <div class="modal discovery-modal">
+    <div class="discovery-head">
+      <div>
+        <h2 data-i18n="discovery.title"></h2>
+        <div class="hint" data-i18n="discovery.hint"></div>
+      </div>
+      <button class="discovery-refresh" onclick="discoverNodes()" data-i18n="discovery.refresh"></button>
+    </div>
+    <div id="discovery-list" class="discovery-list" aria-live="polite"></div>
+    <div class="dlg-actions discovery-actions">
+      <button class="sec" onclick="openManualHostModal()" data-i18n="discovery.manual"></button>
+      <button class="sec" onclick="closeDiscoveryModal()" data-i18n="dialog.cancel"></button>
+    </div>
+  </div>
+</div>
+
 <div id="host-modal" class="modal-bg" style="display:none">
   <div class="modal">
     <h2 style="margin-bottom:10px" data-i18n="host.modalTitle"></h2>

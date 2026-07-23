@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
-import { DATA_DIR, DB_PATH, LEGACY_DATA_DIR, DID_MIGRATE } from "./paths.js";
+import { DATA_DIR, DB_PATH, LEGACY_DATA_DIR, DID_MIGRATE, NS } from "./paths.js";
 import { initSchema } from "./schema.js";
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -19,11 +19,11 @@ initSchema(db, { didMigrate: DID_MIGRATE, legacyDir: LEGACY_DATA_DIR, dataDir: D
   let localId: number;
   if (local) {
     localId = local.id;
-    db.prepare("UPDATE hosts SET data_dir=?, status='online' WHERE id=?").run(DATA_DIR, localId);
+    db.prepare("UPDATE hosts SET data_dir=?, node_id=?, status='online' WHERE id=?").run(DATA_DIR, NS, localId);
   } else {
     const info = db.prepare(
-      "INSERT INTO hosts (name, target, kind, data_dir, status) VALUES ('local','','local',?,'online')"
-    ).run(DATA_DIR);
+      "INSERT INTO hosts (name, target, kind, data_dir, node_id, status) VALUES ('local','','local',?,?,'online')"
+    ).run(DATA_DIR, NS);
     localId = Number(info.lastInsertRowid);
   }
   db.prepare("UPDATE repos SET host_id=? WHERE host_id IS NULL").run(localId);
@@ -84,5 +84,14 @@ export interface Host {
   status: string;            // online | offline | unknown
   last_checked: string | null;
   tdsp_bin: string | null;   // absolute path to this node's tdsp wrapper once bootstrapped; null = not yet
+  node_id: string | null;    // stable Switchyard instance id
+  tailscale_id: string | null;
+  tailscale_dns: string | null;
+  tailscale_ip: string | null;
+  tailscale_user: string | null;
+  ssh_port: number;
+  ssh_ready: number | null;
+  managed_ssh: number;
+  connection_source: string | null;
   created_at: string;
 }

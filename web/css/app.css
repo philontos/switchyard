@@ -677,6 +677,35 @@ a { color: var(--accent-bar); }
 .modal-bg { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal { width: 420px; max-width: 92vw; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
 .modal h2 { margin-top: 0; }
+.discovery-modal { width: 540px; }
+.discovery-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 14px; }
+.discovery-head > div { flex: 1; min-width: 0; }
+.discovery-head h2 { margin-bottom: 3px; }
+.discovery-refresh { flex: none; margin: 0; }
+.discovery-list { min-height: 150px; max-height: min(430px, 55vh); overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.discovery-state { min-height: 150px; display: flex; align-items: center; justify-content: center;
+  gap: 9px; padding: 18px; color: var(--faint); text-align: center; }
+.discovery-spin { width: 16px; height: 16px; border: 2px solid var(--border);
+  border-top-color: var(--accent-bar); border-radius: 50%; animation: spin .8s linear infinite; }
+.discovery-peer { display: flex; align-items: center; gap: 11px; padding: 11px 12px;
+  border-bottom: 1px solid var(--surface-2); }
+.discovery-peer:last-child { border-bottom: 0; }
+.discovery-machine { flex: none; width: 34px; height: 34px; display: flex; align-items: center;
+  justify-content: center; border-radius: 8px; background: var(--surface); font-size: 16px; }
+.discovery-main { flex: 1; min-width: 0; }
+.discovery-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.discovery-address { color: var(--faint); font: 10.5px/1.4 Menlo, Consolas, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.discovery-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.discovery-meta .ready, .discovery-meta .connected { color: var(--green); }
+.discovery-meta .muted { color: var(--faint); }
+.discovery-dot { width: 7px; height: 7px; border-radius: 50%; }
+.discovery-dot.on { background: var(--green); }
+.discovery-dot.off { background: var(--faint); }
+.discovery-action { flex: none; }
+.discovery-action button { min-width: 72px; margin: 0; }
+.discovery-actions { margin-top: 12px; }
 .sessrow { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--surface-2); }
 .sessrow code { background: var(--bg); padding: 1px 6px; border-radius: 4px; }
 .sessrow button { width: auto; padding: 2px 8px; margin: 0; font-size: 11px; }

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR } from "../core/paths.js";
 import { Host } from "../core/db.js";
+import { sshIdentityPaths } from "../network/ssh-identity.js";
 
 const pexec = promisify(execFile);
 
@@ -82,28 +83,46 @@ function shq(s: string): string {
 export function sshControlPath(
   dataDir: string = DATA_DIR,
   uid: string | number = typeof process.getuid === "function" ? process.getuid() : "user",
+  managed = false,
 ): string {
   if (process.platform === "win32") return path.join(dataDir, "cm-%C");
   const scope = crypto.createHash("sha256").update(dataDir).digest("hex").slice(0, 12);
-  return `/tmp/tdsp-${uid}-${scope}-%C`;
+  return `/tmp/tdsp-${uid}-${scope}${managed ? "-m" : ""}-%C`;
 }
 
 // First connect sets up a master socket; later commands/probes ride it (a few
 // milliseconds instead of a full handshake).
-const SSH_MUX = [
-  "-o", "ControlMaster=auto",
-  "-o", `ControlPath=${sshControlPath()}`,
-  "-o", "ControlPersist=60s",
-];
 const SSH_BATCH = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"];
 
 /** ssh args (connection reuse + non-interactive) for one-off remote commands like
  *  the fleet's `ssh <node> tdsp list` — same muxing/batching the Runner uses. */
-export const SSH_BASE_ARGS = [...SSH_MUX, ...SSH_BATCH];
+export function sshBaseArgs(managed = false, port = 22): string[] {
+  const identityPaths = sshIdentityPaths(DATA_DIR);
+  const mux = [
+    "-o", "ControlMaster=auto",
+    "-o", `ControlPath=${sshControlPath(DATA_DIR, typeof process.getuid === "function" ? process.getuid() : "user", managed)}`,
+    "-o", "ControlPersist=60s",
+  ];
+  const identity = managed
+    ? [
+        "-o", "IdentitiesOnly=yes",
+        "-i", identityPaths.privateKeyPath,
+        // The Tailscale peer identity + same-user handshake authenticates the
+        // network destination. Keep TOFU host keys in this profile's private
+        // file so first use is non-interactive without weakening ~/.ssh.
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", `UserKnownHostsFile=${path.join(identityPaths.dir, "known_hosts")}`,
+      ]
+    : [];
+  const portArgs = port !== 22 ? ["-p", String(port)] : [];
+  return [...mux, ...SSH_BATCH, ...identity, ...portArgs];
+}
+
+export const SSH_BASE_ARGS = sshBaseArgs();
 
 export class RemoteRunner implements CommandRunner {
   kind = "ssh" as const;
-  constructor(public target: string) {}
+  constructor(public target: string, public managed = false, public port = 22) {}
 
   // just forward: optional cd; per-command env prefix; the exec'd command —
   // joined into one remote shell command string. PATH/toolchain resolution is
@@ -117,7 +136,7 @@ export class RemoteRunner implements CommandRunner {
   }
 
   async exec(file: string, args: string[], opts: ExecOpts = {}): Promise<string> {
-    return localRunner.exec("ssh", [...SSH_MUX, ...SSH_BATCH, this.target, this.remoteCmd(file, args, opts)], {
+    return localRunner.exec("ssh", [...sshBaseArgs(this.managed, this.port), this.target, this.remoteCmd(file, args, opts)], {
       maxBuffer: opts.maxBuffer,
     });
   }
@@ -126,10 +145,10 @@ export class RemoteRunner implements CommandRunner {
 /** SSH transport runner; do not use it as a remote repo/task service. */
 export function transportRunnerFor(host: Host): CommandRunner {
   if (host.kind === "local") return localRunner;
-  return new RemoteRunner(host.target);
+  return new RemoteRunner(host.target, host.managed_ssh === 1, host.ssh_port || 22);
 }
 
 /** One SSH round-trip that proves transport reachability. */
-export async function sshProbe(target: string): Promise<void> {
-  await localRunner.exec("ssh", [...SSH_MUX, ...SSH_BATCH, target, "true"]);
+export async function sshProbe(target: string, managed = false, port = 22): Promise<void> {
+  await localRunner.exec("ssh", [...sshBaseArgs(managed, port), target, "true"]);
 }

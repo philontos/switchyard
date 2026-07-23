@@ -23,6 +23,14 @@ test("attachCommand: ssh host sshes in and attaches there", () => {
   assert.deepEqual(r.args, ["-t", "me@box", "exec tmux attach -t tdsp-3-x"]);
 });
 
+test("attachCommand: a discovered host uses the managed identity without a prompt", () => {
+  const r = attachCommand({ ...host("ssh", "me@box"), managed_ssh: 1, ssh_port: 22 }, "tdsp-3-x", BINS);
+  assert.equal(r.file, BINS.ssh);
+  assert.ok(r.args.includes("IdentitiesOnly=yes"));
+  assert.ok(r.args.includes("StrictHostKeyChecking=accept-new"));
+  assert.deepEqual(r.args.slice(-3), ["-t", "me@box", "exec tmux attach -t tdsp-3-x"]);
+});
+
 test("attachCommand: mosh host attaches via mosh", () => {
   const r = attachCommand(host("mosh", "me@box"), "tdsp-4-x", BINS);
   assert.equal(r.file, BINS.mosh);

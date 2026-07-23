@@ -222,6 +222,8 @@ function fakeDeps(db: Database.Database) {
         health: [],
         self: {
           id: "self",
+          userId: "1",
+          loginName: "me@example.com",
           hostName: "dev-a",
           dnsName: "dev-a.example.ts.net",
           os: "linux",

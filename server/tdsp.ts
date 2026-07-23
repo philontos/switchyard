@@ -124,6 +124,12 @@ process.exitCode = await runCli(process.argv.slice(2), {
         httpsPort: opts.tailscaleHttpsPort ?? localPort,
       });
       if (!result.ok) throw new Error(`serve: ${result.error || result.status.error || "Tailscale setup failed"}`);
+      // The HTTP app uses these only to publish/probe the tailnet-private
+      // well-known node endpoint. They are set after Serve succeeds, so a plain
+      // LAN/loopback launch can never pretend to be an authenticated peer.
+      process.env.TDSP_TAILSCALE_SERVE = "1";
+      process.env.TDSP_TAILSCALE_PORT = String(result.httpsPort);
+      if (result.url) process.env.TDSP_TAILSCALE_URL = result.url;
       process.stdout.write(`Switchyard on ${result.url || `Tailscale HTTPS :${result.httpsPort}`}\n`);
     }
 

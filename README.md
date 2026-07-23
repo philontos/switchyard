@@ -102,7 +102,8 @@ Switchyard stays bound to `127.0.0.1:4500`; `tailscale serve` publishes that bac
 The layers stay deliberately thin:
 
 - **Phone → console:** HTTPS/WebSocket through Tailscale Serve. Open the printed URL and add it to the home screen.
-- **Machine A → machine B:** the existing node protocol remains `ssh B tdsp …`; use B's MagicDNS name or `100.x` address as the SSH target. Tailscale supplies reachability, while SSH still supplies command authentication.
+- **Machine A → machine B:** click `+` in the machine rail, then **Discover devices**. Switchyard keeps online peers owned by the same Tailscale login and probes compatible nodes. **Connect** exchanges stable instance ids, exact tdsp paths, and one profile-owned Ed25519 key in each direction, then registers both nodes. There is no pairing code and no personal SSH key is reused or replaced.
+- **Actual control:** the node protocol remains `ssh B tdsp …`. Tailscale supplies discovery, identity, and reachability; SSH supplies commands, terminals, and file transport. Each peer key gets one marked line in `~/.ssh/authorized_keys`. If SSH/Remote Login is still off, the relationship is retained as **SSH not ready** and turns online after the OS service is enabled.
 - **Route choice:** Tailscale automatically tries direct WireGuard, then a configured peer relay, then DERP. Inspect the route instead of guessing:
 
 ```sh
@@ -138,7 +139,7 @@ If the tailnet owner has not enabled Serve HTTPS yet, the command prints a one-t
 tdsp-tailscale-test serve --port 14500 --host-cidr 100.64.0.0/10
 ```
 
-On another machine, check out the same branch and run the same two commands. In **New machine**, enter its Tailscale MagicDNS SSH target and set the optional profile to `tailscale-test`; Switchyard verifies that exact remote profile before adding it. Neither side will invoke the canonical `tdsp` or open the canonical database. Clean up only the canary listener with:
+On another machine, check out the same branch and run the same two commands. Open either canary console and click the machine-rail `+`: the other `tailscale-test` appears automatically. **Connect** exchanges the exact canary launcher and isolated SSH keys, so neither side invokes canonical `tdsp` or opens the canonical database. The manual SSH target + profile form remains as an advanced fallback. Clean up only the canary listener with:
 
 ```sh
 tdsp-tailscale-test network off --https-port 14500 --port 14500

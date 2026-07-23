@@ -22,8 +22,12 @@ const running = JSON.stringify({
   BackendState: "Running",
   CertDomains: ["dev-a.example.ts.net"],
   TailscaleIPs: ["100.1.2.3"],
+  User: {
+    1: { LoginName: "me@example.com", DisplayName: "Me" },
+  },
   Self: {
     ID: "self",
+    UserID: 1,
     HostName: "dev-a",
     DNSName: "dev-a.example.ts.net.",
     OS: "macOS",
@@ -40,6 +44,7 @@ const running = JSON.stringify({
   Peer: {
     one: {
       ID: "one",
+      UserID: 1,
       HostName: "dev-b",
       DNSName: "dev-b.example.ts.net.",
       OS: "linux",
@@ -51,6 +56,7 @@ const running = JSON.stringify({
     },
     two: {
       ID: "two",
+      UserID: 1,
       HostName: "dev-c",
       DNSName: "dev-c.example.ts.net.",
       OS: "linux",
@@ -82,6 +88,8 @@ test("parseTailscaleStatus projects a stable, private status shape", () => {
   assert.equal(status.state, "running");
   assert.equal(status.self?.dnsName, "dev-a.example.ts.net");
   assert.equal(status.tailnet, "me@example.com");
+  assert.equal(status.self?.loginName, "me@example.com");
+  assert.equal(status.peers[0].userId, "1");
   assert.equal(status.peers[0].connection, "direct");
   assert.equal(status.peers[1].connection, "peer-relay");
   assert.equal("PublicKey" in (status.self as any), false);

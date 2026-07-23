@@ -5,6 +5,8 @@ export type TailscaleConnection = "direct" | "peer-relay" | "derp" | "idle" | "u
 
 export interface TailscalePeer {
   id: string;
+  userId: string | null;
+  loginName: string | null;
   hostName: string;
   dnsName: string;
   os: string;
@@ -117,9 +119,13 @@ function peerConnection(raw: any): TailscaleConnection {
   return "unknown";
 }
 
-function peerFromRaw(raw: any): TailscalePeer {
+function peerFromRaw(raw: any, users: Record<string, any> = {}): TailscalePeer {
+  const userId = raw?.UserID == null ? null : String(raw.UserID);
+  const user = userId ? users[userId] : null;
   return {
     id: String(raw?.ID || raw?.PublicKey || raw?.DNSName || raw?.HostName || ""),
+    userId,
+    loginName: typeof user?.LoginName === "string" && user.LoginName ? user.LoginName : null,
     hostName: String(raw?.HostName || ""),
     dnsName: trimDns(raw?.DNSName),
     os: String(raw?.OS || ""),
@@ -165,8 +171,9 @@ export function parseTailscaleStatus(raw: string, binary = "tailscale"): Tailsca
         : normalized === "stopped" || normalized === "starting" ? "stopped"
           : "error";
   const peerValues = doc?.Peer && typeof doc.Peer === "object" ? Object.values(doc.Peer) : [];
+  const users = doc?.User && typeof doc.User === "object" ? doc.User : {};
   const peers = peerValues
-    .map(peerFromRaw)
+    .map((peer) => peerFromRaw(peer, users))
     .filter((peer) => peer.id || peer.hostName || peer.dnsName)
     .sort((a, b) => a.hostName.localeCompare(b.hostName));
   const currentTailnet = doc?.CurrentTailnet && typeof doc.CurrentTailnet === "object" ? doc.CurrentTailnet : {};
@@ -186,7 +193,7 @@ export function parseTailscaleStatus(raw: string, binary = "tailscale"): Tailsca
     magicDnsEnabled: currentTailnet?.MagicDNSEnabled === true,
     certDomains: Array.isArray(doc?.CertDomains) ? stringList(doc.CertDomains) : null,
     health: stringList(doc?.Health),
-    self: doc?.Self ? peerFromRaw(doc.Self) : null,
+    self: doc?.Self ? peerFromRaw(doc.Self, users) : null,
     peers,
     error: state === "error" ? `unexpected Tailscale backend state: ${backendState || "unknown"}` : null,
   };
