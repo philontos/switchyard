@@ -109,6 +109,18 @@ function fakeDeps(db: Database.Database) {
   let err = "";
   let served = false;
   let serveOpts: any = null;
+  let serveStopCalls = 0;
+  let serviceStatus: any = {
+    state: "stopped",
+    running: false,
+    instance: "test-instance",
+    dataDir: "/data/test-instance",
+    pid: null,
+    startedAt: null,
+    readyAt: null,
+    options: null,
+    command: null,
+  };
   const createCalls: { cwd?: string | null; title?: string | null }[] = [];
   const repoCalls: any[] = [];
   const stopCalls: number[] = [];
@@ -129,6 +141,14 @@ function fakeDeps(db: Database.Database) {
       serve: (opts?: any) => {
         served = true;
         serveOpts = opts;
+      },
+      serveStatus: () => serviceStatus,
+      serveStop: async () => {
+        serveStopCalls++;
+        const pid = serviceStatus.pid;
+        const alreadyStopped = !serviceStatus.running;
+        serviceStatus = { ...serviceStatus, state: "stopped", running: false, pid: null };
+        return { ok: true, stopped: !alreadyStopped, alreadyStopped, pid };
       },
       liveness: noLive,
       createLocal: async (opts: { cwd?: string | null; title?: string | null }): Promise<CreateLocalResult> => {
@@ -300,6 +320,12 @@ function fakeDeps(db: Database.Database) {
     get serveOpts() {
       return serveOpts;
     },
+    get serveStopCalls() {
+      return serveStopCalls;
+    },
+    setServeStatus(status: any) {
+      serviceStatus = status;
+    },
   };
 }
 
@@ -391,6 +417,87 @@ test("runCli serve rejects invalid ports before starting", async () => {
   assert.equal(await runCli(["serve", "--port", "70000"], f.deps), 1);
   assert.equal(f.served, false);
   assert.match(f.err, /port/i);
+});
+
+test("runCli serve status reports lifecycle state without trying to bind a port", async () => {
+  const f = fakeDeps(seed());
+  f.setServeStatus({
+    state: "running",
+    running: true,
+    instance: "abc123",
+    dataDir: "/profiles/canary/data/abc123",
+    pid: 4321,
+    startedAt: "2026-07-23T10:00:00.000Z",
+    readyAt: "2026-07-23T10:00:01.000Z",
+    options: { port: 14500 },
+    command: "tdsp serve --port 14500",
+  });
+  const code = await runCli(["serve", "status"], f.deps);
+  assert.equal(code, 0);
+  assert.equal(f.served, false);
+  assert.match(f.out, /running/);
+  assert.match(f.out, /4321/);
+  assert.match(f.out, /14500/);
+});
+
+test("runCli serve status --json exits 1 when this profile is stopped", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["serve", "status", "--json"], f.deps);
+  assert.equal(code, 1);
+  assert.equal(JSON.parse(f.out).state, "stopped");
+  assert.equal(f.served, false);
+});
+
+test("runCli serve stop is idempotent and never starts a server", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["serve", "stop"], f.deps);
+  assert.equal(code, 0);
+  assert.equal(f.serveStopCalls, 1);
+  assert.equal(f.served, false);
+  assert.match(f.out, /already stopped/i);
+});
+
+test("runCli serve restart stops this profile and reuses its last successful options", async () => {
+  const f = fakeDeps(seed());
+  f.setServeStatus({
+    state: "running",
+    running: true,
+    instance: "abc123",
+    dataDir: "/data/abc123",
+    pid: 1234,
+    startedAt: "2026-07-23T10:00:00.000Z",
+    readyAt: "2026-07-23T10:00:01.000Z",
+    options: { port: 14500, tailscale: true, tailscaleHttpsPort: 14500 },
+    command: "tdsp serve --port 14500 --tailscale --tailscale-port 14500",
+  });
+  const code = await runCli(["serve", "restart"], f.deps);
+  assert.equal(code, 0);
+  assert.equal(f.serveStopCalls, 1);
+  assert.equal(f.served, true);
+  assert.deepEqual(f.serveOpts, { port: 14500, tailscale: true, tailscaleHttpsPort: 14500 });
+});
+
+test("runCli serve restart refuses to guess when this profile has never had a managed launch", async () => {
+  const f = fakeDeps(seed());
+  const code = await runCli(["serve", "restart"], f.deps);
+  assert.equal(code, 1);
+  assert.equal(f.serveStopCalls, 0);
+  assert.equal(f.served, false);
+  assert.match(f.err, /no previous managed launch/i);
+});
+
+test("runCli serve rejects unknown actions, positionals, options, and missing values", async () => {
+  for (const argv of [
+    ["serve", "bogus"],
+    ["serve", "--port", "14500", "bogus"],
+    ["serve", "--bogus"],
+    ["serve", "--port"],
+  ]) {
+    const f = fakeDeps(seed());
+    assert.equal(await runCli(argv, f.deps), 1, argv.join(" "));
+    assert.equal(f.served, false, argv.join(" "));
+    assert.match(f.err, /unknown|requires a value/i);
+  }
 });
 
 test("runCli rejects an unknown command with a usage hint on stderr and exits 1", async () => {
@@ -555,6 +662,8 @@ test("runCli install sets up the machine and reports the paths", async () => {
   assert.equal(code, 0);
   assert.match(f.out, /\.task-dispatcher\/src/);
   assert.match(f.out, /\.task-dispatcher\/bin\/tdsp/);
+  assert.match(f.out, /no server was started/);
+  assert.match(f.out, /tdsp serve status/);
 });
 
 test("runCli install --profile creates and reports an isolated launcher", async () => {
@@ -564,6 +673,7 @@ test("runCli install --profile creates and reports an isolated launcher", async 
   assert.deepEqual(f.installCalls, ["tailscale-test"]);
   assert.match(f.out, /profiles\/tailscale-test\/data/);
   assert.match(f.out, /tdsp-tailscale-test/);
+  assert.match(f.out, /tdsp-tailscale-test serve --port <unused-port>/);
 });
 
 test("runCli install rejects an unsafe profile name", async () => {

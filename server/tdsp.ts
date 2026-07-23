@@ -11,6 +11,7 @@ import path from "node:path";
 import { runCli } from "./task/cli.js";
 import { db, type Provider, type Task } from "./core/db.js";
 import { NS, DATA_DIR, ROOT } from "./core/paths.js";
+import { ServeLifecycle, serveOptionsToArgs } from "./core/serve-lifecycle.js";
 import { applyInstall, applyProfileInstall } from "./fleet/bootstrap.js";
 import { localRunner } from "./fleet/runner.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions } from "./session/tmux.js";
@@ -94,47 +95,62 @@ const ownedRepoEnv: OwnedRepoEnv = {
   killSession: (session) => killSession(localRunner, session),
 };
 
+const serveLifecycle = new ServeLifecycle({
+  dataDir: DATA_DIR,
+  instance: NS,
+});
+
 process.exitCode = await runCli(process.argv.slice(2), {
   db,
   out: (s) => process.stdout.write(s + "\n"),
   err: (s) => process.stderr.write(s + "\n"),
   serve: async (opts) => {
-    process.env.TDSP_RESTART_ARGS = JSON.stringify(process.argv.slice(2));
-    if (opts?.port) process.env.PORT = String(opts.port);
-    if (opts?.hosts?.length) process.env.HOSTS = opts.hosts.join(",");
-    else if (opts?.host) process.env.HOST = opts.host;
+    const launch = opts ?? {};
+    const lease = serveLifecycle.claim(launch);
+    try {
+      process.env.TDSP_RESTART_ARGS = JSON.stringify(serveOptionsToArgs(launch));
+      if (launch.port) process.env.PORT = String(launch.port);
+      if (launch.hosts?.length) process.env.HOSTS = launch.hosts.join(",");
+      else if (launch.host) process.env.HOST = launch.host;
 
-    if (opts?.hostCidr != null) {
-      if (!opts.hostCidr) throw new Error("serve: --host-cidr requires a CIDR range, for example 10.10.0.0/24");
-      const hostIp = findLocalIpInCidr(opts.hostCidr);
-      if (!hostIp) throw new Error(`serve: no local IPv4 address found in ${opts.hostCidr}`);
-      const hosts = [...new Set(["127.0.0.1", hostIp, ...(process.env.HOSTS || "").split(",").filter(Boolean)])];
-      process.env.HOSTS = hosts.join(",");
-      delete process.env.HOST;
+      if (launch.hostCidr != null) {
+        if (!launch.hostCidr) throw new Error("serve: --host-cidr requires a CIDR range, for example 10.10.0.0/24");
+        const hostIp = findLocalIpInCidr(launch.hostCidr);
+        if (!hostIp) throw new Error(`serve: no local IPv4 address found in ${launch.hostCidr}`);
+        const hosts = [...new Set(["127.0.0.1", hostIp, ...(process.env.HOSTS || "").split(",").filter(Boolean)])];
+        process.env.HOSTS = hosts.join(",");
+        delete process.env.HOST;
+      }
+
+      if (launch.tailscale) {
+        // Keep the app loopback-only and let Tailscale Serve own tailnet TLS. The
+        // dedicated listener is additive: no Funnel and no reset of other routes.
+        delete process.env.HOST;
+        delete process.env.HOSTS;
+        const localPort = launch.port ?? Number(process.env.PORT || 4500);
+        const result = await setupTailscale({
+          localPort,
+          httpsPort: launch.tailscaleHttpsPort ?? localPort,
+        });
+        if (!result.ok) throw new Error(`serve: ${result.error || result.status.error || "Tailscale setup failed"}`);
+        // The HTTP app uses these only to publish/probe the tailnet-private
+        // well-known node endpoint. They are set after Serve succeeds, so a plain
+        // LAN/loopback launch can never pretend to be an authenticated peer.
+        process.env.TDSP_TAILSCALE_SERVE = "1";
+        process.env.TDSP_TAILSCALE_PORT = String(result.httpsPort);
+        if (result.url) process.env.TDSP_TAILSCALE_URL = result.url;
+        process.stdout.write(`Switchyard on ${result.url || `Tailscale HTTPS :${result.httpsPort}`}\n`);
+      }
+
+      await import("./index.js");
+      lease.markReady();
+    } catch (error) {
+      lease.release();
+      throw error;
     }
-
-    if (opts?.tailscale) {
-      // Keep the app loopback-only and let Tailscale Serve own tailnet TLS. The
-      // dedicated listener is additive: no Funnel and no reset of other routes.
-      delete process.env.HOST;
-      delete process.env.HOSTS;
-      const localPort = opts.port ?? Number(process.env.PORT || 4500);
-      const result = await setupTailscale({
-        localPort,
-        httpsPort: opts.tailscaleHttpsPort ?? localPort,
-      });
-      if (!result.ok) throw new Error(`serve: ${result.error || result.status.error || "Tailscale setup failed"}`);
-      // The HTTP app uses these only to publish/probe the tailnet-private
-      // well-known node endpoint. They are set after Serve succeeds, so a plain
-      // LAN/loopback launch can never pretend to be an authenticated peer.
-      process.env.TDSP_TAILSCALE_SERVE = "1";
-      process.env.TDSP_TAILSCALE_PORT = String(result.httpsPort);
-      if (result.url) process.env.TDSP_TAILSCALE_URL = result.url;
-      process.stdout.write(`Switchyard on ${result.url || `Tailscale HTTPS :${result.httpsPort}`}\n`);
-    }
-
-    await import("./index.js");
   },
+  serveStatus: () => serveLifecycle.status(),
+  serveStop: () => serveLifecycle.stop(),
   // This node's own task liveness, for `tdsp list`. The node is the sole authority
   // for its tmux server + worktrees, so it computes the same three signals the
   // local HTTP API computes in GET /api/tasks — green when the session

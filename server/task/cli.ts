@@ -19,6 +19,11 @@ import type {
   TailscaleSetupResult,
   TailscaleStatus,
 } from "../network/tailscale.js";
+import type {
+  ServeOptions,
+  ServeStatus,
+  ServeStopResult,
+} from "../core/serve-lifecycle.js";
 export { CODE_VIEW_CAPABILITY } from "../codeview/codeview.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
@@ -261,6 +266,8 @@ export interface CliDeps {
   out: (s: string) => void;
   err: (s: string) => void;
   serve: (opts?: ServeOpts) => void | Promise<void>;
+  serveStatus: () => ServeStatus | Promise<ServeStatus>;
+  serveStop: () => ServeStopResult | Promise<ServeStopResult>;
   // report THIS node's own task liveness (tmux + worktree probes), for `list`
   liveness: TaskLiveness;
   createLocal: (opts: CreateLocalOpts) => Promise<CreateLocalResult>;
@@ -304,14 +311,7 @@ export interface CliDeps {
   update: () => Promise<{ ok: true; clone: string; head: string } | { ok: false; error: string }>;
 }
 
-export interface ServeOpts {
-  host?: string;
-  hosts?: string[];
-  hostCidr?: string;
-  port?: number;
-  tailscale?: boolean;
-  tailscaleHttpsPort?: number;
-}
+export type ServeOpts = ServeOptions;
 
 // Minimal flag parser: supports `--key value` and `--key=value`. Bare flags
 // (no following value) map to "". Enough for the node-control verbs.
@@ -331,6 +331,67 @@ function parsePort(value: string | undefined, fallback: number): number | null {
   if (value == null || value === "") return fallback;
   const port = Number(value);
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+const SERVE_VALUE_FLAGS = new Set([
+  "host",
+  "hosts",
+  "host-cidr",
+  "cidr",
+  "wireguard",
+  "wg",
+  "port",
+  "tailscale-port",
+  "https-port",
+]);
+const SERVE_BOOLEAN_FLAGS = new Set(["tailscale"]);
+
+function parseServeFlags(args: string[]): { ok: true; flags: Record<string, string> } | { ok: false; error: string } {
+  const flags: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg.startsWith("--")) {
+      return { ok: false, error: `serve: unknown action or positional argument: ${arg}` };
+    }
+    const eq = arg.indexOf("=");
+    const key = arg.slice(2, eq >= 0 ? eq : undefined);
+    if (!SERVE_VALUE_FLAGS.has(key) && !SERVE_BOOLEAN_FLAGS.has(key)) {
+      return { ok: false, error: `serve: unknown option: --${key}` };
+    }
+    if (SERVE_BOOLEAN_FLAGS.has(key)) {
+      if (eq >= 0) return { ok: false, error: `serve: --${key} does not take a value` };
+      flags[key] = "";
+      continue;
+    }
+    const value = eq >= 0 ? arg.slice(eq + 1) : args[++i];
+    if (!value || value.startsWith("--")) {
+      return { ok: false, error: `serve: --${key} requires a value` };
+    }
+    flags[key] = value;
+  }
+  return { ok: true, flags };
+}
+
+function serveStatusText(status: ServeStatus): string {
+  const headline =
+    status.state === "running"
+      ? "Switchyard: running"
+      : status.state === "starting"
+        ? "Switchyard: starting"
+        : status.state === "legacy"
+          ? "Switchyard: running (legacy launch)"
+          : status.state === "stale"
+            ? "Switchyard: stopped (stale process record)"
+            : "Switchyard: stopped";
+  return [
+    headline,
+    `  instance ${status.instance}`,
+    status.pid != null ? `  PID      ${status.pid}` : "",
+    status.readyAt || status.startedAt ? `  since    ${status.readyAt || status.startedAt}` : "",
+    status.command ? `  command  ${status.command}` : "",
+    `  data     ${status.dataDir}`,
+    status.message ? `  note     ${status.message}` : "",
+  ].filter(Boolean).join("\n");
 }
 
 function networkStatusText(status: TailscaleStatus): string {
@@ -357,7 +418,60 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   const [cmd] = argv;
   switch (cmd) {
     case "serve": {
-      const f = parseFlags(argv.slice(1));
+      const action = argv[1];
+      if (action === "status") {
+        const rest = argv.slice(2);
+        if (rest.some((arg) => arg !== "--json")) {
+          deps.err("Usage: tdsp serve status [--json]");
+          return 1;
+        }
+        const status = await deps.serveStatus();
+        deps.out(rest.includes("--json") ? JSON.stringify(status) : serveStatusText(status));
+        return status.running ? 0 : 1;
+      }
+      if (action === "stop") {
+        const rest = argv.slice(2);
+        if (rest.some((arg) => arg !== "--json")) {
+          deps.err("Usage: tdsp serve stop [--json]");
+          return 1;
+        }
+        const result = await deps.serveStop();
+        if (rest.includes("--json")) deps.out(JSON.stringify(result));
+        else if (!result.ok) deps.err(`Switchyard stop failed: ${result.error || "unknown error"}`);
+        else if (result.alreadyStopped) deps.out("Switchyard is already stopped");
+        else deps.out(`Switchyard stopped${result.pid != null ? ` (PID ${result.pid})` : ""}`);
+        return result.ok ? 0 : 1;
+      }
+      if (action === "restart") {
+        if (argv.length > 2) {
+          deps.err("Usage: tdsp serve restart");
+          return 1;
+        }
+        const status = await deps.serveStatus();
+        if (!status.options) {
+          deps.err("serve restart: no previous managed launch found; run `tdsp serve [options]` once first");
+          return 1;
+        }
+        const stopped = await deps.serveStop();
+        if (!stopped.ok) {
+          deps.err(`Switchyard restart failed: ${stopped.error || "could not stop the current process"}`);
+          return 1;
+        }
+        try {
+          await deps.serve(status.options);
+        } catch (error: any) {
+          deps.err(String(error?.message || error));
+          return 1;
+        }
+        return 0;
+      }
+
+      const parsed = parseServeFlags(argv.slice(1));
+      if (!parsed.ok) {
+        deps.err(`${parsed.error}\nUsage: tdsp serve [--port <port>] [--host <ip>|--hosts <ips>|--host-cidr <cidr>] [--tailscale [--tailscale-port <port>]]`);
+        return 1;
+      }
+      const f = parsed.flags;
       const hosts = f.hosts
         ? f.hosts
             .split(",")
@@ -666,13 +780,16 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         return 1;
       }
       const r = deps.install(profile);
+      const command = profile ? `tdsp-${profile}` : "tdsp";
       deps.out(
         `${profile ? `tdsp profile "${profile}" installed` : "tdsp installed"}:\n` +
           `  code   ${r.src} -> ${r.clone}\n` +
           (r.dataDir ? `  data   ${r.dataDir}\n` : "") +
           `  command ${r.binPath}\n` +
           `  on PATH ${r.localBin}  (ensure ~/.local/bin is on your PATH)\n` +
-          `now: type \`${profile ? `tdsp-${profile}` : "tdsp"} list\` here, or reach this machine from another with \`ssh <host> ${r.binPath} list\``,
+          `  state  installed only (no server was started)\n` +
+          `next: start with \`${command} serve${profile ? " --port <unused-port>" : ""}\`, then check \`${command} serve status\`\n` +
+          `remote check: \`ssh <host> ${r.binPath} list\``,
       );
       return 0;
     }
@@ -686,11 +803,11 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       // The clone path is useful to the person running this node directly, but
       // is not part of the cross-node update result consumed by a controller.
       if (argv.includes("--json")) deps.out(JSON.stringify({ ok: true, head: r.head }));
-      else deps.out(`tdsp updated: ${r.clone}\n  now at ${r.head}\nrestart the console to pick it up (re-run \`tdsp serve\`)`);
+      else deps.out(`tdsp updated: ${r.clone}\n  now at ${r.head}\nrestart the console to pick it up (\`tdsp serve restart\`, or re-run \`tdsp serve\`)`);
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve|network|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|skills-list|plugins-list|plugins-install|doctor|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve [status|stop|restart]|network|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|skills-list|plugins-list|plugins-install|doctor|install|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

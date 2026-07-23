@@ -191,6 +191,8 @@ npm run -s tdsp -- install --profile canary
   serve --port 14500 --tailscale --tailscale-port 14500
 ```
 
+`install --profile` only creates the isolated data root and launcher; it does not start a server. Manage that profile through its own command (`tdsp-canary serve status/stop/restart`), independently of the default `tdsp` instance.
+
 This is useful for testing networking without touching a live `:4500` instance.
 
 </details>
@@ -200,6 +202,7 @@ This is useful for testing networking without touching a live `:4500` instance.
 | Command | Purpose |
 |---|---|
 | `tdsp serve [--port N] [--tailscale]` | Start the local console and optionally publish private HTTPS |
+| `tdsp serve status/stop/restart` | Inspect, stop, or restart this launcher/profile's own server |
 | `tdsp serve --host-cidr CIDR` | Also bind this machine's address in an existing private range |
 | `tdsp network status/setup/diagnose/off` | Inspect or manage Switchyard's Tailscale path |
 | `tdsp list` | Print this node's repositories and tasks as JSON |
@@ -208,7 +211,7 @@ This is useful for testing networking without touching a live `:4500` instance.
 | `tdsp repo-create/repo-fetch/repo-branches/repo-delete` | Operate on this node's repository catalog |
 | `tdsp stop/resume/cleanup/delete-task` | Operate on this node's task lifecycle |
 | `tdsp doctor legacy [--json]` | Read-only audit for remote state left by older releases |
-| `tdsp install [--profile name]` | Install the global launcher or an isolated profile |
+| `tdsp install [--profile name]` | Install a launcher/profile without starting its server |
 | `tdsp update` | Fast-forward the installed checkout and refresh dependencies |
 
 ## Security notes

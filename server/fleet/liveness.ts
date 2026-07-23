@@ -22,5 +22,9 @@ export function startLivenessLoop(intervalMs = 10000) {
     await Promise.allSettled(hosts.map(probeHost));
   };
   tick();
-  setInterval(tick, intervalMs);
+  const timer = setInterval(tick, intervalMs);
+  // The HTTP listener owns the server lifetime; this background probe should
+  // never keep a failed/closing process alive by itself.
+  timer.unref();
+  return timer;
 }
