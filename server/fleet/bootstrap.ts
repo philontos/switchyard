@@ -99,6 +99,7 @@ export function renderWrapper(opts: WrapperOpts): string {
 # version-manager changes without re-bootstrapping.
 APP=${app}
 export TDSP_SOURCE_DIR="$APP"
+export TDSP_BIN="$0"
 ${isolatedData}${ladder}
 # git/tmux for what the app actually does
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"

@@ -30,8 +30,6 @@ process.on("unhandledRejection", (e) => console.error("[unhandledRejection]", e)
 const app = createApp();
 
 if (DID_MIGRATE) repairWorktrees(); // fix git worktree links after the ./data move
-startLivenessLoop();                // background ssh probe of remote machines
-restoreKeepAwake(db);               // opt-in, PID-scoped AC keep-awake assertion
 syncReposManifest();                // bootstrap repos.json from the current catalog on boot
 // adopt any task manifests on disk this DB is missing (recover a wiped db / own
 // tasks present locally), then backfill manifests for every task we own so the
@@ -50,10 +48,36 @@ const HOSTS = (process.env.HOSTS || process.env.HOST || "127.0.0.1")
   .map((h) => h.trim())
   .filter(Boolean);
 const uniqueHosts = [...new Set(HOSTS)];
-for (const host of uniqueHosts) {
+const servers = uniqueHosts.map((host) => {
   const server = createServer(app);
   attachWs(server);
-  server.listen(PORT, host, () => {
-    console.log(`task-dispatcher on http://${host}:${PORT}`);
-  });
+  return { host, server };
+});
+
+try {
+  // Do not resolve the tdsp `serve` command until every requested listener has
+  // actually bound. In particular, EADDRINUSE must reject startup so the
+  // lifecycle record is released instead of claiming that a broken server is
+  // running.
+  for (const { host, server } of servers) {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => reject(error);
+      server.once("error", onError);
+      server.listen(PORT, host, () => {
+        server.off("error", onError);
+        console.log(`task-dispatcher on http://${host}:${PORT}`);
+        resolve();
+      });
+    });
+  }
+  // Background work begins only after every listener is ready. A failed bind
+  // therefore cannot leave a probe timer or caffeinate child keeping a broken
+  // startup process alive.
+  startLivenessLoop();
+  restoreKeepAwake(db);
+} catch (error) {
+  for (const { server } of servers) {
+    if (server.listening) server.close();
+  }
+  throw error;
 }

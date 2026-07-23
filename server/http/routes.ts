@@ -88,9 +88,14 @@ function restartArgs(): string[] {
 
 function installedPaths() {
   const root = path.join(os.homedir(), ".task-dispatcher");
+  const src = process.env.TDSP_SOURCE_DIR?.trim() || path.join(root, "src");
+  // New launchers pass their exact command path. Deriving bin beside src keeps
+  // already-installed profile launchers safe until `tdsp install` refreshes
+  // them: profiles/<name>/src -> profiles/<name>/bin/tdsp.
+  const bin = process.env.TDSP_BIN?.trim() || path.join(path.dirname(src), "bin", "tdsp");
   return {
-    src: path.join(root, "src"),
-    bin: path.join(root, "bin", "tdsp"),
+    src,
+    bin,
   };
 }
 

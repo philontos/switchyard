@@ -92,6 +92,7 @@ test("renderWrapper places a manual override ahead of the auto rungs", () => {
 test("renderWrapper can pin an isolated data root before tdsp starts", () => {
   const w = renderWrapper({ appDir: "/app", dataDir: "/home/me/.task-dispatcher/profiles/canary/data" });
   assert.match(w, /export TDSP_SOURCE_DIR="\$APP"/);
+  assert.match(w, /export TDSP_BIN="\$0"/);
   assert.match(w, /export TASK_DISPATCHER_DATA_DIR='\/home\/me\/\.task-dispatcher\/profiles\/canary\/data'/);
 });
 
