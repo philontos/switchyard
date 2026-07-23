@@ -106,7 +106,7 @@ test("nodeLadderScript is shared by the wrapper and bootstrap (same rungs)", () 
 
 // ---------- installPlan ----------
 test("installPlan puts code at ~/.task-dispatcher/src and the wrapper execs it", () => {
-  const p = installPlan("/home/me", "/home/me/Develop/switchyard");
+  const p = installPlan("/home/me");
   assert.equal(p.src, "/home/me/.task-dispatcher/src");
   assert.equal(p.binPath, "/home/me/.task-dispatcher/bin/tdsp");
   assert.equal(p.localBin, "/home/me/.local/bin/tdsp");
@@ -138,7 +138,7 @@ test("applyInstall symlinks src→clone and writes an executable wrapper (real f
 });
 
 test("profileInstallPlan is isolated from every canonical install path", () => {
-  const p = profileInstallPlan("/home/me", "/clone", "tailscale-test");
+  const p = profileInstallPlan("/home/me", "tailscale-test");
   assert.equal(p.src, "/home/me/.task-dispatcher/profiles/tailscale-test/src");
   assert.equal(p.binPath, "/home/me/.task-dispatcher/profiles/tailscale-test/bin/tdsp");
   assert.equal(p.localBin, "/home/me/.local/bin/tdsp-tailscale-test");
@@ -149,7 +149,7 @@ test("profileInstallPlan is isolated from every canonical install path", () => {
 
 test("profileInstallPlan rejects path traversal and ambiguous names", () => {
   for (const name of ["../live", "UPPER", "has space", "", "-leading"]) {
-    assert.throws(() => profileInstallPlan("/home/me", "/clone", name), /profile/i);
+    assert.throws(() => profileInstallPlan("/home/me", name), /profile/i);
   }
 });
 

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Web task dispatcher that drives Claude Code in tmux + git worktrees",
+  "description": "Self-hosted web control plane for Claude Code, Codex, and Kimi tasks",
   "scripts": {
     "dev": "tsx watch server/index.ts",
     "start": "tsx server/index.ts",

@@ -214,27 +214,6 @@ export const providers = [
   { id: 1, name: "Team Gateway", model: "claude-sonnet-4-5" },
 ];
 
-export const skills = [
-  {
-    key: "official:frontend-design",
-    name: "frontend-design",
-    description: "Build polished production interfaces.",
-    source: "official",
-  },
-  {
-    key: "official:security-review",
-    name: "security-review",
-    description: "Review a change for security issues.",
-    source: "official",
-  },
-  {
-    key: "personal:release-check",
-    name: "release-check",
-    description: "Run the project release checklist.",
-    source: "personal",
-  },
-];
-
 export const onboarding = {
   schema_version: 1,
   instance_id: "demo-home-studio",

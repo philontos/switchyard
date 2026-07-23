@@ -1,34 +1,14 @@
 // The "which agent" axis. A task runs under one coding-agent CLI: `claude`
 // (the default, unchanged), `codex`, or `kimi`. Every Claude-specific launch detail is
 // funnelled through here, so the orchestration code stays agent-agnostic:
-//   - agentArgv:  how to launch / resume the agent (the command + its args)
-//   - agentCaps:  which worktree injections apply (skills, the yellow-light hook)
+//   - agentArgv: how to launch / resume the agent (the command + its args)
 // Claude's launch is byte-for-byte what it always was.
 export type AgentKind = "claude" | "codex" | "kimi";
-
-export const AGENT_KINDS: readonly AgentKind[] = ["claude", "codex", "kimi"];
 
 /** Normalize an untrusted value to an AgentKind. Only known exact strings opt in;
  *  anything else (missing, blank, garbage) is the default "claude" — never throws. */
 export function asAgentKind(s: unknown): AgentKind {
   return s === "codex" || s === "kimi" ? s : "claude";
-}
-
-export interface AgentCaps {
-  /** deliver each selected skill's dir into the worktree's .claude/skills/ */
-  injectSkills: boolean;
-  /** inject the .claude/settings.local.json hook that powers the yellow "waiting
-   *  on a permission prompt" light (and captures the session id) */
-  injectHooks: boolean;
-}
-
-// Both injections hang off Claude's .claude/ conventions, which other CLIs don't
-// share — so non-Claude agents opt out. They also have no waiting-hook, so an
-// approval pause is invisible to the dispatcher.
-export function agentCaps(agent: AgentKind): AgentCaps {
-  return agent === "claude"
-    ? { injectSkills: true, injectHooks: true }
-    : { injectSkills: false, injectHooks: false };
 }
 
 export interface LaunchOpts {

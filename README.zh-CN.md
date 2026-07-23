@@ -121,13 +121,13 @@ tdsp serve
 
 | Agent | 任务配置 | 当前 Switchyard 能力 |
 |---|---|---|
-| **Claude Code** | 本机登录，或经过连通性验证的 Anthropic 兼容端点 | 实时终端、恢复、图片粘贴、可选 Skill 注入、原生权限等待状态、本机移动端会话阅读 |
+| **Claude Code** | 本机登录，或经过连通性验证的 Anthropic 兼容端点 | 实时终端、恢复、图片粘贴、原生权限等待状态、本机移动端会话阅读 |
 | **Codex** | 本机登录与可选模型 ID | 实时终端、恢复、图片粘贴、全权限启动、本机移动端会话阅读 |
 | **Kimi Code / Kimi K3** | 本机登录与可选模型 ID，例如 `k3` | 交互式 `--auto` 终端、恢复与图片粘贴 |
 
 所选 Agent 与模型属于任务本身，恢复时会被保留。Provider 凭据只留在真正运行任务的机器，不会复制给其它节点。
 
-当前能力边界：附加 Skill 注入和黄色「需要你」权限状态只支持 Claude Code；远程节点与 Kimi 的会话记录暂未接入 **阅读** 模式，这些任务会直接进入实时终端。
+当前能力边界：黄色「需要你」权限状态只支持 Claude Code；远程节点与 Kimi 的会话记录暂未接入 **阅读** 模式，这些任务会直接进入实时终端。
 
 ## 为手机完整适配
 
@@ -239,6 +239,6 @@ server/session/      tmux、PTY 与 Claude/Codex/Kimi 启动参数
 server/fleet/        SSH runner、bootstrap、存活探测与节点视图
 server/network/      Tailscale Serve、路径诊断与 Peer Relay
 server/onboarding/   网络、手机、电源与舰队实时就绪状态
-server/http/         REST、WebSocket 与预览路由
+server/http/         REST API、静态页面服务与 WebSocket 终端桥接
 web/js/features/     看板、节点、终端、移动端、阅读与引导 UI
 ```

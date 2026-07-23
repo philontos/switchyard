@@ -9,9 +9,8 @@ import type { AgentKind } from "../session/agent.ts";
 
 const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 
-// A Runner double that records every putDir (skill delivery + the hooks overlay
-// both go through putDir) and swallows exec (the git worktree commands). This
-// lets us assert exactly which .claude/* injections happened per agent.
+// A Runner double that records the hooks overlay and swallows the git worktree
+// commands. This lets us assert which agents receive .claude settings.
 function recordingRunner() {
   const putDirs: { src: string; dest: string }[] = [];
   const runner = {
@@ -24,38 +23,34 @@ function recordingRunner() {
   return { runner, putDirs };
 }
 
-function setupWith(agent: AgentKind, putDirs: { src: string; dest: string }[], runner: Runner) {
+function setupWith(agent: AgentKind, runner: Runner) {
   const db = new Database(":memory:");
   initSchema(db, opts);
   const env = buildRepoTaskEnv({ db, ns: "ns", runner, writeManifest: () => {} });
   return env.setupWorktree({
     id: 1, mirror: "/m", worktree: "/wt", workBranch: "feat/1-x", baseBranch: "main",
-    skills: [{ key: "d:tdd", name: "tdd", dir: "/skills/tdd" }], agent,
+    agent,
   } as any);
 }
 
-// claude keeps its .claude/ conventions: the skill dir is delivered and the
-// waiting-hook overlay is injected. (Regression guard for existing behavior.)
-test("setupWorktree (claude) delivers skills and injects the .claude hooks overlay", async () => {
+test("setupWorktree (claude) injects the .claude hooks overlay", async () => {
   const { runner, putDirs } = recordingRunner();
-  await setupWith("claude", putDirs, runner);
-  assert.ok(putDirs.some((p) => p.dest === path.join("/wt", ".claude", "skills", "tdd")), "skill delivered");
-  assert.ok(putDirs.some((p) => p.dest === path.join("/wt", ".claude")), "hooks overlay delivered");
+  await setupWith("claude", runner);
+  assert.deepEqual(putDirs.map((p) => p.dest), [path.join("/wt", ".claude")]);
 });
 
-// codex has no .claude/skills and no hook mechanism, so neither injection runs —
-// zero putDir calls. It also has no waiting-hook (the dispatcher can't see a
-// codex approval pause — see agentArgv).
-test("setupWorktree (codex) skips skills and hooks — no .claude injection at all", async () => {
+// Codex and Kimi have no equivalent hook mechanism, so Switchyard cannot see
+// their approval pauses.
+test("setupWorktree (codex) skips Claude hooks", async () => {
   const { runner, putDirs } = recordingRunner();
-  await setupWith("codex", putDirs, runner);
-  assert.equal(putDirs.length, 0, "codex delivers no skills and injects no hooks");
+  await setupWith("codex", runner);
+  assert.equal(putDirs.length, 0);
 });
 
-test("setupWorktree (kimi) skips skills and hooks — no .claude injection at all", async () => {
+test("setupWorktree (kimi) skips Claude hooks", async () => {
   const { runner, putDirs } = recordingRunner();
-  await setupWith("kimi", putDirs, runner);
-  assert.equal(putDirs.length, 0, "kimi delivers no skills and injects no hooks");
+  await setupWith("kimi", runner);
+  assert.equal(putDirs.length, 0);
 });
 
 test("buildRepoTaskEnv refuses a remote runner", () => {

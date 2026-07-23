@@ -11,8 +11,6 @@ import QRCode from "qrcode";
 import { db, Repo, Task, Host, Provider } from "../core/db.js";
 import { renameTask } from "../task/tasks.js";
 import { removeWorktree } from "../repo/git.js";
-import { scanSkills, defaultSources } from "../skills/skills.js";
-import { listAvailable, installPlugin } from "../skills/plugins.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions } from "../session/tmux.js";
 import { asAgentKind } from "../session/agent.js";
 import { readTranscript } from "../session/transcript.js";
@@ -536,18 +534,16 @@ app.post("/api/tasks", async (req, res) => {
   const provider = agentKind === "claude" && provider_id
     ? (getProvider.get(provider_id) as Provider | undefined)
     : undefined;
-  const extraSkills: string[] = Array.isArray(req.body?.extra_skills) ? req.body.extra_skills.map(String) : [];
   const r = await createRepoTask(
     repoTaskEnvFor(),
     { id: repo.id, name: repo.name, mirror_path: repo.mirror_path },
-    { baseBranch: base_branch, title, prompt, extraSkills, providerId: provider ? provider.id : null, env: providerEnv(provider), agent: agentKind, model: agent_model ?? null },
+    { baseBranch: base_branch, title, prompt, providerId: provider ? provider.id : null, env: providerEnv(provider), agent: agentKind, model: agent_model ?? null },
   );
   if (r.ok) return res.json({ id: r.id, session: r.session, work_branch: r.workBranch });
-  if (r.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: r.missing.join(", ") }) });
   return res.status(500).json({ error: r.message });
 });
 
-// repo-less shell task: skip the mirror/worktree/skills machinery and just open a
+// repo-less shell task: skip the mirror/worktree machinery and just open a
 // bare tmux shell in a plain dir (default this node's home). A remote controller
 // must invoke the target node's create-local verb instead of selecting host_id
 // here. Stored with kind='local', repo_id=0 and empty branch/worktree columns.
@@ -873,7 +869,6 @@ app.post("/api/nodes/:hostId/tasks", async (req, res) => {
     base,
     title,
     prompt: prompt || null,
-    skills: Array.isArray(req.body?.skills) ? req.body.skills.map(String) : [],
     agent: agentKind,
     model: req.body?.model ?? req.body?.agent_model ?? null,
     provider_id: agentKind === "claude" && provider_id ? Number(provider_id) : null,
@@ -881,7 +876,6 @@ app.post("/api/nodes/:hostId/tasks", async (req, res) => {
   const { out, result } = await runNodeJson(host, ["create", b64Json(spec)]);
   if (!result) return sendMissingNodeCommand(req, res, "create", out);
   if (result.ok) return res.json({ id: result.id, session: result.session, work_branch: result.workBranch, node: host.id });
-  if (result.error === "skillsMissing") return res.status(400).json({ error: tr(lang, "skill.missing", { keys: (result.missing || []).join(", ") }) });
   if (result.error === "repoNotFound") return res.status(404).json({ error: tr(lang, "repo.notFound") });
   if (result.error === "repoNotReady") return res.status(409).json({ error: tr(lang, "repo.status", { status: result.message || "unknown" }) });
   return res.status(500).json({ error: result.message || result.error });
@@ -951,33 +945,6 @@ app.delete("/api/nodes/:hostId/providers/:id", async (req, res) => {
   const { result } = await runNodeJson(host, ["providers-delete", String(req.params.id)]);
   if (result?.ok) return res.json({ ok: true });
   res.status(400).json({ error: result?.error || "node provider delete failed" });
-});
-
-app.get("/api/nodes/:hostId/skills", async (req, res) => {
-  const host = remoteHost(req, res);
-  if (!host) return;
-  const { out, result } = await runNodeJson(host, ["skills-list"]);
-  if (!result) return sendMissingNodeCommand(req, res, "skills-list", out);
-  if (!result.ok) return res.status(502).json({ error: result.error || "node skills failed" });
-  res.json(result.skills ?? []);
-});
-
-app.get("/api/nodes/:hostId/plugins/available", async (req, res) => {
-  const host = remoteHost(req, res);
-  if (!host) return;
-  const { out, result } = await runNodeJson(host, ["plugins-list"]);
-  if (!result) return sendMissingNodeCommand(req, res, "plugins-list", out);
-  if (!result.ok) return res.status(502).json({ error: result.error || "node plugins failed" });
-  res.json(result.plugins ?? []);
-});
-
-app.post("/api/nodes/:hostId/plugins/install", async (req, res) => {
-  const host = remoteHost(req, res);
-  if (!host) return;
-  const { out, result } = await runNodeJson(host, ["plugins-install", b64Json(req.body ?? {})]);
-  if (!result) return sendMissingNodeCommand(req, res, "plugins-install", out);
-  if (!result.ok) return res.status(500).json({ error: result.error || "node plugin install failed" });
-  res.json({ ok: true });
 });
 
 // Relay a lifecycle verb to the node that owns the task. The controller never
@@ -1231,28 +1198,6 @@ app.delete("/api/providers/:id", (req, res) => {
   clearProviderFromOwnedTasks(db, req.params.id);
   db.prepare("DELETE FROM providers WHERE id=?").run(req.params.id);
   res.json({ ok: true });
-});
-
-// ---------- skills (read-through aggregation; nothing stored) ----------
-app.get("/api/skills", (_req, res) => {
-  res.json(scanSkills(defaultSources()).map(({ key, name, description, source }) => ({ key, name, description, source })));
-});
-
-// ---------- plugin install (official channel; populates the skill sources) ----------
-app.get("/api/plugins/available", async (_req, res) => {
-  try { res.json(await listAvailable()); }
-  catch (e: any) { res.status(500).json({ error: String(e.message || e) }); }
-});
-
-app.post("/api/plugins/install", async (req, res) => {
-  const { pluginId } = req.body ?? {};
-  if (!pluginId) return res.status(400).json({ error: tr(langFromReq(req), "plugin.idRequired") });
-  try {
-    await installPlugin(String(pluginId));
-    res.json({ ok: true });
-  } catch (e: any) {
-    res.status(500).json({ error: String(e.message || e) });
-  }
 });
 
 }

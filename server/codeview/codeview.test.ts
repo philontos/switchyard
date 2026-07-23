@@ -58,7 +58,7 @@ async function fixture() {
 
   const repo = {
     id: 1, host_id: 1, name: "demo", git_url: "", token: null,
-    default_branch: "main", project_path: null, mirror_path: dir,
+    default_branch: "main", mirror_path: dir,
     status: "ready", error: null, created_at: "now",
   } satisfies Repo;
   const task = {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agentArgv, agentCaps, asAgentKind } from "./agent.ts";
+import { agentArgv, asAgentKind } from "./agent.ts";
 
 // ---- asAgentKind: only known exact strings opt in; everything else defaults to 'claude' ----
 test("asAgentKind returns known agents only for exact strings", () => {
@@ -10,17 +10,6 @@ test("asAgentKind returns known agents only for exact strings", () => {
   assert.equal(asAgentKind(""), "claude");
   assert.equal(asAgentKind(undefined), "claude", "a missing agent defaults to claude");
   assert.equal(asAgentKind("CODEX"), "claude", "unknown/garbage falls back to claude, never throws");
-});
-
-// ---- agentCaps: skills + the yellow-light hook are Claude-only ----
-test("agentCaps: claude injects skills and the waiting-hook", () => {
-  assert.deepEqual(agentCaps("claude"), { injectSkills: true, injectHooks: true });
-});
-test("agentCaps: codex injects neither (no .claude/skills, no hook mechanism)", () => {
-  assert.deepEqual(agentCaps("codex"), { injectSkills: false, injectHooks: false });
-});
-test("agentCaps: kimi injects neither (no .claude/skills, no hook mechanism)", () => {
-  assert.deepEqual(agentCaps("kimi"), { injectSkills: false, injectHooks: false });
 });
 
 // ---- agentArgv: claude (unchanged from the historical hardcoded launch) ----

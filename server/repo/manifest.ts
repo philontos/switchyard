@@ -14,7 +14,6 @@ export interface RepoManifestEntry {
   name: string;
   git_url: string;
   default_branch: string;
-  project_path: string | null;
   mirror: string | null; // path relative to DATA_DIR, e.g. "mirrors/7-ug.git"
   created_at: string;
 }
@@ -27,7 +26,6 @@ export function reposManifest(repos: Repo[]): { version: number; repos: RepoMani
       name: r.name,
       git_url: r.git_url,
       default_branch: r.default_branch,
-      project_path: r.project_path,
       mirror: r.mirror_path ? path.relative(DATA_DIR, r.mirror_path) : null,
       created_at: r.created_at,
     })),

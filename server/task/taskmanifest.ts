@@ -67,7 +67,7 @@ export function readTaskManifests(dataDir: string): TaskManifest[] {
 
 const TASK_COLS = [
   "id", "repo_id", "base_branch", "base_commit", "work_branch", "title", "prompt", "worktree_path",
-  "session", "status", "error", "created_at", "skills", "kind", "host_id", "cwd",
+  "session", "status", "error", "created_at", "kind", "host_id", "cwd",
   "claude_session", "provider_id", "agent", "agent_model",
 ] as const;
 

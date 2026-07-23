@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS repos (
   git_url TEXT NOT NULL,
   token TEXT,
   default_branch TEXT DEFAULT 'main',
-  project_path TEXT,           -- gitlab project path for glab, e.g. group/repo
   mirror_path TEXT,
   status TEXT DEFAULT 'cloning', -- cloning | ready | error
   error TEXT,
@@ -47,7 +46,6 @@ CREATE TABLE IF NOT EXISTS hosts (
   name TEXT NOT NULL,
   target TEXT NOT NULL,           -- ssh target, e.g. user@host
   kind TEXT DEFAULT 'ssh',        -- ssh | mosh
-  session TEXT DEFAULT 'main',    -- legacy/unused: shells are now per-machine task rows (kind='local'), not one named session per host
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -82,15 +80,19 @@ function addColumn(db: DB, table: string, col: string, def: string) {
 }
 
 /**
- * Tear down schema for removed features. The presets feature was dropped, so
- * delete its table and the now-orphaned tasks.preset_id column. Idempotent: a
- * DB that never had them (or was already cleaned) is a no-op. DROP COLUMN needs
- * SQLite ≥ 3.35, which better-sqlite3 bundles.
+ * Tear down schema for removed features. Idempotent: a DB that never had them
+ * (or was already cleaned) is a no-op. DROP COLUMN needs SQLite ≥ 3.35, which
+ * better-sqlite3 bundles.
  */
 function dropDeprecated(db: DB) {
   db.exec("DROP TABLE IF EXISTS presets");
-  const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
-  if (cols.includes("preset_id")) db.exec("ALTER TABLE tasks DROP COLUMN preset_id");
+  const columns = (table: string) =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+  const taskCols = columns("tasks");
+  if (taskCols.includes("preset_id")) db.exec("ALTER TABLE tasks DROP COLUMN preset_id");
+  if (taskCols.includes("skills")) db.exec("ALTER TABLE tasks DROP COLUMN skills");
+  if (columns("repos").includes("project_path")) db.exec("ALTER TABLE repos DROP COLUMN project_path");
+  if (columns("hosts").includes("session")) db.exec("ALTER TABLE hosts DROP COLUMN session");
 }
 
 /**
@@ -124,7 +126,6 @@ function reconcileColumns(db: DB) {
   addColumn(db, "hosts", "managed_ssh", "INTEGER DEFAULT 0");  // use this instance's dedicated peer key
   addColumn(db, "hosts", "connection_source", "TEXT");         // manual | tailscale
   addColumn(db, "repos", "host_id", "INTEGER");                // which machine this repo lives on
-  addColumn(db, "tasks", "skills", "TEXT DEFAULT '[]'");       // JSON: source:name actually delivered
   // repo-less local quick tasks (kind='local'): no mirror/worktree, repo_id=0,
   // branch/worktree columns are "" — they carry their own host_id and cwd.
   addColumn(db, "tasks", "kind", "TEXT DEFAULT 'repo'");       // 'repo' | 'local'

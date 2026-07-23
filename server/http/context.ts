@@ -2,7 +2,7 @@
 // resolved binaries that the HTTP routes and pty bridge lean on. Lifted
 // verbatim out of the old monolithic index.ts.
 import fs from "node:fs";
-import { db, Task, Host, Provider } from "../core/db.js";
+import { db, Task, Host } from "../core/db.js";
 import { writeTaskManifest } from "../task/taskmanifest.js";
 import { DATA_DIR } from "../core/paths.js";
 export { str, providerEnv, checkProvider } from "../provider/providers.js";

@@ -28,8 +28,6 @@ import { clearProviderFromOwnedTasks, getOwnedRepo } from "./core/ownership.js";
 import { branchesForOwnedRepo, deleteOwnedRepo, fetchOwnedRepo, registerOwnedRepo, type OwnedRepoEnv } from "./repo/owned.js";
 import { syncReposManifest } from "./repo/manifest.js";
 import { pasteImageIntoOwnedTask } from "./task/paste-service.js";
-import { defaultSources, scanSkills } from "./skills/skills.js";
-import { installPlugin, listAvailable } from "./skills/plugins.js";
 import {
   configureTailscalePeerRelay,
   diagnoseTailscale,
@@ -209,7 +207,6 @@ process.exitCode = await runCli(process.argv.slice(2), {
         baseBranch: spec.base,
         title: spec.title,
         prompt: spec.prompt,
-        extraSkills: spec.skills,
         providerId: provider ? spec.provider_id ?? null : null,
         env: providerEnv(provider),
         agent: asAgentKind(spec.agent),
@@ -327,16 +324,6 @@ process.exitCode = await runCli(process.argv.slice(2), {
     clearProviderFromOwnedTasks(db, id);
     db.prepare("DELETE FROM providers WHERE id=?").run(id);
     return { ok: true as const };
-  },
-  skillsList: () => scanSkills(defaultSources()).map(({ key, name, description, source }) => ({ key, name, description, source })),
-  pluginsList: () => listAvailable(),
-  pluginsInstall: async (pluginId) => {
-    try {
-      await installPlugin(pluginId);
-      return { ok: true as const };
-    } catch (error: any) {
-      return { ok: false as const, error: String(error?.message || error) };
-    }
   },
   networkStatus: () => tailscaleStatus(),
   networkSetup: async (options) => {

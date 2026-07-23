@@ -33,6 +33,7 @@ test("initSchema on a fresh DB has worktree_path and the newer columns", () => {
   initSchema(db, opts(false));
   const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
   for (const c of ["worktree_path", "base_commit", "kind", "host_id", "cwd"]) assert.ok(cols.includes(c), `missing ${c}`);
+  assert.ok(!cols.includes("skills"), "removed skills metadata is not recreated");
 });
 
 test("initSchema adds stable peer identity and managed SSH state to hosts", () => {
@@ -73,11 +74,14 @@ test("initSchema backfills agent='claude' onto an old tasks table", () => {
   assert.equal(row.agent, "claude", "existing rows backfill to claude");
 });
 
-// The presets feature was removed: initSchema must drop a pre-existing presets
-// table and the orphaned tasks.preset_id column, and never recreate them.
-test("initSchema tears down the removed presets feature", () => {
+// Removed features leave no schema behind. Historical data may contain presets,
+// task skill metadata, a GitLab project path, and a single host session; none is
+// used by current code.
+test("initSchema tears down removed feature schema", () => {
   const db = new Database(":memory:");
-  db.exec("CREATE TABLE tasks (id INTEGER PRIMARY KEY, repo_id INTEGER, preset_id INTEGER)");
+  db.exec("CREATE TABLE tasks (id INTEGER PRIMARY KEY, repo_id INTEGER, preset_id INTEGER, skills TEXT)");
+  db.exec("CREATE TABLE repos (id INTEGER PRIMARY KEY, project_path TEXT)");
+  db.exec("CREATE TABLE hosts (id INTEGER PRIMARY KEY, session TEXT)");
   db.exec("CREATE TABLE presets (id INTEGER PRIMARY KEY, name TEXT)");
   db.prepare("INSERT INTO presets (name) VALUES ('legacy')").run();
 
@@ -87,6 +91,11 @@ test("initSchema tears down the removed presets feature", () => {
   assert.equal(presets, undefined, "presets table should be dropped");
   const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
   assert.ok(!cols.includes("preset_id"), "tasks.preset_id should be dropped");
+  assert.ok(!cols.includes("skills"), "tasks.skills should be dropped");
+  const repoCols = (db.prepare("PRAGMA table_info(repos)").all() as { name: string }[]).map((c) => c.name);
+  assert.ok(!repoCols.includes("project_path"), "repos.project_path should be dropped");
+  const hostCols = (db.prepare("PRAGMA table_info(hosts)").all() as { name: string }[]).map((c) => c.name);
+  assert.ok(!hostCols.includes("session"), "hosts.session should be dropped");
 });
 
 test("initSchema on a fresh DB never creates a presets table", () => {
