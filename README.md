@@ -154,10 +154,12 @@ tdsp-tailscale-test network off --https-port 14500 --port 14500
 
 ### Adding a remote machine
 
-1. **Register it** — name + ssh target (e.g. `user@host`) in the console. A background prober shows its online status.
-2. **Install tdsp on it** — open the machine's ⚙ menu and click **Install tdsp**. One click over ssh: it clones the code there (or reuses a clone it already has) and installs the launcher.
-   - A machine that already runs its own console has a clone — run `npm run tdsp -- install` there once instead (reuses that clone, no second copy), then click Install in the console to register it as ready.
-3. **Use it** — the machine's repos and live tasks show up, grouped by repo. Dispatch onto **its** repos (＋ on the repo group) or open a shell on it (＋ on its Shells group).
+1. **Start both nodes** — install and run `tdsp serve --tailscale` independently on every computer, signed in to the same Tailscale account.
+2. **Connect automatically** — in either console, click the machine-rail `+` → **Discover devices** → **Connect**. The nodes authenticate over Tailscale HTTPS, exchange dedicated SSH keys, and register each other. The OS SSH service does not need to be enabled for this phase.
+3. **Check the execution path** — Switchyard probes SSH asynchronously. A node with Remote Login enabled turns online automatically; otherwise the relationship remains saved as **SSH not ready**. It never falls back to making the other node own its tasks.
+4. **Use it** — that machine's own repos and live tasks appear in the page. Dispatch onto **its** repos (＋ on the repo group) or open a shell on it (＋ in its Shells group).
+
+Without Tailscale discovery, **Add manually** remains an advanced fallback for a name, SSH target, and optional isolated profile. That path requires SSH reachability; a target without Switchyard gets only an explicit install/bootstrap action and never stores its repos or tasks on the controlling node.
 
 ## tdsp commands
 
