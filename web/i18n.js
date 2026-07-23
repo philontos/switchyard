@@ -47,11 +47,6 @@
       "term.empty": "点左侧任务进入终端",
       "term.claudeCopy": "点击复制完整 session id",
 
-      // web preview (click a localhost link in the terminal → new browser tab)
-      "preview.portPh": "端口",
-      "preview.go": "在新标签打开预览",
-      "preview.portTitle": "填 dev server 端口,在新标签打开当前任务的页面(用于链接没被自动识别时)",
-
       // read-only repository tree + task diff explorer
       "code.open": "查看代码",
       "code.refresh": "刷新代码快照",
@@ -393,11 +388,6 @@
       "term.attachCopy": "Click to copy the tmux attach command",
       "term.empty": "Pick a task on the left to open its terminal",
       "term.claudeCopy": "Click to copy the full session id",
-
-      // web preview (click a localhost link in the terminal → side panel)
-      "preview.portPh": "port",
-      "preview.go": "Open preview in a new tab",
-      "preview.portTitle": "Enter a dev-server port to open the current task's page in a new tab (for when the printed link isn't auto-detected)",
 
       // read-only repository tree + task diff explorer
       "code.open": "Browse code",

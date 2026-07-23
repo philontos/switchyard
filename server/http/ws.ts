@@ -1,14 +1,12 @@
-// The websocket side: route HTTP upgrades (preview HMR vs the /pty terminal),
-// and relay a browser terminal to a task's tmux session over a locally-spawned
-// pty (attaching locally, or via ssh/mosh for a remote task). Lifted verbatim
-// from index.ts; attachWs() takes the http server so index.ts stays the entry.
+// The websocket side: route /pty upgrades and relay a browser terminal to a
+// task's tmux session over a locally-spawned pty (attaching locally, or via
+// ssh/mosh for a remote task). Lifted verbatim from index.ts; attachWs() takes
+// the http server so index.ts stays the entry.
 import type { Server } from "node:http";
 import { WebSocketServer } from "ws";
 import pty from "node-pty";
 import { spawnPty } from "../session/pty.js";
 import { attachCommand } from "../session/attach.js";
-import { parsePreviewHost, handlePreviewUpgrade } from "../preview/preview.js";
-import { resolvePreviewUpstream } from "./preview.js";
 import { db, Task, Host } from "../core/db.js";
 import { transportRunnerFor, localRunner, type CommandRunner } from "../fleet/runner.js";
 import { cancelCopyMode, ensureSessionOptions, pasteSubmit } from "../session/tmux.js";
@@ -103,10 +101,6 @@ wss.on("connection", async (ws, req) => {
 
 export function attachWs(server: Server) {
 server.on("upgrade", (req, socket, head) => {
-  if (parsePreviewHost(req.headers.host)) {
-    handlePreviewUpgrade(req, socket, head, resolvePreviewUpstream);
-    return;
-  }
   const { pathname } = new URL(req.url || "", "http://localhost");
   if (pathname === "/pty") {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));

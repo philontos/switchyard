@@ -165,9 +165,6 @@ export function initTerm() {
   // paint settling, a scrollbar toggling, browser zoom, window resize) keeps the
   // column count matched to the real width, so neither happens.
   try { new ResizeObserver(fitActive).observe($("term")); } catch {}
-  // manual preview-port fallback (for when the printed link isn't auto-detected)
-  $("prev-go").addEventListener("click", goPreviewPort);
-  $("prev-port").addEventListener("keydown", (e) => { if (e.key === "Enter") goPreviewPort(); });
   // click the Claude session-id chip → copy the full uuid (dataset.sid, never the
   // possibly-truncated visible text) to the clipboard.
   $("term-claude").addEventListener("click", () => {
@@ -329,13 +326,6 @@ function createPane(id, query, agent) {
     const ta = pane.querySelector(".xterm-helper-textarea");
     if (ta) { ta.readOnly = true; ta.setAttribute("inputmode", "none"); }
     mountTouchScroll(pane);
-  }
-
-  // Preview currently resolves owner-local tasks only. A remote pane id is a
-  // transport handle ("n<host>:<task>"), not a controller-local task id, so do
-  // not turn its localhost output into an invalid/incorrect controller URL.
-  if (canPreviewTaskPane(id)) {
-    try { term.registerLinkProvider(localhostLinks(term, id)); } catch {}
   }
 
   const p = {
@@ -614,62 +604,6 @@ export function closePending(tmpId) {
   pending.delete(tmpId);
   pe.el.remove();
   if (activePending === tmpId) { activePending = null; showTermEmpty(); }
-}
-
-// ---- web preview ----
-// A localhost link the session prints (e.g. a dev server's "Local:
-// http://localhost:5173") is opened in a NEW BROWSER TAB pointed at the
-// dispatcher's proxy origin (t<task>-<port>.localhost), which reverse-proxies to
-// an owner-local task's dev server. The new tab rides the SAME path you
-// reach the dashboard by (direct, or an `ssh -L 4500` tunnel), so it works
-// whether the browser is local or reaching that dispatcher remotely — and it handles
-// *.localhost + IPv4/IPv6 itself. A bare localhost:<port> would instead hit the
-// BROWSER's own machine, which is wrong whenever you aren't sitting at the box.
-const LOCALHOST_URL = /https?:\/\/(?:localhost|127\.0\.0\.1):(\d{1,5})(?:\/[^\s"'`]*)?/g;
-
-export function canPreviewTaskPane(id) {
-  return Number.isInteger(id) && id > 0;
-}
-
-function previewUrl(taskId, port) {
-  const proto = location.protocol === "https:" ? "https" : "http";
-  const portSuffix = location.port ? ":" + location.port : "";
-  return `${proto}://t${taskId}-${port}.localhost${portSuffix}/`;
-}
-
-function openPreviewTab(taskId, port) {
-  window.open(previewUrl(taskId, port), "_blank", "noopener");
-}
-
-function localhostLinks(term, taskId) {
-  return {
-    provideLinks(y, callback) {
-      const line = term.buffer.active.getLine(y - 1);
-      if (!line) { callback(undefined); return; }
-      const text = line.translateToString(false);
-      const links = [];
-      LOCALHOST_URL.lastIndex = 0;
-      let m;
-      while ((m = LOCALHOST_URL.exec(text)) !== null) {
-        const port = Number(m[1]);
-        if (port < 1 || port > 65535) continue;
-        const start = m.index;
-        links.push({
-          text: m[0],
-          range: { start: { x: start + 1, y }, end: { x: start + m[0].length, y } },
-          activate: () => openPreviewTab(taskId, port),
-        });
-      }
-      callback(links.length ? links : undefined);
-    },
-  };
-}
-
-// manual fallback: a port typed into the term bar opens the active task's page
-// in a new tab — for when the printed link is wrapped/truncated in a TUI.
-function goPreviewPort() {
-  const port = Number($("prev-port").value);
-  if (canPreviewTaskPane(activeId) && port >= 1 && port <= 65535) openPreviewTab(activeId, port);
 }
 
 // Attach the dock to a task's session: reuse its live pane if we have one (just
