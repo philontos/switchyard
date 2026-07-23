@@ -9,7 +9,7 @@ import { $ } from "./core/dom.js";
 import { toast } from "./core/feedback.js";
 import { closeDialog } from "./core/dialog.js";
 import { Selects, csMount } from "./core/select.js";
-import { initTerm, showTermEmpty, applyTermTheme, setViewHooks } from "./features/terminal.js";
+import { initTerm, showTermEmpty, applyTermTheme, setViewHooks, setCodeViewOpener } from "./features/terminal.js";
 import { initMobile, isOn as isMobile, autoFollowing, enterTerminal, enterList, mobileBack, setMode, reflectKeysWaiting } from "./features/mobile.js";
 import { initReading, reflectWaiting } from "./features/reading.js";
 import { state } from "./core/state.js";
@@ -134,6 +134,7 @@ renderSwitcher();
 renderThemeToggle();
 
 function dismissBoot() { const b = $("boot"); if (b) b.classList.add("done"); }
+setCodeViewOpener(openTaskCode);
 try { initTerm(); } catch (e) { console.error("terminal init failed:", e); }
 // mobile master-detail: a pane/placeholder taking the dock flips to the terminal
 // view (unless it's a machine-switch auto-follow); the dock emptying flips back to

@@ -70,13 +70,6 @@
 .code-ico { display: block; flex: none; width: 14px; height: 14px; background: currentColor;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7.25 5 3 10l4.25 5M12.75 5 17 10l-4.25 5M11.5 3.25l-3 13.5' fill='none' stroke='black' stroke-width='1.65' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7.25 5 3 10l4.25 5M12.75 5 17 10l-4.25 5M11.5 3.25l-3 13.5' fill='none' stroke='black' stroke-width='1.65' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
-.task.has-code .t { padding-right: 64px; }
-.card-code { position: absolute; z-index: 2; top: 6px; right: 36px; width: 28px; height: 26px; margin: 0; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: 6px;
-  color: color-mix(in srgb, var(--faint) 68%, var(--surface)); background: none; }
-.card-code:hover { color: var(--faint); background: color-mix(in srgb, var(--surface-2) 55%, transparent); border-color: transparent; }
-.card-code:disabled { opacity: .35; cursor: default; }
-
 #code-modal { z-index: 70; }
 .code-modal-bg { padding: 18px; }
 .modal.code-modal { width: min(1180px, 96vw); max-width: 96vw; height: min(800px, 90vh); padding: 0;
@@ -202,9 +195,6 @@
 @media (max-width: 760px) {
   .grp-code { width: 34px; height: 34px; border-radius: 10px; }
   .grp-code .code-ico { width: 15px; height: 15px; }
-  .task.has-code .t { padding-right: 84px; }
-  .card-code { top: 8px; right: 49px; width: 36px; height: 36px; border-radius: 10px; }
-  .card-code .code-ico { width: 15px; height: 15px; }
   .code-modal-bg { padding: 0; }
   .modal.code-modal { width: 100%; max-width: 100%; height: var(--vvh, 100dvh); max-height: var(--vvh, 100dvh);
     border: none; border-radius: 0; padding: 0; overflow: hidden; }
@@ -555,10 +545,12 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
   display: inline-flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent;
   border-radius: 6px; color: var(--faint); font-size: 13px; line-height: 1; }
 .card-x:hover { background: #f8514914; color: var(--red); }
-.card-x.stop { color: color-mix(in srgb, var(--faint) 68%, var(--surface)); }
+.card-x.stop { color: color-mix(in srgb, var(--faint) 68%, var(--surface));
+  border-color: color-mix(in srgb, var(--red) 28%, var(--border)); }
 .stop-ico { display: block; width: 9px; height: 9px; border: 1.25px solid currentColor; border-radius: 1.5px; background: transparent; }
 .card-x.stop:hover { color: color-mix(in srgb, var(--red-text) 45%, var(--faint));
-  background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+  border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
 /* drag-to-reorder (reorder.js): repo task cards carry data-repo. touch-action:pan-y
    lets the browser own VERTICAL scrolling (so a swipe over a card still scrolls the
    list — `none` here silently killed touch-scroll, since cards blanket the list),
@@ -656,6 +648,11 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 #term-title { color: var(--text); font-weight: 600; white-space: nowrap; flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .attach-btn { flex: none; border: 1px solid var(--border); background: var(--bg); color: var(--muted); border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; }
 .attach-btn:hover { color: var(--text); border-color: var(--accent); }
+.term-code { flex: none; width: 28px; height: 26px; margin: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--muted); background: var(--bg); }
+.term-code:hover { color: var(--text); border-color: var(--accent); background: var(--surface-2); }
+.term-code[hidden] { display: none; }
 /* Claude session id: show the full UUID when the bar has room, ellipsis it when
    it doesn't (flex:0 1 auto + min-width:0 lets it shrink past its content). Click
    copies the full id (wired in terminal.js); the title shows the complete value.
@@ -905,6 +902,9 @@ a { color: var(--accent-bar); }
   #term-back:active { background: var(--surface-2); }
   #term-attach, .term-claude { display: none; }
   #term-title { flex: 1; max-width: none; font-size: 13px; text-align: left; padding-right: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .term-code { width: 44px; height: 44px; border-radius: 12px; background: transparent; }
+  .term-code .code-ico { width: 16px; height: 16px; }
+  .term-code:active { color: var(--text); background: var(--surface-2); }
 
   /* ===== 阅读 / Reading view (mobile only) =========================================
      A native-scrolling chat rendering of the agent's session transcript, a peer of the
@@ -1102,7 +1102,7 @@ a { color: var(--accent-bar); }
   .tname { padding: 2px 6px; border-radius: 7px; }
   .tname-edit { min-height: 32px; padding: 3px 7px; border-radius: 7px; font-size: 15px; }
   .card-x { top: 8px; right: 8px; width: 36px; height: 36px; padding: 0; font-size: 17px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; }
-  .card-x.stop { background: transparent; border: 1px solid transparent; color: color-mix(in srgb, var(--faint) 68%, var(--surface)); }
+  .card-x.stop { background: transparent; color: color-mix(in srgb, var(--faint) 68%, var(--surface)); }
   .card-x.stop:active { background: color-mix(in srgb, var(--surface-2) 55%, transparent);
     color: color-mix(in srgb, var(--red-text) 45%, var(--faint)); }
   .stop-ico { width: 10px; height: 10px; border-radius: 1.75px; }

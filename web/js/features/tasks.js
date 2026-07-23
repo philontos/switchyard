@@ -80,8 +80,9 @@ export function connect(id) {
   const hid = hostOfTask(t);
   if (hid != null) state.lastTaskByHost[hid] = id;
   paintSelection();
+  const codeTarget = t.kind !== "local" && t.hasWorktree ? { id: t.id, nodeId: null } : null;
   openPty(`session=${encodeURIComponent(t.session)}`,
-    `#${t.id} ${t.title}`, "tmux attach -t " + t.session, t.id, t.claude_session || "", t.agent);
+    `#${t.id} ${t.title}`, "tmux attach -t " + t.session, t.id, t.claude_session || "", t.agent, codeTarget);
 }
 
 // The agent picker (Claude Code | Codex | Kimi Code). Persists the last pick so the next
@@ -509,9 +510,6 @@ export function taskCard(t, online) {
   const resumeBtn = resumable
     ? `<button class="t-resume" title="${I18N.t("task.resumeTitle")}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();resume(${t.id})">⟳ ${I18N.t("task.resume")}</button>`
     : "";
-  const codeBtn = t.kind !== "local" && t.hasWorktree
-    ? `<button class="card-code" title="${I18N.t("code.open")}" aria-label="${I18N.t("code.open")}" ${online ? "" : "disabled"} onclick="event.stopPropagation();openTaskCode(${t.id})"><span class="code-ico" aria-hidden="true"></span></button>`
-    : "";
   // local quick tasks have no branch/MR — show their working dir + a "local" tag
   const meta = t.kind === "local"
     ? `<div class="muted">📂 <code>${t.cwd || "~"}</code> <span class="tag-local">${I18N.t("local.tag")}</span></div>`
@@ -533,8 +531,7 @@ export function taskCard(t, online) {
   // data-repo marks a card as drag-reorderable (reorder.js) — only active repo
   // tasks: shells have no repo group, archived/cleaned ones aren't reorderable.
   const drag = active && t.kind !== "local" ? ` data-repo="${t.repo_id}"` : "";
-  return `<div class="card task task-${agent}${codeBtn ? " has-code" : ""}${open}" data-id="${t.id}"${drag}>
-    ${codeBtn}
+  return `<div class="card task task-${agent}${open}" data-id="${t.id}"${drag}>
     <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
     ${head}${note}${resumeBtn}
   </div>`;
