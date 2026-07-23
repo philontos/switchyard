@@ -28,14 +28,9 @@
   const DICT = {
     zh: {
       // top-level nav / layout
-      "repo.new": "＋ 新建仓库",
-      "repo.heading": "仓库",
-      "tab.live": "任务列表",
-      "tab.archived": "归档",
       "task.dispatch": "＋ 派发任务",
 
       // terminal dock
-      "term.label": "终端",
       "term.notConnected": "未连接",
       "term.disconnected": "[已断开]",
       "term.creating": "正在创建任务…",
@@ -126,10 +121,8 @@
       "task.agentLabel": "智能体",
       "agent.modelLabel": "模型",
       "agent.codexModelPh": "Codex 模型（可选），留空用默认，如 gpt-5-codex",
-      "agent.codexSkillsNote": "Codex 暂不支持附加 skill",
       "agent.codexAutoNote": "🔓 完全放开：Codex 可 push/联网/跑 gh；极少数情况会停下问授权(此时任务静默等待)，使用本机已登录的 Codex 账号",
       "agent.kimiModelPh": "Kimi 模型（可选），留空用默认，如 kimi-code/kimi-for-coding",
-      "agent.kimiSkillsNote": "Kimi 暂不支持附加 skill",
       "agent.kimiAutoNote": "Kimi 以 auto 模式启动；普通工具审批由 Kimi Code 自动处理，使用本机已登录的 Kimi 账号",
 
       // shells (bare tmux, per machine — local or remote)
@@ -161,12 +154,8 @@
 
       // repo card / empty state
       "repo.delTitle": "删除仓库",
-      "repo.menu": "仓库操作",
       "repo.delConfirm": "删除该仓库镜像？",
       "repo.forceDelConfirm": "该仓库下还有 {count} 个进行中的任务。强制删除会杀掉它们的会话、删除 worktree 和任务记录。确定？",
-      "repo.emptyTitle": "还没有仓库",
-      "repo.emptyHintPre": "注册一个 Git 仓库",
-      "repo.emptyHintPost": "开始派发任务",
 
       // task card
       "task.waiting": "等待你授权",
@@ -181,11 +170,8 @@
       "task.killTitle": "kill 会话",
       "task.removeWtConfirm": "删除该任务的 worktree？释放磁盘，工作目录将移除（不可恢复）。",
 
-      // empty states (task lists)
-      "empty.liveTitle": "还没有进行中的任务",
-      "empty.liveHint": "在左侧仓库卡片点击「派发任务」开始",
+      // archived task list
       "empty.archTitle": "暂无已归档任务",
-      "empty.archHint": "归档进行中的任务后会出现在这里",
 
       // loading overlay
       "loading.default": "处理中…",
@@ -197,7 +183,6 @@
       // toasts
       "toast.opFailed": "操作失败",
       "toast.repoNotReady": "仓库尚未就绪",
-      "toast.repoFieldsRequired": "名称和 git url 必填",
       "toast.repoRegistered": "仓库 #{id} 已注册，正在校验连接…",
       "toast.repoExists": "仓库 #{id} 已经注册，已定位现有记录",
       "toast.taskFieldsRequired": "仓库 / 分支 / 标题必填",
@@ -214,11 +199,8 @@
       "toast.termReconnecting": "终端连接已断开，正在重连；输入未发送",
 
       // machines (remote hosts)
-      "host.new": "＋ 新建机器",
-      "host.heading": "机器",
       "host.blocked": "· 有任务在等你",
       "host.local": "本机",
-      "host.terminal": "终端",
       "host.noRepos": "还没有仓库",
       "host.onMachine": "注册到",
       "host.modalTitle": "新建机器",
@@ -244,12 +226,7 @@
       "host.error": "读取失败",
       "host.sshPending": "已连接，SSH 尚未就绪",
       "node.group": "节点任务",
-      "node.none": "该节点暂无任务",
       "node.newTask": "在该仓库新建任务",
-      "toast.dispatchingToNode": "正在派发到 {name}…",
-      "host.emptyTitle": "还没有机器",
-      "host.emptyHintPre": "添加一台可 SSH 的远程机",
-      "host.emptyHintPost": "在网页里操作它",
       "host.required": "名称 / ssh 目标必填",
       "host.added": "机器已添加",
       "host.delConfirm": "删除该机器入口？（不影响远程机本身）",
@@ -336,19 +313,6 @@
       "onboarding.mobileWelcome.title": "手机连接成功",
       "onboarding.mobileWelcome.body": "Safari 已安全连接到 {machine}。现在可以查看任务、回复确认并进入实时终端。",
       "onboarding.mobileWelcome.home": "建议：点击 Safari 的分享按钮，再选择“添加到主屏幕”，以后就像 App 一样打开。",
-      // skill injection
-      "task.extraSkills": "附加 skill",
-      "skill.none": "（无可用 skill）",
-      "skill.manage": "Skills",
-      "skill.modalTitle": "安装 skill（官方插件）",
-      "skill.filterPh": "筛选插件…",
-      "skill.install": "安装",
-      "skill.installing": "安装中…（克隆插件，可能十几秒）",
-      "skill.installedToast": "已安装：{name}",
-      "skill.loadFailed": "加载可用插件失败",
-      "skill.availableEmpty": "没有可用插件",
-      "skill.loading": "加载中…",
-
       // theme toggle (header)
       "theme.toLight": "切换到浅色",
       "theme.toDark": "切换到深色",
@@ -371,13 +335,8 @@
       "read.noOutput": "（无输出）",
     },
     en: {
-      "repo.new": "＋ New repo",
-      "repo.heading": "Repositories",
-      "tab.live": "Tasks",
-      "tab.archived": "Archived",
       "task.dispatch": "＋ Dispatch task",
 
-      "term.label": "Terminal",
       "term.notConnected": "Not connected",
       "term.disconnected": "[disconnected]",
       "term.creating": "Creating task…",
@@ -465,10 +424,8 @@
       "task.agentLabel": "Agent",
       "agent.modelLabel": "Model",
       "agent.codexModelPh": "Codex model (optional), blank = default, e.g. gpt-5-codex",
-      "agent.codexSkillsNote": "Codex doesn't support extra skills yet",
       "agent.codexAutoNote": "🔓 Full access: Codex can push / network / run gh; may rarely pause for approval (task then waits silently); uses this machine's Codex login",
       "agent.kimiModelPh": "Kimi model (optional), blank = default, e.g. kimi-code/kimi-for-coding",
-      "agent.kimiSkillsNote": "Kimi doesn't support extra skills yet",
       "agent.kimiAutoNote": "Kimi starts in auto mode; normal tool approvals are handled by Kimi Code and it uses this machine's Kimi login",
 
       // shells (bare tmux, per machine — local or remote)
@@ -498,12 +455,8 @@
       "provider.hint": "Test first — Save unlocks only on a green check. The probe matches how claude calls the backend at runtime.",
 
       "repo.delTitle": "Delete repository",
-      "repo.menu": "Repo actions",
       "repo.delConfirm": "Delete this repository mirror?",
       "repo.forceDelConfirm": "This repository still has {count} task(s) in progress. Force delete will kill their sessions, remove their worktrees and delete the task records. Proceed?",
-      "repo.emptyTitle": "No repositories yet",
-      "repo.emptyHintPre": "Register a Git repository",
-      "repo.emptyHintPost": "to start dispatching tasks",
 
       "task.waiting": "Waiting for your approval",
       "task.renameHint": "Double-click to rename",
@@ -517,10 +470,7 @@
       "task.killTitle": "Kill session",
       "task.removeWtConfirm": "Remove this task's worktree? Frees disk; the working directory is deleted (not recoverable).",
 
-      "empty.liveTitle": "No tasks in progress yet",
-      "empty.liveHint": "Click “Dispatch task” on a repo card on the left to start",
       "empty.archTitle": "No archived tasks yet",
-      "empty.archHint": "Archived tasks show up here after you archive an active one",
 
       "loading.default": "Working…",
       "loading.creatingWorktree": "Fetching branch and creating worktree…",
@@ -530,7 +480,6 @@
 
       "toast.opFailed": "Operation failed",
       "toast.repoNotReady": "Repository is not ready yet",
-      "toast.repoFieldsRequired": "Name and git url are required",
       "toast.repoRegistered": "Repository #{id} registered, verifying connection…",
       "toast.repoExists": "Repository #{id} is already registered; showing the existing entry",
       "toast.taskFieldsRequired": "Repo / branch / title are required",
@@ -546,11 +495,8 @@
       "toast.attachCopied": "Copied the attach command",
       "toast.termReconnecting": "Terminal is reconnecting; your input was not sent",
 
-      "host.new": "＋ New machine",
-      "host.heading": "Machines",
       "host.blocked": "· task needs you",
       "host.local": "Local",
-      "host.terminal": "Terminal",
       "host.noRepos": "No repos yet",
       "host.onMachine": "Register to",
       "host.modalTitle": "New machine",
@@ -576,12 +522,7 @@
       "host.error": "read failed",
       "host.sshPending": "Connected; SSH is not ready yet",
       "node.group": "Node tasks",
-      "node.none": "no tasks on this node",
       "node.newTask": "New task on this repo",
-      "toast.dispatchingToNode": "Dispatching to {name}…",
-      "host.emptyTitle": "No machines yet",
-      "host.emptyHintPre": "Add a remote machine you can SSH into",
-      "host.emptyHintPost": "to operate it from the browser",
       "host.required": "Name and ssh target are required",
       "host.added": "Machine added",
       "host.delConfirm": "Delete this machine entry? (the remote machine itself is unaffected)",
@@ -668,19 +609,6 @@
       "onboarding.mobileWelcome.title": "Phone connected",
       "onboarding.mobileWelcome.body": "Safari is securely connected to {machine}. You can now inspect tasks, answer confirmations, and enter live terminals.",
       "onboarding.mobileWelcome.home": "Recommended: tap Safari's Share button and choose Add to Home Screen for an app-like launch.",
-      // skill injection
-      "task.extraSkills": "Extra skills",
-      "skill.none": "(no skills available)",
-      "skill.manage": "Skills",
-      "skill.modalTitle": "Install skills (official plugins)",
-      "skill.filterPh": "Filter plugins…",
-      "skill.install": "Install",
-      "skill.installing": "Installing… (cloning plugin, ~10s+)",
-      "skill.installedToast": "Installed: {name}",
-      "skill.loadFailed": "Failed to load available plugins",
-      "skill.availableEmpty": "No plugins available",
-      "skill.loading": "Loading…",
-
       // theme toggle (header)
       "theme.toLight": "Switch to light",
       "theme.toDark": "Switch to dark",

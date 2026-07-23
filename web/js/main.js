@@ -16,7 +16,6 @@ import { state } from "./core/state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo } from "./features/repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, removeNodeWt, resumeNodeTask, deleteNodeTask, delNodeRepo, updateHost, openDiscoveryModal, closeDiscoveryModal, openManualHostModal, discoverNodes, connectDiscoveredAt } from "./features/hosts.js";
 import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, cancelTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, addNodeShell, allTasks } from "./features/tasks.js";
-import { openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList } from "./features/skills.js";
 import { initCodeView, openRepoCode, openTaskCode, closeCodeView, repaintCodeView, isCodeViewOpen } from "./features/codeview.js";
 import { initReorder } from "./features/reorder.js";
 import { refreshProviders, repaintProviders, onProviderChange, toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider } from "./features/providers.js";
@@ -79,8 +78,6 @@ Object.assign(window, {
   setOnboardingKeepAwake, copyOnboardingPhoneUrl, openDiscoveryFromOnboarding,
   // local controller
   updateSelf,
-  // skills (official-plugin install)
-  openSkillsModal, closeSkillsModal, installPluginUI, filterSkillList,
   // providers (alternate model backends — picker + inline add/remove panel)
   toggleProviderPanel, onPanelInput, testProvider, addProvider, delProvider,
   // mobile (term-bar back button → list view; 阅读/实时 toggle + 需要确认 banner)
@@ -179,13 +176,12 @@ $("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal
 $("host-modal").addEventListener("click", e => { if (e.target.id === "host-modal") closeHostModal(); });
 $("onboarding-modal").addEventListener("click", e => { if (e.target.id === "onboarding-modal") closeOnboardingModal(); });
 $("discovery-modal").addEventListener("click", e => { if (e.target.id === "discovery-modal") closeDiscoveryModal(); });
-$("skills-modal").addEventListener("click", e => { if (e.target.id === "skills-modal") closeSkillsModal(); });
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
   if (isCodeViewOpen()) { closeCodeView(); return; }
   if ($("dialog").style.display === "flex") closeDialog(null);
-  else { closeRepoModal(); cancelTaskModal(); closeHostModal(); closeOnboardingModal(); closeDiscoveryModal(); closeSkillsModal(); }
+  else { closeRepoModal(); cancelTaskModal(); closeHostModal(); closeOnboardingModal(); closeDiscoveryModal(); }
 });
 // poll repos so cloning -> ready (and clone errors) show up without manual refresh
 setInterval(() => { if (state.repos.some(r => r.status === "cloning")) loadRepos(); }, 2000);

@@ -15,7 +15,7 @@ import { attachWs } from "./http/ws.js";
 import { listOwnedTasks } from "./core/ownership.js";
 import { restoreKeepAwake } from "./onboarding/power.js";
 
-// ensure child processes (git/tmux/glab/pty) find Homebrew/usr-local binaries
+// ensure child processes (git/tmux/pty) find Homebrew/usr-local binaries
 // regardless of how the server was launched (a stripped PATH otherwise breaks
 // tmux/pty with "posix_spawnp failed").
 for (const p of ["/opt/homebrew/bin", "/usr/local/bin"]) {

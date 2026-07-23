@@ -36,7 +36,6 @@ export interface Repo {
   git_url: string;
   token: string | null;
   default_branch: string;
-  project_path: string | null;
   mirror_path: string | null;
   status: string;
   error: string | null;

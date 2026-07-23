@@ -124,9 +124,9 @@ export interface InstallPlan {
   dataDir?: string;
 }
 
-/** Compute the canonical install paths + wrapper for a machine, given the clone
- *  we're installing from. Pure — the fs work is applyInstall. */
-export function installPlan(home: string, _cloneDir: string): InstallPlan {
+/** Compute the canonical install paths + wrapper for a machine.
+ * Pure — the fs work is applyInstall. */
+export function installPlan(home: string): InstallPlan {
   const root = path.join(home, ".task-dispatcher");
   const src = path.join(root, "src");
   const binDir = path.join(root, "bin");
@@ -153,7 +153,7 @@ function relink(target: string, linkPath: string) {
  * remote bootstrap once the code is in place.
  */
 export function applyInstall(home: string, cloneDir: string): InstallPlan {
-  const p = installPlan(home, cloneDir);
+  const p = installPlan(home);
   fs.mkdirSync(p.binDir, { recursive: true });
   // src → cloneDir (skip if the clone already lives at src — a fresh `git clone <src>`)
   if (path.resolve(cloneDir) !== path.resolve(p.src)) relink(path.resolve(cloneDir), p.src);
@@ -172,7 +172,7 @@ export function validProfileName(profile: string): boolean {
   return /^[a-z0-9][a-z0-9-]{0,31}$/.test(profile);
 }
 
-export function profileInstallPlan(home: string, cloneDir: string, profile: string): InstallPlan {
+export function profileInstallPlan(home: string, profile: string): InstallPlan {
   if (!validProfileName(profile)) {
     throw new Error("profile must be 1-32 lowercase letters, numbers, or hyphens");
   }
@@ -194,7 +194,7 @@ export function profileInstallPlan(home: string, cloneDir: string, profile: stri
 /** Install an isolated launcher without touching ~/.task-dispatcher/src,
  * ~/.task-dispatcher/bin/tdsp, or ~/.local/bin/tdsp. */
 export function applyProfileInstall(home: string, cloneDir: string, profile: string): InstallPlan {
-  const p = profileInstallPlan(home, cloneDir, profile);
+  const p = profileInstallPlan(home, profile);
   fs.mkdirSync(p.binDir, { recursive: true });
   fs.mkdirSync(p.dataDir!, { recursive: true });
   relink(path.resolve(cloneDir), p.src);

@@ -28,14 +28,13 @@ import type { ProfileUninstallResult } from "../fleet/profile-uninstall.js";
 export { CODE_VIEW_CAPABILITY } from "../codeview/codeview.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
-// prompt and skill list survive intact). The repo id belongs to the target
-// node's own catalog; paths and credentials never cross the node boundary.
+// prompt survives intact). The repo id belongs to the target node's own catalog;
+// paths and credentials never cross the node boundary.
 export interface CreateRepoSpec {
   repo_id: number;
   base: string;
   title: string;
   prompt?: string | null;
-  skills?: string[];
   // Which coding-agent CLI the node runs (claude default | codex | kimi) and the
   // optional non-Claude -m model. Local and remote dispatch are symmetric — the
   // node runs the same agent A picked, using createRepoTask on its own machine.
@@ -289,9 +288,6 @@ export interface CliDeps {
   providersTest: (body: ProviderInput) => Promise<{ ok: true } | { ok: false; error: string }>;
   providersCreate: (body: ProviderInput) => Promise<{ ok: true; id: number } | { ok: false; error: string }>;
   providersDelete: (id: number) => Promise<{ ok: true }>;
-  skillsList: () => unknown[];
-  pluginsList: () => Promise<unknown[]>;
-  pluginsInstall: (pluginId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   // Set up THIS machine's canonical tdsp, or a side-by-side isolated profile.
   install: (profile?: string) => {
     src: string;
@@ -744,25 +740,6 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(r));
       return 0;
     }
-    case "skills-list":
-      deps.out(JSON.stringify({ ok: true, skills: deps.skillsList() }));
-      return 0;
-    case "plugins-list":
-      deps.out(JSON.stringify({ ok: true, plugins: await deps.pluginsList() }));
-      return 0;
-    case "plugins-install": {
-      let pluginId = "";
-      try {
-        pluginId = String(JSON.parse(Buffer.from(argv[1] ?? "", "base64").toString("utf8"))?.pluginId || "");
-      } catch {}
-      if (!pluginId) {
-        deps.out(JSON.stringify({ ok: false, error: "pluginId required" }));
-        return 1;
-      }
-      const r = await deps.pluginsInstall(pluginId);
-      deps.out(JSON.stringify(r));
-      return r.ok ? 0 : 1;
-    }
     case "stop": {
       const id = Number(argv[1]);
       if (!Number.isInteger(id)) {
@@ -889,7 +866,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve [status|stop|restart]|network|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|skills-list|plugins-list|plugins-install|doctor|install|uninstall|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve [status|stop|restart]|network|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|doctor|install|uninstall|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

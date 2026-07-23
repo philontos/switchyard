@@ -160,10 +160,10 @@ test("stopTask reports notFound for an unknown id and does nothing", async () =>
 });
 
 // ---------- createRepoTask ----------
-// The repo-task orchestration sinks to the owner: worktree+skills+hooks+session
+// The repo-task orchestration sinks to the owner: worktree+hooks+session
 // are prepared locally and the manifest is the record. The mechanical steps are
-// grouped behind setupWorktree (the prod env fills in the real git/putDir/exclude
-// /hooks); the core owns ordering, naming, opening-message, cleanup and manifest.
+// grouped behind setupWorktree (the prod env fills in the real git/putDir/hooks);
+// the core owns ordering, naming, opening-message, cleanup and manifest.
 const REPO: RepoRef = { id: 4, name: "switchyard", mirror_path: "/data/mirrors/4-switchyard.git" };
 
 function makeRepoEnv(overrides: Partial<RepoTaskEnv> = {}) {
@@ -176,7 +176,6 @@ function makeRepoEnv(overrides: Partial<RepoTaskEnv> = {}) {
     db,
     ns: "abcd1234",
     writeManifest: (id) => writeTaskManifest(dir, db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task),
-    resolveSkills: (keys) => ({ found: keys.map((k) => ({ key: k, name: k.split(":").pop()!, dir: `/skills/${k}` })), missing: [] }),
     setupWorktree: async (a) => {
       calls.push("setup");
       setupArgs = a;
@@ -216,7 +215,6 @@ test("createRepoTask inserts a running task, prepares the worktree, starts the s
     assert.equal(s.baseBranch, "master");
     assert.equal(s.workBranch, `feat/${r.id}-fix-login`);
     assert.equal(s.worktree, path.resolve(`/data/worktrees/4-${r.id}`));
-    assert.equal(s.skills.length, 0);
 
     const m = JSON.parse(fs.readFileSync(path.join(dir, "tasks", String(r.id), "task.json"), "utf8"));
     assert.equal(m.task.work_branch, `feat/${r.id}-fix-login`);
@@ -225,39 +223,7 @@ test("createRepoTask inserts a running task, prepares the worktree, starts the s
   }
 });
 
-test("createRepoTask preflights skills and rejects a missing one before inserting any row", async () => {
-  const { env, dir, db, calls } = makeRepoEnv({
-    resolveSkills: () => ({ found: [], missing: ["dispatcher:nope"] }),
-  });
-  try {
-    const r = await createRepoTask(env, REPO, { baseBranch: "master", title: "t", extraSkills: ["dispatcher:nope"] });
-    assert.equal(r.ok, false);
-    if (r.ok) return;
-    assert.equal(r.error, "skillsMissing");
-    assert.deepEqual((r as any).missing, ["dispatcher:nope"]);
-    assert.equal((db.prepare("SELECT count(*) c FROM tasks").get() as { c: number }).c, 0, "no row before a failed preflight");
-    assert.deepEqual(calls, [], "nothing orchestrated");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("createRepoTask appends a skills line to the opening when skills are delivered", async () => {
-  const { env, dir, calls } = makeRepoEnv({
-    resolveSkills: () => ({ found: [{ key: "dispatcher:tdd", name: "tdd", dir: "/skills/tdd" }], missing: [] }),
-  });
-  try {
-    const r = await createRepoTask(env, REPO, { baseBranch: "m", title: "t", prompt: "build", extraSkills: ["dispatcher:tdd"] });
-    assert.equal(r.ok, true);
-    const start = calls.find((c) => c.startsWith("start:"))!;
-    assert.match(start, /build/);
-    assert.match(start, /tdd/);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("createRepoTask with neither prompt nor skills starts the session with a null opening", async () => {
+test("createRepoTask without a prompt starts the session with a null opening", async () => {
   const { env, dir, calls } = makeRepoEnv();
   try {
     await createRepoTask(env, REPO, { baseBranch: "m", title: "t" });
@@ -304,9 +270,8 @@ test("createRepoTask defaults agent to claude and agent_model to null", async ()
 });
 
 // codex: the agent + its model are recorded (so resume can rebuild the same
-// launch) and threaded into setup + session; skills are ignored entirely (codex
-// has no skill mechanism), so none are delivered and the opening is just the prompt.
-test("createRepoTask (codex) records agent+model, ignores skills, and threads agent into setup/session", async () => {
+// launch) and threaded into setup + session.
+test("createRepoTask (codex) records agent+model and threads agent into setup/session", async () => {
   let startOpts: any = null;
   let setupArgs: any = null;
   const { env, dir, db, calls } = makeRepoEnv({
@@ -316,7 +281,7 @@ test("createRepoTask (codex) records agent+model, ignores skills, and threads ag
   try {
     const r = await createRepoTask(env, REPO, {
       baseBranch: "m", title: "t", prompt: "build",
-      agent: "codex", model: "gpt-5.4", extraSkills: ["dispatcher:tdd"],
+      agent: "codex", model: "gpt-5.4",
     });
     assert.equal(r.ok, true);
     if (!r.ok) return;
@@ -324,8 +289,7 @@ test("createRepoTask (codex) records agent+model, ignores skills, and threads ag
     assert.equal(row.agent, "codex");
     assert.equal(row.agent_model, "gpt-5.4");
     assert.equal(setupArgs.agent, "codex", "setup is told which agent");
-    assert.equal(setupArgs.skills.length, 0, "codex delivers no skills even when some were requested");
-    assert.ok(calls.includes("start:build"), "opening is just the prompt — no skills line");
+    assert.ok(calls.includes("start:build"));
     assert.equal(startOpts.agent, "codex", "session launches codex");
     assert.equal(startOpts.model, "gpt-5.4");
   } finally {
@@ -333,7 +297,7 @@ test("createRepoTask (codex) records agent+model, ignores skills, and threads ag
   }
 });
 
-test("createRepoTask (kimi) records agent+model, ignores skills, and threads agent into setup/session", async () => {
+test("createRepoTask (kimi) records agent+model and threads agent into setup/session", async () => {
   let startOpts: any = null;
   let setupArgs: any = null;
   const { env, dir, db, calls } = makeRepoEnv({
@@ -343,7 +307,7 @@ test("createRepoTask (kimi) records agent+model, ignores skills, and threads age
   try {
     const r = await createRepoTask(env, REPO, {
       baseBranch: "m", title: "t", prompt: "build",
-      agent: "kimi", model: "kimi-code/kimi-for-coding", extraSkills: ["dispatcher:tdd"],
+      agent: "kimi", model: "kimi-code/kimi-for-coding",
     });
     assert.equal(r.ok, true);
     if (!r.ok) return;
@@ -351,8 +315,7 @@ test("createRepoTask (kimi) records agent+model, ignores skills, and threads age
     assert.equal(row.agent, "kimi");
     assert.equal(row.agent_model, "kimi-code/kimi-for-coding");
     assert.equal(setupArgs.agent, "kimi", "setup is told which agent");
-    assert.equal(setupArgs.skills.length, 0, "kimi delivers no Switchyard skills even when some were requested");
-    assert.ok(calls.includes("start:build"), "opening is just the prompt — no skills line");
+    assert.ok(calls.includes("start:build"));
     assert.equal(startOpts.agent, "kimi", "session launches kimi");
     assert.equal(startOpts.model, "kimi-code/kimi-for-coding");
   } finally {

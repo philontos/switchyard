@@ -212,9 +212,6 @@ function fakeDeps(db: Database.Database) {
       },
       pasteImage: async () => ({ ok: true as const }),
       readStdin: async () => Buffer.from("image"),
-      skillsList: () => [],
-      pluginsList: async () => [],
-      pluginsInstall: async () => ({ ok: true as const }),
       install: (profile?: string) => {
         installCalls.push(profile);
         return profile
@@ -550,7 +547,7 @@ test("runCli create-local supports --flag=value form too", async () => {
 // prompt with newlines/quotes survives ssh argv) and the node decodes + runs it.
 test("runCli create decodes the base64 spec, invokes createRepo, prints JSON, exits 0", async () => {
   const f = fakeDeps(seed());
-  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "line1\nline2", skills: ["dispatcher:tdd"] };
+  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "line1\nline2" };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 0);
@@ -564,7 +561,7 @@ test("runCli create decodes the base64 spec, invokes createRepo, prints JSON, ex
 // ride in the spec, so the node's own createRepoTask runs the same agent A picked.
 test("runCli create round-trips the agent + model in the spec (symmetric codex dispatch)", async () => {
   const f = fakeDeps(seed());
-  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "go", skills: [], agent: "codex", model: "gpt-5.4" };
+  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "go", agent: "codex", model: "gpt-5.4" };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 0);
@@ -574,7 +571,7 @@ test("runCli create round-trips the agent + model in the spec (symmetric codex d
 
 test("runCli create round-trips kimi as an agent in the spec", async () => {
   const f = fakeDeps(seed());
-  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "go", skills: [], agent: "kimi", model: "kimi-code/kimi-for-coding" };
+  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "go", agent: "kimi", model: "kimi-code/kimi-for-coding" };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 0);
@@ -584,7 +581,7 @@ test("runCli create round-trips kimi as an agent in the spec", async () => {
 
 test("runCli create round-trips provider_id in the spec (node-local provider)", async () => {
   const f = fakeDeps(seed());
-  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "go", skills: [], agent: "claude", provider_id: 9 };
+  const spec = { repo_id: 5, base: "main", title: "fix", prompt: "go", agent: "claude", provider_id: 9 };
   const b64 = Buffer.from(JSON.stringify(spec)).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 0);
@@ -614,11 +611,11 @@ test("runCli create exits 1 and reports an error when the spec is not valid base
 
 test("runCli create exits 1 and prints the error when dispatch fails", async () => {
   const f = fakeDeps(seed());
-  f.deps.createRepo = async () => ({ ok: false as const, error: "skillsMissing", missing: ["dispatcher:x"] });
+  f.deps.createRepo = async () => ({ ok: false as const, error: "dispatchFailed", id: 77, message: "worktree failed" });
   const b64 = Buffer.from(JSON.stringify({ repo_id: 5, base: "main", title: "t" })).toString("base64");
   const code = await runCli(["create", b64], f.deps);
   assert.equal(code, 1);
-  assert.match(f.out, /skillsMissing/);
+  assert.match(f.out, /dispatchFailed/);
 });
 
 test("runCli stop parses the id, invokes stop, prints JSON, exits 0", async () => {

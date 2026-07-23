@@ -6,8 +6,7 @@
 import path from "node:path";
 import { writeTaskManifest } from "./taskmanifest.js";
 import { resolveCwd } from "../fleet/local.js";
-import { skillsLine } from "../skills/skills.js";
-import { agentCaps, type AgentKind } from "../session/agent.js";
+import type { AgentKind } from "../session/agent.js";
 import type Database from "better-sqlite3";
 import type { Task } from "../core/db.js";
 import { getOwnedTask } from "../core/ownership.js";
@@ -103,13 +102,6 @@ export async function stopTask(env: StopTaskEnv, id: number): Promise<StopResult
 }
 
 // ---------- repo task ----------
-// A skill delivered into a task's worktree: identity, display name, source dir.
-export interface SkillRef {
-  key: string;
-  name: string;
-  dir: string;
-}
-
 // The repo this task springs from. The owner already holds its mirror; the core
 // derives the worktree path from it. (Not the full Repo row — just what we need.)
 export interface RepoRef {
@@ -124,22 +116,19 @@ export interface RepoTaskEnv {
   // Persist the task's durable record. Both the CLI verb and HTTP route execute
   // on the owner and inject their node-local manifest writer.
   writeManifest(id: number): void | Promise<void>;
-  // Preflight the requested skill keys against the owner's sources.
-  resolveSkills(keys: string[]): { found: SkillRef[]; missing: string[] };
-  // Prepare the worktree's CONTENTS: create it from the base branch, deliver each
-  // skill, inject the per-task hooks, and keep both out of git status. Grouped as
-  // one seam — the prod env fills it with the real git/putDir/exclude/hooks code.
+  // Prepare the worktree's contents: create it from the base branch and inject
+  // the per-task Claude hooks. Grouped as one seam so orchestration remains
+  // independent of git and filesystem mechanics.
   setupWorktree(args: {
     id: number;
     mirror: string;
     worktree: string;
     workBranch: string;
     baseBranch: string;
-    skills: SkillRef[];
     agent: AgentKind;
   }): Promise<string>; // exact HEAD immediately after worktree creation
-  // Launch the agent in the worktree (opening = freeform prompt + skills line, or
-  // null). opts.env injects ANTHROPIC_* vars for claude's alternate model backend;
+  // Launch the agent in the worktree (opening = freeform prompt or null).
+  // opts.env injects ANTHROPIC_* vars for claude's alternate model backend;
   // opts.agent picks the CLI (claude default | codex | kimi); opts.model is the
   // non-Claude -m model. All omitted → the machine's default claude login.
   startSession(
@@ -156,7 +145,6 @@ export interface CreateRepoOpts {
   baseBranch: string;
   title: string;
   prompt?: string | null;
-  extraSkills?: string[];
   // Alternate model backend (optional). providerId is recorded on the task (so
   // resume can re-inject the same backend); env is the resolved ANTHROPIC_* vars
   // injected when claude launches. Both omitted → default claude login. Only the
@@ -171,30 +159,22 @@ export interface CreateRepoOpts {
 
 export type CreateRepoResult =
   | { ok: true; id: number; session: string; workBranch: string }
-  | { ok: false; error: "skillsMissing"; missing: string[] }
   | { ok: false; error: "dispatchFailed"; id: number; message: string };
 
 /**
- * Create a repo task ON the owner: preflight skills, insert the row, prepare the
- * worktree + session, then flip to running and write the manifest. A failure
+ * Create a repo task ON the owner: insert the row, prepare the worktree +
+ * session, then flip to running and write the manifest. A failure
  * after the row exists removes the partial worktree and marks the task errored
  * (still manifested). Mirrors index.ts's POST /api/tasks exactly — the HTTP route
  * becomes a thin caller, and a future `tdsp create` verb reuses this verbatim.
  */
 export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: CreateRepoOpts): Promise<CreateRepoResult> {
   const agent = opts.agent ?? "claude";
-  // Preflight skills BEFORE inserting, so a bad skill never leaves a half-built
-  // task pointing at a nonexistent skill. codex has no skill mechanism, so skills
-  // are ignored for it — never resolved, delivered, or announced in the opening.
-  const wantKeys = agentCaps(agent).injectSkills ? [...new Set((opts.extraSkills ?? []).map(String))] : [];
-  const { found, missing } = env.resolveSkills(wantKeys);
-  if (missing.length) return { ok: false, error: "skillsMissing", missing };
-
   const info = env.db
     .prepare(
-      "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, skills, provider_id, agent, agent_model) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO tasks (repo_id, base_branch, work_branch, title, prompt, worktree_path, session, status, provider_id, agent, agent_model) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
     )
-    .run(repo.id, opts.baseBranch, "", opts.title, opts.prompt || null, "", "", "creating", JSON.stringify(found.map((f) => f.key)), opts.providerId ?? null, agent, opts.model ?? null);
+    .run(repo.id, opts.baseBranch, "", opts.title, opts.prompt || null, "", "", "creating", opts.providerId ?? null, agent, opts.model ?? null);
   const id = Number(info.lastInsertRowid);
   const s = slug(opts.title);
   const workBranch = `feat/${id}-${s}`;
@@ -202,10 +182,10 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
   const session = `tdsp-${env.ns}-${id}-${slug(repo.name)}-${s}`;
 
   try {
-    const baseCommit = await env.setupWorktree({ id, mirror: repo.mirror_path, worktree, workBranch, baseBranch: opts.baseBranch, skills: found, agent });
-    // opening = freeform prompt + the "skills delivered" line; pass it UNTRIMMED
-    // (only the null-decision uses trim) to match the prior HTTP behavior exactly.
-    const opening = (opts.prompt || "") + skillsLine(found.map((f) => f.name));
+    const baseCommit = await env.setupWorktree({ id, mirror: repo.mirror_path, worktree, workBranch, baseBranch: opts.baseBranch, agent });
+    // Preserve the prompt verbatim; trim only decides whether there is an
+    // opening message at all.
+    const opening = opts.prompt || "";
     await env.startSession(session, worktree, opening.trim() ? opening : null, { env: opts.env, agent, model: opts.model });
     env.db.prepare("UPDATE tasks SET base_commit=?, work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
       .run(baseCommit, workBranch, worktree, session, id);

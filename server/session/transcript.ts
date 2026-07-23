@@ -15,7 +15,6 @@
 // transcript files over SSH. Parsing is stateless per line, so tailing remains a
 // pure append with a simple byte cursor.
 import os from "node:os";
-import path from "node:path";
 import type { Runner } from "../fleet/runner.js";
 import { asAgentKind, type AgentKind } from "./agent.js";
 import type { Task } from "../core/db.js";
@@ -46,7 +45,7 @@ const cap = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "\n…（�
 const tryParse = (s: string) => { try { return JSON.parse(s); } catch { return null; } };
 
 // Best one-liner for a tool call's summary row: the command / file / pattern it acts on.
-function toolArg(name: string, input: unknown): string {
+function toolArg(input: unknown): string {
   const o = typeof input === "string" ? tryParse(input) : input;
   if (o && typeof o === "object") {
     const rec = o as Record<string, unknown>;
@@ -97,7 +96,7 @@ export function parseClaudeLine(o: any): Entry[] {
     } else if (b?.type === "thinking") {
       if (b.thinking?.trim()) out.push({ t: "thinking", text: b.thinking });
     } else if (b?.type === "tool_use") {
-      out.push({ t: "tool_call", id: String(b.id ?? ""), name: String(b.name ?? "tool"), arg: toolArg(b.name, b.input), detail: toolDetail(b.input) });
+      out.push({ t: "tool_call", id: String(b.id ?? ""), name: String(b.name ?? "tool"), arg: toolArg(b.input), detail: toolDetail(b.input) });
     } else if (b?.type === "tool_result") {
       out.push({ t: "tool_result", id: String(b.tool_use_id ?? ""), ok: !b.is_error, output: cap(claudeContentStr(b.content), OUT_CAP) });
     }
@@ -125,7 +124,7 @@ export function parseCodexLine(o: any): Entry[] {
   }
   if (pt === "function_call" || pt === "custom_tool_call") {
     const input = pt === "function_call" ? p.arguments : p.input;
-    return [{ t: "tool_call", id: String(p.call_id ?? p.id ?? ""), name: String(p.name ?? "tool"), arg: toolArg(p.name, input), detail: toolDetail(input) }];
+    return [{ t: "tool_call", id: String(p.call_id ?? p.id ?? ""), name: String(p.name ?? "tool"), arg: toolArg(input), detail: toolDetail(input) }];
   }
   if (pt === "function_call_output" || pt === "custom_tool_call_output") {
     return [{ t: "tool_result", id: String(p.call_id ?? ""), ok: true, output: cap(String(p.output ?? ""), OUT_CAP) }];

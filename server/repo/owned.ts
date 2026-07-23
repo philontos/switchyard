@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { Repo, Task } from "../core/db.js";
+import type { Task } from "../core/db.js";
 import type { Runner } from "../fleet/runner.js";
 import { getOwnedRepo, localHostId } from "../core/ownership.js";
 import { findRepoByGitUrl } from "./catalog.js";
@@ -12,7 +12,6 @@ export interface OwnedRepoInput {
   git_url?: string | null;
   token?: string | null;
   default_branch?: string | null;
-  project_path?: string | null;
 }
 
 export type OwnedRepoResult =
@@ -59,12 +58,12 @@ export async function registerOwnedRepo(env: OwnedRepoEnv, input: OwnedRepoInput
     id = existing.id;
     dest = existing.mirror_path || mirrorPath(env.runner.dataDir, id, name);
     env.db.prepare(
-      "UPDATE repos SET name=?,git_url=?,token=?,default_branch=?,project_path=?,mirror_path=?,status='cloning',error=NULL WHERE id=?",
-    ).run(name, gitUrl, input.token || null, input.default_branch || "main", input.project_path || null, dest, id);
+      "UPDATE repos SET name=?,git_url=?,token=?,default_branch=?,mirror_path=?,status='cloning',error=NULL WHERE id=?",
+    ).run(name, gitUrl, input.token || null, input.default_branch || "main", dest, id);
   } else {
     const info = env.db.prepare(
-      "INSERT INTO repos (host_id,name,git_url,token,default_branch,project_path,status) VALUES (?,?,?,?,?,?,?)",
-    ).run(hostId, name, gitUrl, input.token || null, input.default_branch || "main", input.project_path || null, "cloning");
+      "INSERT INTO repos (host_id,name,git_url,token,default_branch,status) VALUES (?,?,?,?,?,?)",
+    ).run(hostId, name, gitUrl, input.token || null, input.default_branch || "main", "cloning");
     id = Number(info.lastInsertRowid);
     dest = mirrorPath(env.runner.dataDir, id, name);
     env.db.prepare("UPDATE repos SET mirror_path=? WHERE id=?").run(dest, id);

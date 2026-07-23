@@ -11,7 +11,6 @@ import {
   onboarding,
   providers,
   repos,
-  skills,
   tasks,
   terminalFrame,
   transcript,
@@ -32,7 +31,6 @@ export async function startDemoServer(port = 0) {
   app.get("/api/hosts", (_req, res) => res.json(hosts));
   app.get("/api/fleet", (_req, res) => res.json(fleet));
   app.get("/api/providers", (_req, res) => res.json(providers));
-  app.get("/api/skills", (_req, res) => res.json(skills));
   app.get("/api/network/discovery", (_req, res) => res.json(discovery));
   app.get("/api/onboarding/status", (_req, res) => {
     res.setHeader("cache-control", "no-store");

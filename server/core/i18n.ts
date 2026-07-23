@@ -9,7 +9,7 @@
 //   3. In a route, replace the literal with `tr(langFromReq(req), "your.key", { ... })`.
 //
 // WHAT DOES NOT BELONG HERE
-//   Raw output from external tools (git / glab / node-pty). Those errors are
+//   Raw output from external tools (git / node-pty). Those errors are
 //   passed through verbatim via `String(e.message || e)` — they are dynamic and
 //   not ours to translate.
 
@@ -30,15 +30,12 @@ const messages: Record<Lang, Record<string, string>> = {
     "task.worktreeExists": "worktree still exists, remove it first",
     "task.notResumable": "task cannot be resumed (no session or worktree on record)",
     "task.worktreeGone": "worktree no longer exists on disk; rebuild it instead",
-    "task.localDefaultTitle": "Local task #{id}",
     "task.cwdMissing": "directory does not exist: {cwd}",
     "session.invalid": "invalid session",
     "session.attachFailed": "cannot connect to session {session}: {error}",
     "session.orphanRefused": "session {name} is not tracked by this Switchyard instance (it may belong to another instance sharing this machine); pass force to kill it anyway",
     "host.offline": "machine is offline",
     "host.nodeUpdateRequired": "this node is running an older tdsp; open the machine's ⚙ menu, click \"Update code\", then retry",
-    "skill.missing": "skill(s) not found: {keys}",
-    "plugin.idRequired": "pluginId required",
     "paste.badType": "unsupported image type",
     "paste.empty": "empty image data",
     "paste.noTarget": "this task has no working directory for pasted images",
@@ -54,15 +51,12 @@ const messages: Record<Lang, Record<string, string>> = {
     "task.worktreeExists": "worktree 仍存在，请先删除 worktree",
     "task.notResumable": "该任务无法恢复（没有会话或 worktree 记录）",
     "task.worktreeGone": "worktree 已不在磁盘上，请改用重建",
-    "task.localDefaultTitle": "本地任务 #{id}",
     "task.cwdMissing": "目录不存在：{cwd}",
     "session.invalid": "会话名非法",
     "session.attachFailed": "无法连接会话 {session}: {error}",
     "session.orphanRefused": "会话 {name} 不属于当前 Switchyard 实例（可能属于共用本机的另一个实例）；如确需结束请传 force",
     "host.offline": "机器离线",
     "host.nodeUpdateRequired": "该节点的 tdsp 版本较旧；请打开机器的 ⚙ 菜单，点击“更新代码”后重试",
-    "skill.missing": "未找到 skill：{keys}",
-    "plugin.idRequired": "缺少 pluginId",
     "paste.badType": "不支持的图片类型",
     "paste.empty": "空图片数据",
     "paste.noTarget": "该任务没有可存放粘贴图片的工作目录",

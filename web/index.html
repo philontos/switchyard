@@ -21,7 +21,7 @@
 </head>
 <body>
 <div id="boot"><div class="spinner"></div></div>
-<header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true" /><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true" /></a><span style="flex:1"></span><button id="onboarding-btn" class="sec onboarding-nav" onclick="openOnboardingModal()"><span id="onboarding-nav-dot" class="onboarding-nav-dot pending" aria-hidden="true"></span><span class="onboarding-nav-label" data-i18n="onboarding.nav"></span></button><button id="self-update" class="sec icon-btn" onclick="updateSelf()" data-i18n-title="system.updateTitle" aria-label="Update"><span class="sync-icon" aria-hidden="true"></span></button><button id="skills-btn" class="sec" data-i18n="skill.manage" onclick="openSkillsModal()"></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
+<header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true" /><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true" /></a><span style="flex:1"></span><button id="onboarding-btn" class="sec onboarding-nav" onclick="openOnboardingModal()"><span id="onboarding-nav-dot" class="onboarding-nav-dot pending" aria-hidden="true"></span><span class="onboarding-nav-label" data-i18n="onboarding.nav"></span></button><button id="self-update" class="sec icon-btn" onclick="updateSelf()" data-i18n-title="system.updateTitle" aria-label="Update"><span class="sync-icon" aria-hidden="true"></span></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
   <div id="m-list" class="list"></div>
@@ -98,7 +98,6 @@
   <div class="modal">
     <h2 id="dlg-title" style="margin:0 0 4px"></h2>
     <div id="dlg-msg" class="dlg-msg"></div>
-    <input id="dlg-input" style="display:none" />
     <div class="dlg-actions">
       <button id="dlg-cancel" class="sec" data-i18n="dialog.cancel"></button>
       <button id="dlg-ok" data-i18n="dialog.ok"></button>
@@ -123,11 +122,6 @@
     <div id="t-base" class="cs"></div>
     <input id="t-title" data-i18n-ph="task.titlePh" />
     <textarea id="t-prompt" rows="3" data-i18n-ph="task.promptPh"></textarea>
-    <label class="tm-lbl" data-i18n="task.extraSkills"></label>
-    <div id="t-skills" class="skills-box"></div>
-    <!-- non-Claude agents have no Switchyard skill injection: the box above is
-         greyed out and this note explains why. -->
-    <div id="t-skills-codex-note" class="hint" style="display:none" data-i18n="agent.codexSkillsNote"></div>
     <!-- model backend: only meaningful for in-process dispatch (this controller
          launches claude). Hidden in node mode — a bootstrapped remote owns its
          own claude login, so the picker doesn't apply there. -->
@@ -243,17 +237,6 @@
       <button class="primary" data-i18n="host.submit" onclick="addHost()"></button>
     </div>
     <div class="hint" style="margin-top:10px" data-i18n="host.hint"></div>
-  </div>
-</div>
-
-<div id="skills-modal" class="modal-bg" style="display:none">
-  <div class="modal">
-    <h2 style="margin-bottom:10px" data-i18n="skill.modalTitle"></h2>
-    <input id="sk-filter" data-i18n-ph="skill.filterPh" oninput="filterSkillList(this.value)" />
-    <div id="sk-list" class="pg-box"></div>
-    <div class="dlg-actions">
-      <button class="sec" data-i18n="dialog.cancel" onclick="closeSkillsModal()"></button>
-    </div>
   </div>
 </div>
 

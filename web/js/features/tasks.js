@@ -27,7 +27,6 @@ function normalizeAgent(kind) {
 // this UI. Providers belong to the node that will run the task: local catalog for
 // local tasks, remote catalog through tdsp for bootstrapped remote nodes.
 let modalProviderAvailable = true;
-let dispatchOptionsVersion = 0;
 // when set, the dispatch modal is in "node mode": dispatch to a remote node's OWN
 // repo (surfaced via the fleet) instead of a controller-registered repo.
 let nodeTask = null;   // { hostId, repo } or null
@@ -96,21 +95,15 @@ export function selectAgent(kind) {
   applyAgentUI();
 }
 
-// Reflect the selected agent onto the modal:
-//   codex/kimi → provider picker hidden, model field + note shown, skills box
-//            greyed out (no Switchyard-side skill injection mechanism)
-//   claude → the reverse; the provider picker is restored when the current
-//            target node has a reachable provider catalog.
+// Reflect the selected agent onto the modal: codex/kimi use a model field;
+// Claude uses the target node's provider catalog when it is reachable.
 function applyAgentUI() {
   const external = selectedAgent !== "claude";
   $("t-codex-sec").style.display = external ? "" : "none";
-  $("t-skills-codex-note").style.display = external ? "" : "none";
-  $("t-skills").classList.toggle("disabled", external);
   const model = $("t-codex-model");
   model.placeholder = t(selectedAgent === "kimi" ? "agent.kimiModelPh" : "agent.codexModelPh");
   const note = $("t-agent-auto-note");
   note.textContent = t(selectedAgent === "kimi" ? "agent.kimiAutoNote" : "agent.codexAutoNote");
-  $("t-skills-codex-note").textContent = t(selectedAgent === "kimi" ? "agent.kimiSkillsNote" : "agent.codexSkillsNote");
   if (external) {
     $("t-provider-sec").style.display = "none";
     $("prov-panel").style.display = "none";
@@ -140,7 +133,6 @@ export function openTaskModal(repoId) {
   sheetOpened();   // claim the mobile history entry BEFORE the sheet paints (list still on the glass)
   $("task-modal").style.display = "flex";
   loadBranches();
-  loadDispatchOptions();
   if (modalProviderAvailable) refreshProviders();      // fill the target node's backend picker
   setTimeout(() => $("t-title").focus(), 30);
 }
@@ -150,7 +142,6 @@ export function closeTaskModal() {
   const modal = $("task-modal");
   if (modal.contains(document.activeElement)) document.activeElement.blur();
   modal.style.display = "none";
-  dispatchOptionsVersion++;
   branchReq?.abort();
   nodeTask = null;
 }
@@ -162,7 +153,7 @@ export function cancelTaskModal() { closeTaskModal(); sheetCancelled(); }
 // Open the dispatch modal for a remote node's OWN repo (from the fleet). The task
 // is created ON the node, using the node's existing mirror — no re-registration
 // here. Branches are listed live by the node itself (its mirror is over there);
-// everything else (title/prompt/skills) is the same as a local dispatch.
+// title and prompt behave exactly like a local dispatch.
 export function openNodeTaskModal(hostId, repoId) {
   const repo = state.fleet[hostId]?.repos?.find(r => r.id === repoId && (!r.status || r.status === "ready"));
   if (!repo) return toast(t("toast.repoNotReady"), "error");
@@ -182,7 +173,6 @@ export function openNodeTaskModal(hostId, repoId) {
   sheetOpened();   // claim the mobile history entry BEFORE the sheet paints (list still on the glass)
   $("task-modal").style.display = "flex";
   loadNodeBranches(hostId, repo);
-  loadDispatchOptions();
   refreshProviders();
   setTimeout(() => $("t-title").focus(), 30);
 }
@@ -247,25 +237,6 @@ export async function addNodeShell(hostId) {
   }
 }
 
-// extra-skill checkboxes for the dispatch modal; reset each open. Dispatch works
-// fine even if this fails to load (just no skills offered).
-async function loadDispatchOptions() {
-  const version = ++dispatchOptionsVersion;
-  const targetHostId = nodeTask?.hostId ?? null;
-  $("t-skills").innerHTML = "";
-  try {
-    const endpoint = targetHostId != null ? `/api/nodes/${targetHostId}/skills` : "/api/skills";
-    const skills = await api(endpoint);
-    if (version !== dispatchOptionsVersion) return;
-    $("t-skills").innerHTML = skills.length
-      ? skills.map(s => `<label class="skopt"><input type="checkbox" value="${s.key}"> ${s.name} <span class="sksrc">${s.source}</span></label>`).join("")
-      : `<div class="muted">${t("skill.none")}</div>`;
-  } catch (e) { /* leave empty — a task can still be dispatched without skills */ }
-}
-function selectedExtraSkills() {
-  return [...document.querySelectorAll("#t-skills input:checked")].map(i => i.value);
-}
-
 async function loadBranches() {
   const id = taskRepoId;
   if (!id) { Selects["t-base"].setOptions([]); return; }
@@ -295,8 +266,6 @@ async function addNodeTask() {
     repo_id: repo.id,
     base: Selects["t-base"].value, title: $("t-title").value.trim(),
     prompt: $("t-prompt").value,
-    // non-Claude agents carry a model and no Switchyard-injected skills.
-    skills: external ? [] : selectedExtraSkills(),
     provider_id: providerShown ? selectedProviderId() : null,
     agent: selectedAgent,
     model: external ? ($("t-codex-model").value.trim() || null) : null,
@@ -334,8 +303,6 @@ export async function addTask() {
   const body = {
     repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
-    // non-Claude agents have no Switchyard-injected skills and never take a provider.
-    extra_skills: external ? [] : selectedExtraSkills(),
     provider_id: providerShown ? selectedProviderId() : null,   // null == default claude login
     agent: selectedAgent,
     agent_model: external ? ($("t-codex-model").value.trim() || null) : null,

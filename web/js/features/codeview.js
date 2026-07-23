@@ -102,7 +102,7 @@ function stateBox(target, message, loading = false) {
   box.className = "cv-state";
   if (loading) {
     const spin = document.createElement("span");
-    spin.className = "pg-spin";
+    spin.className = "cv-state-spin";
     box.append(spin);
   }
   const text = document.createElement("span");

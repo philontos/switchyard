@@ -121,13 +121,13 @@ A host reboot or killed tmux session does not destroy the working tree. As long 
 
 | Agent | Task configuration | Current Switchyard integration |
 |---|---|---|
-| **Claude Code** | Machine login or a validated Anthropic-compatible endpoint | Live terminal, resume, image paste, optional skill injection, native permission-waiting signal, local mobile transcript |
+| **Claude Code** | Machine login or a validated Anthropic-compatible endpoint | Live terminal, resume, image paste, native permission-waiting signal, local mobile transcript |
 | **Codex** | Machine login and optional model ID | Live terminal, resume, image paste, full-access launch, local mobile transcript |
 | **Kimi Code / Kimi K3** | Machine login and optional model ID such as `k3` | Interactive `--auto` terminal, resume, and image paste |
 
 The selected agent and model belong to the task and are preserved on resume. Provider credentials stay on the machine that runs the task and are not copied to peers.
 
-Current boundary: extra skill injection and the yellow “needs you” permission signal are Claude Code-only. Remote-node transcripts and Kimi transcripts do not yet have **Read** mode; those tasks open directly in the live terminal.
+Current boundary: the yellow “needs you” permission signal is Claude Code-only. Remote-node transcripts and Kimi transcripts do not yet have **Read** mode; those tasks open directly in the live terminal.
 
 ## Built for the phone
 
@@ -252,6 +252,6 @@ server/session/      tmux, PTY, and Claude/Codex/Kimi launch arguments
 server/fleet/        SSH runners, bootstrap, liveness, and node views
 server/network/      Tailscale Serve, diagnosis, and peer relay
 server/onboarding/   live network, phone, power, and fleet readiness
-server/http/         REST, WebSocket, and preview routing
+server/http/         REST APIs, static web serving, and the WebSocket terminal bridge
 web/js/features/     board, hosts, terminal, mobile, reading, and setup UI
 ```
