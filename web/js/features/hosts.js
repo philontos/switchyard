@@ -65,8 +65,8 @@ export async function updateHost(id) {
 }
 
 // Updating this Switchyard instance belongs to the local machine, so its control
-// lives on the Local rail chip instead of in the global page header. Keep the
-// state here as renderRail is rebuilt by the liveness poll while an update runs.
+// lives in the Local machine header instead of in the global page header. Keep
+// the state here as the machine list is rebuilt while an update runs.
 export async function updateSelf() {
   if (selfUpdating) return;
   selfUpdating = true;
@@ -298,9 +298,7 @@ function renderRail(hosts, blocked) {
     const dotClass = !online ? "off" : waiting ? "waiting" : "on";
     const base = h.kind === "local" ? t("host.local") : `${h.name} · ${h.target}`;
     const title = waiting ? `${base} ${t("host.blocked")}` : base;
-    const chip = `<button class="rchip${h.id === state.activeHostId ? " active" : ""}" title="${title}" onclick="selectHost(${h.id})"><span class="rdot ${dotClass}"></span>${glyph}</button>`;
-    if (h.kind !== "local") return chip;
-    return `<div class="rchip-local">${chip}<button id="self-update" class="rchip-update${selfUpdating ? " updating" : ""}" title="${t("system.updateTitle")}" aria-label="${t("system.updateTitle")}" onclick="event.stopPropagation();updateSelf()" ${selfUpdating ? "disabled" : ""}><span class="sync-icon" aria-hidden="true"></span></button></div>`;
+    return `<button class="rchip${h.id === state.activeHostId ? " active" : ""}" title="${title}" onclick="selectHost(${h.id})"><span class="rdot ${dotClass}"></span>${glyph}</button>`;
   };
   $("m-rail").innerHTML = hosts.map(icon).join("")
     + `<button class="rchip add" title="${t("discovery.title")}" onclick="openDiscoveryModal()">＋</button>`;
@@ -413,6 +411,9 @@ function renderListHtml() {
 
   const gear = isLocal ? ""
     : `<button class="mh-gear" title="${t("host.manage")}" onclick="event.stopPropagation();toggleHostMenu(${h.id})">⚙</button>`;
+  const selfUpdate = isLocal
+    ? `<button id="self-update" class="mh-self-update${selfUpdating ? " updating" : ""}" title="${t("system.updateTitle")}" aria-label="${t("system.updateTitle")}" onclick="updateSelf()" ${selfUpdating ? "disabled" : ""}><span class="sync-icon" aria-hidden="true"></span></button>`
+    : "";
   const canAddRepo = isLocal || remoteReady;
   const newRepo = `<button class="mh-act" ${canAddRepo ? "" : "disabled"} onclick="openRepoModal(${h.id})">＋${t("repo.repoWord")}</button>`;
   // fleet/bootstrap status for this remote machine: bootstrapped+reachable shows a
@@ -446,7 +447,7 @@ function renderListHtml() {
       ${updateRow}
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
-  const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${newRepo}${menu}</div>`;
+  const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${selfUpdate}${newRepo}${menu}</div>`;
   let content = "";
   if (isLocal) {
     const repoBlocks = state.repos.map(r => {
