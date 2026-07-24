@@ -579,7 +579,9 @@ export function renameTask(event, id) {
 export function allTasks() { return taskOrder.map(id => tasksById[id]).filter(Boolean); }
 export function taskById(id) { return tasksById[id] || null; }
 export async function archive(id){
-  if(!await confirmDialog(t("task.killConfirm"),{title:t("task.killTitle"),okText:t("dialog.ok"),danger:true}))return;
+  const task = tasksById[id];
+  const taskLabel = task ? `#${task.id} ${task.title}` : `#${id}`;
+  if(!await confirmDialog(t("task.stopConfirm",{task:taskLabel}),{title:t("task.stopTitle"),okText:t("common.stop"),danger:true}))return;
   await api(`/api/tasks/${id}/archive`,{method:"POST"});
   disposePty(id);                                    // session is killed → tear the pane down
   if (id === state.selectedTaskId) state.selectedTaskId = null;

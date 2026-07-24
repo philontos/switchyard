@@ -146,9 +146,10 @@ setInterval(async () => { await loadTasks(); syncReadWaiting(); }, 4000);
 setInterval(loadHosts, 5000);   // refresh machine liveness dots
 loadFleet();                     // initial cross-node fleet snapshot
 setInterval(loadFleet, 15000);  // refresh each node's live task count (slower — it ssh's out)
-// close modals on backdrop click / Esc
+// Close ordinary modals on backdrop click. The dispatch form is intentionally
+// excluded: an accidental click in the wide desktop scrim must not discard it;
+// its Cancel button / Esc key are the explicit cancellation paths.
 $("repo-modal").addEventListener("click", e => { if (e.target.id === "repo-modal") closeRepoModal(); });
-$("task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") cancelTaskModal(); });
 $("host-modal").addEventListener("click", e => { if (e.target.id === "host-modal") closeHostModal(); });
 $("onboarding-modal").addEventListener("click", e => { if (e.target.id === "onboarding-modal") closeOnboardingModal(); });
 $("discovery-modal").addEventListener("click", e => { if (e.target.id === "discovery-modal") closeDiscoveryModal(); });
