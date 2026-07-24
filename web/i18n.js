@@ -85,8 +85,8 @@
       "dialog.cancel": "取消",
       "dialog.ok": "确定",
       "common.delete": "删除",
-      "common.stop": "停止",
-      "task.stopConfirm": "停止该节点上的这个任务？",
+      "common.stop": "终止任务",
+      "task.stopConfirm": "确定要终止任务“{task}”吗？当前会话会立即结束并归档，worktree 将保留。",
 
       // repo modal
       "repo.modalTitle": "新建仓库",
@@ -160,14 +160,12 @@
       // task card
       "task.waiting": "等待你授权",
       "task.renameHint": "双击重命名",
-      "task.stopTitle": "停止会话并归档",
+      "task.stopTitle": "终止任务并归档",
       "task.worktreeKept": "worktree 未删",
       "task.resume": "恢复",
       "task.resumeTitle": "会话已结束，重启并接回上次对话",
       "task.removeWorktree": "删除 worktree",
       "task.deleteRecord": "删除记录",
-      "task.killConfirm": "kill 该任务的 tmux 会话？会话结束后自动归档（保留 worktree）。",
-      "task.killTitle": "kill 会话",
       "task.removeWtConfirm": "删除该任务的 worktree？释放磁盘，工作目录将移除（不可恢复）。",
 
       // archived task list
@@ -188,7 +186,7 @@
       "toast.taskFieldsRequired": "仓库 / 分支 / 标题必填",
       "toast.taskDispatched": "任务已派发：{session}",
       "toast.dispatchFailed": "派发失败：{error}",
-      "toast.killed": "已 kill 并归档",
+      "toast.killed": "任务已终止并归档",
       "toast.worktreeRemoved": "worktree 已删除",
       "toast.resumed": "已恢复会话",
       "toast.resumeFailed": "恢复失败：{error}",
@@ -390,8 +388,8 @@
       "dialog.cancel": "Cancel",
       "dialog.ok": "OK",
       "common.delete": "Delete",
-      "common.stop": "Stop",
-      "task.stopConfirm": "Stop this task on the node?",
+      "common.stop": "Stop task",
+      "task.stopConfirm": "Stop “{task}”? Its session will end immediately and the task will be archived; the worktree will be kept.",
 
       "repo.modalTitle": "New repository",
       "repo.urlLabel": "Git URL *",
@@ -460,14 +458,12 @@
 
       "task.waiting": "Waiting for your approval",
       "task.renameHint": "Double-click to rename",
-      "task.stopTitle": "Stop session & archive",
+      "task.stopTitle": "Stop task & archive",
       "task.worktreeKept": "worktree kept",
       "task.resume": "Resume",
       "task.resumeTitle": "Session ended — relaunch and reattach the prior conversation",
       "task.removeWorktree": "Remove worktree",
       "task.deleteRecord": "Delete record",
-      "task.killConfirm": "Kill this task's tmux session? It is archived automatically once the session ends (the worktree is kept).",
-      "task.killTitle": "Kill session",
       "task.removeWtConfirm": "Remove this task's worktree? Frees disk; the working directory is deleted (not recoverable).",
 
       "empty.archTitle": "No archived tasks yet",
@@ -485,7 +481,7 @@
       "toast.taskFieldsRequired": "Repo / branch / title are required",
       "toast.taskDispatched": "Task dispatched: {session}",
       "toast.dispatchFailed": "Dispatch failed: {error}",
-      "toast.killed": "Killed and archived",
+      "toast.killed": "Task stopped and archived",
       "toast.worktreeRemoved": "worktree removed",
       "toast.resumed": "Session resumed",
       "toast.resumeFailed": "Resume failed: {error}",

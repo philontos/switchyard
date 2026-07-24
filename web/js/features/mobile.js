@@ -133,7 +133,7 @@ export function sheetOpened() {
     navEntry = "sheet";
   } catch {}
 }
-// Cancel paths only (取消 button / backdrop / Esc): consume the sheet's entry; the
+// Cancel paths only (取消 button / Esc / platform back): consume the sheet's entry; the
 // popstate that back() fires re-closes the (already closed) sheet, a no-op. Dispatch
 // must NOT come here — enterTerminal morphs the entry instead of popping it.
 export function sheetCancelled() {

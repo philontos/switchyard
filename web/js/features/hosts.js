@@ -136,7 +136,9 @@ export function connectNode(hostId, taskId) {
 
 // Stop a remote node's task — the server drives the node's own tdsp to kill it.
 export async function stopNodeTask(hostId, taskId) {
-  if (!(await confirmDialog(t("task.stopConfirm") || "Stop this task?", { title: t("task.stopTitle"), okText: t("common.stop") || "Stop", danger: true }))) return;
+  const task = state.fleet[hostId]?.tasks?.find((candidate) => candidate.id === taskId);
+  const taskLabel = task ? `#${task.id} ${task.title}` : `#${taskId}`;
+  if (!(await confirmDialog(t("task.stopConfirm", { task: taskLabel }), { title: t("task.stopTitle"), okText: t("common.stop"), danger: true }))) return;
   try {
     await api(`/api/nodes/${hostId}/tasks/${taskId}/stop`, { method: "POST" });
     await loadFleet();

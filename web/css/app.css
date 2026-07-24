@@ -321,6 +321,30 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .cs-label.ph { color: var(--placeholder); }
 .cs-caret { color: var(--faint); font-size: 10px; transition: transform .15s; }
 .cs.open .cs-caret { transform: rotate(180deg); }
+/* Desktop dispatch branch picker: a substantial rounded chevron replaces the
+   tiny font glyph. Keep this scoped to t-base so compact provider/host selects
+   retain their existing density, and leave the touch treatment below intact. */
+@media (min-width: 761px) {
+  #task-modal #t-base .cs-caret {
+    flex: none; width: 24px; height: 24px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 0; line-height: 1; color: color-mix(in srgb, var(--muted) 88%, var(--accent));
+    background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+    border: 1px solid var(--border-hover); border-radius: 7px;
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 7%, transparent), 0 1px 2px var(--shadow);
+  }
+  #task-modal #t-base .cs-caret::before {
+    content: ""; width: 7px; height: 7px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+    border-radius: 1px;
+    transform: rotate(45deg) translate(-1px, -1px);
+  }
+  #task-modal #t-base .cs-trigger:hover .cs-caret,
+  #task-modal #t-base.open .cs-caret {
+    color: var(--accent-text);
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  }
+}
 .cs-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px;
   box-shadow: 0 10px 30px var(--shadow); max-height: 232px; overflow-y: auto; animation: csin .12s ease; }
