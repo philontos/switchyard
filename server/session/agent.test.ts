@@ -37,6 +37,14 @@ test("agentArgv claude resume restores referenced repository roots", () => {
     "claude", "--continue", "--add-dir", "/refs/api",
   ]);
 });
+test("agentArgv claude appends the workspace contract on launch and resume", () => {
+  assert.deepEqual(agentArgv("claude", { prompt: "go", workspaceInstructions: "read refs.json" }), [
+    "claude", "--append-system-prompt", "read refs.json", "go",
+  ]);
+  assert.deepEqual(agentArgv("claude", { resume: true, workspaceInstructions: "read refs.json" }), [
+    "claude", "--continue", "--append-system-prompt", "read refs.json",
+  ]);
+});
 
 // ---- agentArgv: codex (full-access: -a on-request -s danger-full-access, so tasks can push/gh/network) ----
 test("agentArgv codex with a prompt is full-access + the prompt", () => {
@@ -64,6 +72,12 @@ test("agentArgv codex resume keeps the same sandbox policy and model while ignor
     "codex", "-a", "on-request", "-s", "danger-full-access", "-m", "gpt-5.4", "resume", "--last",
   ]);
 });
+test("agentArgv codex persists the workspace contract through developer_instructions", () => {
+  assert.deepEqual(agentArgv("codex", { prompt: "go", workspaceInstructions: "read refs.json" }), [
+    "codex", "-a", "on-request", "-s", "danger-full-access",
+    "-c", "developer_instructions=\"read refs.json\"", "go",
+  ]);
+});
 
 // ---- agentArgv: kimi (interactive TUI; start prompt is submitted by tmux after launch) ----
 test("agentArgv kimi starts the interactive TUI in auto mode without passing prompt as -p", () => {
@@ -82,5 +96,13 @@ test("agentArgv kimi adds extra dirs via --add-dir", () => {
 test("agentArgv kimi resume uses --continue, keeps the model and ignores the old prompt", () => {
   assert.deepEqual(agentArgv("kimi", { prompt: "opening", model: "x", resume: true }), [
     "kimi", "--auto", "-m", "x", "--continue",
+  ]);
+});
+test("agentArgv kimi binds the generated agent file once and restores it implicitly on resume", () => {
+  assert.deepEqual(agentArgv("kimi", { kimiAgentFile: "/wt/.tdsp/kimi-agent.md" }), [
+    "kimi", "--auto", "--agent-file", "/wt/.tdsp/kimi-agent.md",
+  ]);
+  assert.deepEqual(agentArgv("kimi", { resume: true, kimiAgentFile: "/wt/.tdsp/kimi-agent.md" }), [
+    "kimi", "--auto", "--continue",
   ]);
 });

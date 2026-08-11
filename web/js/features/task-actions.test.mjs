@@ -70,17 +70,18 @@ test("dispatch supports task-scoped repository references on local and capable r
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.tm-ref-alias\s*\{[^}]*grid-column:\s*1 \/ 3;/s);
 });
 
-test("the terminal bar can attach a repository Ref to the current local or remote agent session", () => {
+test("the terminal bar can attach a task-local repository Ref without mutating the agent session", () => {
   const bar = html.match(/<div class="termbar">([\s\S]*?)<\/div>\s*<!-- mobile-only/)?.[1] || "";
   assert.match(bar, /id="term-ref"/);
   assert.match(html, /id="runtime-ref-modal"[\s\S]*?id="rr-repo"[\s\S]*?id="rr-branch"[\s\S]*?id="rr-alias"/);
   assert.match(terminal, /applyReferenceTarget\(p\.referenceTarget\)/);
   assert.match(terminal, /openReference\(target\)/);
   assert.match(tasks, /references: t\.references \|\| \[\]/);
-  assert.match(hosts, /task-runtime-references-v1/);
+  assert.match(hosts, /task-runtime-reference-manifest-v1/);
   assert.match(hosts, /references: tk\.references \|\| \[\]/);
   assert.match(runtimeReferences, /\/api\/tasks\/\$\{activeTarget\.id\}\/references/);
   assert.match(runtimeReferences, /\/api\/nodes\/\$\{activeTarget\.nodeId\}\/tasks\/\$\{activeTarget\.id\}\/references/);
+  assert.doesNotMatch(runtimeReferences, /attachedResumed|attachedInPlace|attachedDeferred/);
   assert.match(main, /setReferenceOpener\(openRuntimeReference\)/);
   assert.match(css, /\.term-code, \.term-ref\s*\{/);
 });

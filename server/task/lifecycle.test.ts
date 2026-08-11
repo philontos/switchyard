@@ -98,21 +98,27 @@ test("cleanupTask removes the worktree and persists the cleaned task", async () 
   assert.deepEqual(manifested, [7]);
 });
 
-test("cleanupTask removes reference worktrees before the primary worktree", async () => {
+test("cleanupTask removes both legacy and task-local Refs before the primary worktree", async () => {
   const db = seed();
   db.prepare(
     "INSERT INTO repos (id,host_id,name,git_url,mirror_path,status) VALUES (2,1,'api','git@example/api','/mirror/api.git','ready')",
   ).run();
   db.prepare(
     "INSERT INTO task_references (task_id,repo_id,alias,requested_ref,resolved_commit,worktree_path) " +
-      "VALUES (7,2,'api','develop',?, '/wt/refs/7/api')",
+      "VALUES (7,2,'api','develop',?, '/data/worktrees/refs/7/api')",
   ).run("b".repeat(40));
+  db.prepare(
+    "INSERT INTO task_references (task_id,repo_id,alias,requested_ref,resolved_commit,worktree_path) " +
+      "VALUES (7,2,'ui','main',?, '/wt/7/.tdsp/refs/ui')",
+  ).run("c".repeat(40));
   const removed: Array<Array<string | undefined>> = [];
+  const roots: Array<[number, string]> = [];
   const result = await cleanupTask(
     {
       db,
       killSession: async () => {},
       removeWorktree: async (...args) => { removed.push(args); },
+      removeReferenceRoots: async (id, worktree) => { roots.push([id, worktree]); },
       writeManifest: () => {},
     },
     7,
@@ -120,9 +126,11 @@ test("cleanupTask removes reference worktrees before the primary worktree", asyn
 
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(removed, [
-    ["/mirror/api.git", "/wt/refs/7/api"],
+    ["/mirror/api.git", "/data/worktrees/refs/7/api"],
+    ["/mirror/api.git", "/wt/7/.tdsp/refs/ui"],
     ["/mirror/repo.git", "/wt/7", "feat/7"],
   ]);
+  assert.deepEqual(roots, [[7, "/wt/7"]]);
   assert.equal((db.prepare("SELECT count(*) AS c FROM task_references WHERE task_id=7").get() as { c: number }).c, 0);
 });
 

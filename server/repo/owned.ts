@@ -28,7 +28,7 @@ export interface OwnedRepoEnv {
   removeTaskManifest(id: number): void;
   killSession(session: string): Promise<void>;
   syncTaskManifest?(id: number): void;
-  removeReferenceRoot?(taskId: number): Promise<void>;
+  removeReferenceRoots?(taskId: number, taskWorktree: string): Promise<void>;
 }
 
 function messageOf(error: unknown): string {
@@ -140,7 +140,7 @@ export async function deleteOwnedRepo(env: OwnedRepoEnv, id: number, force = fal
         env.db.prepare("DELETE FROM task_references WHERE task_id=? AND alias=?").run(task.id, reference.alias);
       }
       const remaining = env.db.prepare("SELECT 1 FROM task_references WHERE task_id=? LIMIT 1").get(task.id);
-      if (!remaining) await env.removeReferenceRoot?.(task.id);
+      if (!remaining) await env.removeReferenceRoots?.(task.id, task.worktree_path);
       env.syncTaskManifest?.(task.id);
     }
     for (const task of tasks) {
@@ -151,7 +151,7 @@ export async function deleteOwnedRepo(env: OwnedRepoEnv, id: number, force = fal
           await removeWorktree(env.runner, referenceRepo.mirror_path, reference.worktree_path);
         }
       }
-      await env.removeReferenceRoot?.(task.id);
+      await env.removeReferenceRoots?.(task.id, task.worktree_path);
       removeTaskReferenceRows(env.db, task.id);
       if (task.worktree_path && repo.mirror_path && (await env.runner.exists(task.worktree_path).catch(() => false))) {
         await removeWorktree(env.runner, repo.mirror_path, task.worktree_path, task.work_branch);

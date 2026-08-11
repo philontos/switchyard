@@ -13,14 +13,18 @@ const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 // commands. This lets us assert which agents receive .claude settings.
 function recordingRunner() {
   const putDirs: { src: string; dest: string }[] = [];
+  const calls: { file: string; args: string[] }[] = [];
   const runner = {
     kind: "local", dataDir: "/tmp",
-    exec: async (_file: string, args: string[]) => args[0] === "rev-parse" ? "a".repeat(40) + "\n" : "",
+    exec: async (file: string, args: string[]) => {
+      calls.push({ file, args });
+      return args[0] === "rev-parse" ? "a".repeat(40) + "\n" : "";
+    },
     mkdirp: async () => {}, exists: async () => false, readText: async () => null,
     rmrf: async () => {}, putFile: async () => {},
     putDir: async (src: string, dest: string) => { putDirs.push({ src, dest }); },
   } as unknown as Runner;
-  return { runner, putDirs };
+  return { runner, putDirs, calls };
 }
 
 function setupWith(agent: AgentKind, runner: Runner) {
@@ -41,10 +45,11 @@ test("setupWorktree (claude) injects the .claude hooks overlay", async () => {
 
 // Codex and Kimi have no equivalent hook mechanism, so Switchyard cannot see
 // their approval pauses.
-test("setupWorktree (codex) skips Claude hooks", async () => {
-  const { runner, putDirs } = recordingRunner();
+test("setupWorktree (codex) skips Claude hooks but excludes task-local metadata", async () => {
+  const { runner, putDirs, calls } = recordingRunner();
   await setupWith("codex", runner);
   assert.equal(putDirs.length, 0);
+  assert.ok(calls.some((call) => call.file === "sh" && call.args.join(" ").includes(".tdsp/")));
 });
 
 test("setupWorktree (kimi) skips Claude hooks", async () => {

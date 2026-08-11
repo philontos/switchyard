@@ -15,7 +15,7 @@ import { ServeLifecycle, serveOptionsToArgs } from "./core/serve-lifecycle.js";
 import { applyInstall, applyProfileInstall } from "./fleet/bootstrap.js";
 import { uninstallProfile } from "./fleet/profile-uninstall.js";
 import { localRunner } from "./fleet/runner.js";
-import { startSession, startShellSession, hasSession, killSession, listSessions, loadSessionDirectory } from "./session/tmux.js";
+import { startSession, startShellSession, hasSession, killSession, listSessions } from "./session/tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./task/createtask.js";
 import { addTaskReference } from "./task/addreference.js";
 import { cleanupTask, deleteTaskRecord, resumeTask } from "./task/lifecycle.js";
@@ -30,7 +30,12 @@ import { branchesForOwnedRepo, deleteOwnedRepo, fetchOwnedRepo, registerOwnedRep
 import { syncReposManifest } from "./repo/manifest.js";
 import { pasteImageIntoOwnedTask } from "./task/paste-service.js";
 import { renameTask } from "./task/tasks.js";
-import { referenceRootPath, referenceWorktreePaths } from "./task/references.js";
+import {
+  externalReferenceWorktreePaths,
+  kimiWorkspaceAgentPath,
+  referenceRootPaths,
+  TASK_WORKSPACE_INSTRUCTIONS,
+} from "./task/references.js";
 import {
   configureTailscalePeerRelay,
   diagnoseTailscale,
@@ -98,7 +103,9 @@ const ownedRepoEnv: OwnedRepoEnv = {
   removeTaskManifest: (id) => removeTaskManifest(DATA_DIR, id),
   killSession: (session) => killSession(localRunner, session),
   syncTaskManifest: (id) => writeTaskManifestFromDb(DATA_DIR, db, id),
-  removeReferenceRoot: (id) => localRunner.rmrf(referenceRootPath(DATA_DIR, id)),
+  removeReferenceRoots: async (id, taskWorktree) => {
+    for (const root of referenceRootPaths(DATA_DIR, id, taskWorktree)) await localRunner.rmrf(root);
+  },
 };
 
 const serveLifecycle = new ServeLifecycle({
@@ -230,22 +237,10 @@ process.exitCode = await runCli(process.argv.slice(2), {
     });
     return addTaskReference({
       db,
-      dataDir: DATA_DIR,
       exists: (target) => localRunner.exists(target),
       setupReference: repoEnv.setupReference,
       removeReference: repoEnv.removeReference,
       writeManifest: (id) => writeTaskManifestFromDb(DATA_DIR, db, id),
-      loadReference: async (task, newReferencePath, allReferencePaths) => {
-        const provider = task.provider_id
-          ? (db.prepare("SELECT * FROM providers WHERE id=?").get(task.provider_id) as Provider | undefined)
-          : undefined;
-        return loadSessionDirectory(localRunner, task.session, task.worktree_path, newReferencePath, {
-          env: providerEnv(provider),
-          agent: asAgentKind(task.agent),
-          model: task.agent_model,
-          addDirs: allReferencePaths,
-        });
-      },
     }, taskId, input);
   },
   repoCreate: (input) => registerOwnedRepo(ownedRepoEnv, input),
@@ -310,7 +305,9 @@ process.exitCode = await runCli(process.argv.slice(2), {
             env: providerEnv(provider),
             agent: asAgentKind(task.agent),
             model: task.agent_model,
-            addDirs: referenceWorktreePaths(db, task.id),
+            addDirs: externalReferenceWorktreePaths(db, task),
+            workspaceInstructions: TASK_WORKSPACE_INSTRUCTIONS,
+            kimiAgentFile: kimiWorkspaceAgentPath(task.worktree_path),
           });
         },
         writeManifest: (tid) => writeTaskManifestFromDb(DATA_DIR, db, tid),
@@ -323,7 +320,9 @@ process.exitCode = await runCli(process.argv.slice(2), {
         db,
         killSession: (session) => killSession(localRunner, session),
         removeWorktree: (mirror, worktree, workBranch) => removeWorktree(localRunner, mirror, worktree, workBranch),
-        removeReferenceRoot: (tid) => localRunner.rmrf(referenceRootPath(DATA_DIR, tid)),
+        removeReferenceRoots: async (tid, taskWorktree) => {
+          for (const root of referenceRootPaths(DATA_DIR, tid, taskWorktree)) await localRunner.rmrf(root);
+        },
         writeManifest: (tid) => writeTaskManifestFromDb(DATA_DIR, db, tid),
       },
       id,

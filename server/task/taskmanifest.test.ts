@@ -70,11 +70,18 @@ test("writeTaskManifestFromDb records the primary workspace and pinned reference
     "INSERT INTO repos (id,host_id,name,git_url,mirror_path,status) VALUES (2,1,'api','git@example/api','/mirror/api.git','ready')",
   ).run();
   const task = insertTask(db, "cross-repo");
-  db.prepare(
-    "INSERT INTO task_references (task_id,repo_id,alias,requested_ref,resolved_commit,worktree_path) VALUES (?,?,?,?,?,?)",
-  ).run(task.id, 2, "api", "develop", "b".repeat(40), `/wt/refs/${task.id}/api`);
   const dir = tmpDir();
   try {
+    const taskWorktree = path.join(dir, "worktrees", `1-${task.id}`);
+    fs.mkdirSync(taskWorktree, { recursive: true });
+    db.prepare("UPDATE tasks SET worktree_path=? WHERE id=?").run(taskWorktree, task.id);
+    db.prepare(
+      "INSERT INTO task_references (task_id,repo_id,alias,requested_ref,resolved_commit,worktree_path) VALUES (?,?,?,?,?,?)",
+    ).run(task.id, 2, "api", "develop", "b".repeat(40), path.join(taskWorktree, ".tdsp", "refs", "api"));
+    db.prepare(
+      "INSERT INTO task_references (task_id,repo_id,alias,requested_ref,resolved_commit,worktree_path) VALUES (?,?,?,?,?,?)",
+    ).run(task.id, 2, "old-api", "release", "c".repeat(40), `/data/worktrees/refs/${task.id}/old-api`);
+
     writeTaskManifestFromDb(dir, db, task.id);
     const manifest = JSON.parse(fs.readFileSync(path.join(dir, "tasks", String(task.id), "task.json"), "utf8"));
     assert.equal(manifest.references[0].repo_name, "api");
@@ -85,6 +92,16 @@ test("writeTaskManifestFromDb records the primary workspace and pinned reference
     assert.equal(workspace.primary.mode, "editable");
     assert.equal(workspace.references[0].alias, "api");
     assert.equal(workspace.references[0].mode, "reference");
+
+    const refs = JSON.parse(fs.readFileSync(path.join(taskWorktree, ".tdsp", "refs.json"), "utf8"));
+    assert.equal(refs.primary.alias, "primary");
+    assert.equal(refs.references[0].alias, "api");
+    assert.equal(refs.references[0].path, ".tdsp/refs/api");
+    assert.equal(refs.references[0].layout, "task-local");
+    assert.equal(refs.references[1].alias, "old-api");
+    assert.equal(refs.references[1].path, `/data/worktrees/refs/${task.id}/old-api`);
+    assert.equal(refs.references[1].layout, "legacy-external");
+    assert.match(fs.readFileSync(path.join(taskWorktree, ".tdsp", "kimi-agent.md"), "utf8"), /\$\{base_prompt\}/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

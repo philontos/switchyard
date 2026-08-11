@@ -9,10 +9,18 @@
 // in-memory sqlite + a temp dir without opening the real database.
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import type Database from "better-sqlite3";
 import type { Task, TaskReference } from "../core/db.js";
 import { getOwnedRepo, localHostId } from "../core/ownership.js";
-import { listTaskReferences } from "./references.js";
+import {
+  kimiWorkspaceAgentContent,
+  kimiWorkspaceAgentPath,
+  listTaskReferences,
+  pathIsInside,
+  TASK_REFERENCE_MANIFEST,
+} from "./references.js";
 
 type DB = Database.Database;
 
@@ -31,6 +39,28 @@ export interface TaskManifest {
   references?: TaskReferenceManifest[];
 }
 
+export interface TaskReferenceIndex {
+  schema_version: 1;
+  task_id: number;
+  primary: {
+    alias: "primary";
+    repo_id: number;
+    repo_name: string | null;
+    path: ".";
+    mode: "editable";
+  };
+  references: Array<{
+    alias: string;
+    repo_id: number;
+    repo_name: string | null;
+    requested_ref: string;
+    resolved_commit: string;
+    path: string;
+    layout: "task-local" | "legacy-external";
+    mode: "reference";
+  }>;
+}
+
 export function taskManifest(task: Task, references: TaskReferenceManifest[] = []): TaskManifest {
   return { schema_version: TASK_MANIFEST_VERSION, task, references };
 }
@@ -38,6 +68,99 @@ export function taskManifest(task: Task, references: TaskReferenceManifest[] = [
 /** <dataDir>/tasks/<id>/task.json — the task's own folder on its machine. */
 export function taskManifestPath(dataDir: string, id: number): string {
   return path.join(dataDir, "tasks", String(id), "task.json");
+}
+
+export function taskReferenceManifestPath(taskWorktree: string): string {
+  return path.join(taskWorktree, TASK_REFERENCE_MANIFEST);
+}
+
+function slashPath(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
+export function taskReferenceIndex(
+  task: Task,
+  references: TaskReferenceManifest[] = [],
+  primaryName?: string,
+): TaskReferenceIndex {
+  return {
+    schema_version: 1,
+    task_id: task.id,
+    primary: {
+      alias: "primary",
+      repo_id: task.repo_id,
+      repo_name: primaryName ?? null,
+      path: ".",
+      mode: "editable",
+    },
+    references: references.map((reference) => {
+      const local = pathIsInside(task.worktree_path, reference.worktree_path);
+      return {
+        alias: reference.alias,
+        repo_id: reference.repo_id,
+        repo_name: reference.repo_name ?? null,
+        requested_ref: reference.requested_ref,
+        resolved_commit: reference.resolved_commit,
+        path: local
+          ? slashPath(path.relative(task.worktree_path, reference.worktree_path)) || "."
+          : reference.worktree_path,
+        layout: local ? "task-local" : "legacy-external",
+        mode: "reference",
+      };
+    }),
+  };
+}
+
+function writeAtomic(target: string, contents: string): void {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const temporary = path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`,
+  );
+  try {
+    fs.writeFileSync(temporary, contents);
+    fs.renameSync(temporary, target);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+}
+
+function ensureTaskMetadataExcluded(taskWorktree: string): void {
+  try {
+    const reported = execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], {
+      cwd: taskWorktree,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!reported) return;
+    const excludePath = path.resolve(taskWorktree, reported);
+    const current = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, "utf8") : "";
+    if (current.split(/\r?\n/).includes(".tdsp/")) return;
+    fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+    fs.appendFileSync(excludePath, `${current && !current.endsWith("\n") ? "\n" : ""}.tdsp/\n`);
+  } catch {
+    // A retained directory can outlive its mirror metadata. The manifest is
+    // still useful; inability to update a best-effort Git exclude is not fatal.
+  }
+}
+
+function writeTaskWorkspaceFiles(
+  task: Task,
+  references: TaskReferenceManifest[],
+  primaryName?: string,
+): void {
+  if (task.kind === "local" || !task.worktree_path) return;
+  try {
+    if (!fs.statSync(task.worktree_path).isDirectory()) return;
+  } catch {
+    return;
+  }
+  ensureTaskMetadataExcluded(task.worktree_path);
+  writeAtomic(
+    taskReferenceManifestPath(task.worktree_path),
+    JSON.stringify(taskReferenceIndex(task, references, primaryName), null, 2) + "\n",
+  );
+  writeAtomic(kimiWorkspaceAgentPath(task.worktree_path), kimiWorkspaceAgentContent());
 }
 
 /** Write (or overwrite) a task's manifest — the single durable record of it. */
@@ -74,6 +197,7 @@ export function writeTaskManifest(
       mode: "reference",
     })),
   }, null, 2));
+  writeTaskWorkspaceFiles(task, references, primaryName);
 }
 
 /** Re-project the DB's task row + normalized reference rows into the durable

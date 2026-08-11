@@ -10,8 +10,10 @@ import type { AgentKind } from "../session/agent.js";
 import type Database from "better-sqlite3";
 import { getOwnedTask } from "../core/ownership.js";
 import {
-  referencePrompt,
+  kimiWorkspaceAgentPath,
+  referenceRootPath,
   resolveReferenceInputs,
+  TASK_WORKSPACE_INSTRUCTIONS,
   type TaskReferenceInput,
 } from "./references.js";
 
@@ -131,7 +133,8 @@ export interface RepoTaskEnv {
     baseBranch: string;
     agent: AgentKind;
   }): Promise<string>; // exact HEAD immediately after worktree creation
-  // Create a detached, commit-pinned checkout for one referenced repository.
+  // Create an atomically published, commit-pinned plain-code snapshot for one
+  // referenced repository.
   setupReference(args: {
     mirror: string;
     worktree: string;
@@ -145,12 +148,19 @@ export interface RepoTaskEnv {
     session: string,
     worktree: string,
     opening: string | null,
-    opts?: { env?: Record<string, string>; agent?: AgentKind; model?: string | null; addDirs?: string[] },
+    opts?: {
+      env?: Record<string, string>;
+      agent?: AgentKind;
+      model?: string | null;
+      addDirs?: string[];
+      workspaceInstructions?: string;
+      kimiAgentFile?: string;
+    },
   ): Promise<void>;
   // Tear down a partially-built worktree after a failed dispatch.
   removeWorktree(mirror: string, worktree: string, workBranch: string): Promise<void>;
   removeReference(mirror: string, worktree: string): Promise<void>;
-  removeReferenceRoot(taskId: number): Promise<void>;
+  removeReferenceRoots(taskId: number, taskWorktree: string): Promise<void>;
 }
 
 export interface CreateRepoOpts {
@@ -200,7 +210,7 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
   const s = slug(opts.title);
   const workBranch = `feat/${id}-${s}`;
   const worktree = path.resolve(path.join(path.dirname(repo.mirror_path), "..", "worktrees", `${repo.id}-${id}`));
-  const referenceRoot = path.resolve(path.join(path.dirname(repo.mirror_path), "..", "worktrees", "refs", String(id)));
+  const referenceRoot = referenceRootPath(worktree);
   const session = `tdsp-${env.ns}-${id}-${slug(repo.name)}-${s}`;
   const materialized: Array<{
     task_id: number;
@@ -256,21 +266,21 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
         }
       })();
     }
-    // Preserve the user's prompt verbatim in the task row. The launch-only
-    // opening prepends a compact alias/path contract when references exist.
-    const opening = referencePrompt(
-      { name: repo.name, path: worktree },
-      materialized,
-      opts.prompt,
-    );
+    // Publish the initial dynamic manifest before the agent can receive its
+    // first prompt. The row remains `creating` until tmux is confirmed alive.
+    env.db.prepare("UPDATE tasks SET base_commit=?, work_branch=?, worktree_path=?, session=? WHERE id=?")
+      .run(baseCommit, workBranch, worktree, session, id);
+    await env.writeManifest(id);
+
+    const opening = opts.prompt?.trim() ? opts.prompt : null;
     await env.startSession(session, worktree, opening, {
       env: opts.env,
       agent,
       model: opts.model,
-      addDirs: materialized.map((reference) => reference.worktree_path),
+      workspaceInstructions: TASK_WORKSPACE_INSTRUCTIONS,
+      kimiAgentFile: kimiWorkspaceAgentPath(worktree),
     });
-    env.db.prepare("UPDATE tasks SET base_commit=?, work_branch=?, worktree_path=?, session=?, status='running' WHERE id=?")
-      .run(baseCommit, workBranch, worktree, session, id);
+    env.db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(id);
     await env.writeManifest(id);
     return { ok: true, id, session, workBranch };
   } catch (e: any) {
@@ -279,10 +289,12 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
     for (const reference of [...referenceCleanup].reverse()) {
       await env.removeReference(reference.mirror, reference.worktree).catch(() => {});
     }
-    if (referenceCleanup.length) await env.removeReferenceRoot(id).catch(() => {});
+    await env.removeReferenceRoots(id, worktree).catch(() => {});
     env.db.prepare("DELETE FROM task_references WHERE task_id=?").run(id);
     await env.removeWorktree(repo.mirror_path, worktree, workBranch).catch(() => {});
-    env.db.prepare("UPDATE tasks SET status='error', error=? WHERE id=?").run(String(e?.message || e), id);
+    env.db.prepare(
+      "UPDATE tasks SET base_commit=NULL, work_branch='', worktree_path='', session='', status='error', error=? WHERE id=?",
+    ).run(String(e?.message || e), id);
     await env.writeManifest(id);
     return { ok: false, error: "dispatchFailed", id, message: String(e?.message || e) };
   }

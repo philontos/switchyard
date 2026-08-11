@@ -3,7 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fetchBranch, fetchMirror, addDetachedWorktreeFromBranch, addWorktreeFromBranch } from "./git.ts";
+import {
+  addDetachedWorktreeFromBranch,
+  addReferenceSnapshotFromBranch,
+  addWorktreeFromBranch,
+  fetchBranch,
+  fetchMirror,
+  removeWorktree,
+} from "./git.ts";
 import { localRunner } from "../fleet/runner.ts";
 import type { Runner } from "../fleet/runner.ts";
 
@@ -156,6 +163,45 @@ test("reference worktrees are detached and remain pinned to the resolved commit"
       expected,
       "the task keeps the exact snapshot it was dispatched with",
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("task-local reference snapshots are atomically exported without Git metadata", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sw-git-snapshot-"));
+  try {
+    const { seed, mirror } = await scaffold(root);
+    fs.writeFileSync(path.join(seed, ".gitattributes"), "b.txt export-ignore\n");
+    await git(seed, "add", ".gitattributes");
+    await git(seed, "commit", "-m", "archive attributes");
+    await git(seed, "push", "origin", "feat/base");
+    const expected = (await git(seed, "rev-parse", "feat/base")).trim();
+    const taskWorktree = path.join(root, "worktrees", "1-7");
+    const snapshot = path.join(taskWorktree, ".tdsp", "refs", "api");
+
+    const resolved = await addReferenceSnapshotFromBranch(localRunner, mirror, snapshot, "feat/base");
+    assert.equal(resolved, expected);
+    assert.equal(
+      fs.readFileSync(path.join(snapshot, "b.txt"), "utf8"),
+      "b",
+      "a reference includes tracked files even when Git archives would export-ignore them",
+    );
+    assert.equal(fs.existsSync(path.join(snapshot, ".git")), false, "a Ref is a plain code snapshot");
+    assert.deepEqual(
+      fs.readdirSync(path.dirname(snapshot)).filter((name) => name.startsWith(".tmp-")),
+      [],
+      "temporary indexes and directories are removed after publication",
+    );
+
+    fs.writeFileSync(path.join(seed, "c.txt"), "new remote tip");
+    await git(seed, "add", ".");
+    await git(seed, "commit", "-m", "advance snapshot source");
+    await git(seed, "push", "origin", "feat/base");
+    assert.equal(fs.existsSync(path.join(snapshot, "c.txt")), false, "the published Ref stays commit-pinned");
+
+    await removeWorktree(localRunner, mirror, snapshot);
+    assert.equal(fs.existsSync(snapshot), false, "normal task cleanup also removes plain snapshots");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

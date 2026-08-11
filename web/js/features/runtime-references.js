@@ -1,6 +1,6 @@
 // Runtime repository references: the terminal-bar action and its small modal.
 // The browser sends only task/repo ids, branch and alias. The owning node decides
-// where to materialize the worktree and how to load it for the task's agent.
+// where to materialize the task-local snapshot. The live agent is never touched.
 import { $, api } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 import { state } from "../core/state.js";
@@ -76,9 +76,7 @@ function renderDynamicCopy() {
     agent,
     count: (target.references || []).length,
   });
-  $("rr-agent-hint").textContent = target.agent === "claude"
-    ? I18N.t("runtimeRef.claudeHint")
-    : I18N.t("runtimeRef.resumeHint", { agent });
+  $("rr-agent-hint").textContent = I18N.t("runtimeRef.manifestHint");
   $("rr-alias").placeholder = I18N.t("runtimeRef.aliasPh");
   if (!submitting) $("rr-submit").textContent = I18N.t("runtimeRef.submit");
 }
@@ -192,11 +190,7 @@ export async function submitRuntimeReference() {
     if (!activeTarget.references.some((reference) => reference.alias === result.reference?.alias)) {
       activeTarget.references.push(result.reference);
     }
-    const key = result.existing ? "runtimeRef.already"
-      : result.load === "in-place" ? "runtimeRef.attachedInPlace"
-        : result.load === "resumed" ? "runtimeRef.attachedResumed"
-          : result.load === "deferred" ? "runtimeRef.attachedDeferred"
-            : "runtimeRef.attached";
+    const key = result.existing ? "runtimeRef.already" : "runtimeRef.attached";
     toast(I18N.t(key, { alias: result.reference?.alias || alias, agent: agentName(activeTarget.agent) }), "success", 5500);
     submitting = false;
     closeRuntimeReference();

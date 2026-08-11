@@ -2,7 +2,7 @@
 // (the default, unchanged), `codex`, or `kimi`. Every Claude-specific launch detail is
 // funnelled through here, so the orchestration code stays agent-agnostic:
 //   - agentArgv: how to launch / resume the agent (the command + its args)
-// Claude's launch is byte-for-byte what it always was.
+// Provider-specific persistent workspace instructions are also centralized here.
 export type AgentKind = "claude" | "codex" | "kimi";
 
 /** Normalize an untrusted value to an AgentKind. Only known exact strings opt in;
@@ -22,6 +22,11 @@ export interface LaunchOpts {
   /** Additional workspace roots translated to each agent CLI's `--add-dir`.
    *  For codex/kimi this also carries linked-worktree Git metadata directories. */
   addDirs?: string[];
+  /** Stable Switchyard workspace contract installed on every launch/resume. */
+  workspaceInstructions?: string | null;
+  /** Kimi binds a custom main-agent file when the session is first created;
+   * resumes restore that bound agent and reject this option. */
+  kimiAgentFile?: string | null;
 }
 
 const hasText = (s?: string | null): s is string => !!s && !!s.trim();
@@ -48,7 +53,14 @@ const claudeAddDirArgs = (dirs?: string[]) => {
  */
 export function agentArgv(agent: AgentKind, opts: LaunchOpts = {}): string[] {
   if (agent === "codex") {
-    const base = ["codex", "-a", "on-request", "-s", "danger-full-access", ...addDirArgs(opts.addDirs)];
+    const instructions = hasText(opts.workspaceInstructions)
+      ? ["-c", `developer_instructions=${JSON.stringify(opts.workspaceInstructions)}`]
+      : [];
+    const base = [
+      "codex", "-a", "on-request", "-s", "danger-full-access",
+      ...instructions,
+      ...addDirArgs(opts.addDirs),
+    ];
     if (hasText(opts.model)) base.push("-m", opts.model.trim());
     if (opts.resume) return [...base, "resume", "--last"];
     const argv = [...base];
@@ -56,7 +68,10 @@ export function agentArgv(agent: AgentKind, opts: LaunchOpts = {}): string[] {
     return argv;
   }
   if (agent === "kimi") {
-    const base = ["kimi", "--auto", ...addDirArgs(opts.addDirs)];
+    const boundAgent = !opts.resume && hasText(opts.kimiAgentFile)
+      ? ["--agent-file", opts.kimiAgentFile.trim()]
+      : [];
+    const base = ["kimi", "--auto", ...boundAgent, ...addDirArgs(opts.addDirs)];
     if (hasText(opts.model)) base.push("-m", opts.model.trim());
     if (opts.resume) return [...base, "--continue"];
     const argv = [...base];
@@ -65,8 +80,13 @@ export function agentArgv(agent: AgentKind, opts: LaunchOpts = {}): string[] {
   // Claude's --add-dir is variadic (one flag followed by every directory),
   // unlike Codex/Kimi's repeatable single-dir option. `--` terminates that
   // variadic value before the positional opening prompt.
+  const instructions = hasText(opts.workspaceInstructions)
+    ? ["--append-system-prompt", opts.workspaceInstructions]
+    : [];
   const dirs = claudeAddDirArgs(opts.addDirs);
-  if (opts.resume) return ["claude", "--continue", ...dirs];
-  if (!hasText(opts.prompt)) return ["claude", ...dirs];
-  return dirs.length ? ["claude", ...dirs, "--", opts.prompt] : ["claude", opts.prompt];
+  if (opts.resume) return ["claude", "--continue", ...instructions, ...dirs];
+  if (!hasText(opts.prompt)) return ["claude", ...instructions, ...dirs];
+  return dirs.length
+    ? ["claude", ...instructions, ...dirs, "--", opts.prompt]
+    : ["claude", ...instructions, opts.prompt];
 }
