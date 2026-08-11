@@ -101,9 +101,9 @@ test("repo deletion accounts for live tasks that reference the repository", asyn
       "VALUES (7,11,'api','develop',?, '/wt/refs/7/api')",
   ).run("a".repeat(40));
   const manifested: number[] = [];
-  const roots: number[] = [];
+  const roots: Array<[number, string]> = [];
   s.env.syncTaskManifest = (id) => { manifested.push(id); };
-  s.env.removeReferenceRoot = async (id) => { roots.push(id); };
+  s.env.removeReferenceRoots = async (id, worktree) => { roots.push([id, worktree]); };
 
   assert.deepEqual(await deleteOwnedRepo(s.env, 11), {
     ok: false,
@@ -116,6 +116,6 @@ test("repo deletion accounts for live tasks that reference the repository", asyn
   assert.ok(s.db.prepare("SELECT id FROM tasks WHERE id=7").get(), "the primary task survives a forced reference removal");
   assert.equal(s.db.prepare("SELECT 1 FROM task_references WHERE task_id=7").get(), undefined);
   assert.deepEqual(manifested, [7]);
-  assert.deepEqual(roots, [7]);
+  assert.deepEqual(roots, [[7, "/wt/7"]]);
   assert.ok(s.calls.some((call) => call.cwd === "/mirror/api.git" && call.args.slice(0, 3).join(" ") === "worktree remove --force"));
 });

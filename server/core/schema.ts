@@ -39,9 +39,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
--- Additional repository snapshots attached to one task. Each row owns a
--- detached worktree under worktrees/refs/<task-id>/<alias>; the referenced
--- repository's bare mirror remains the shared Git object store.
+-- Additional repository snapshots attached to one task. New rows live below
+-- <primary-worktree>/.tdsp/refs/<alias>; older rows may retain the legacy
+-- worktrees/refs/<task-id>/<alias> linked-worktree path until task cleanup.
 CREATE TABLE IF NOT EXISTS task_references (
   task_id INTEGER NOT NULL,
   repo_id INTEGER NOT NULL,

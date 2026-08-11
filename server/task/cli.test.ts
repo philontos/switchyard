@@ -10,6 +10,7 @@ import {
   CODE_VIEW_CAPABILITY,
   NODE_CONTROL_CAPABILITY,
   TASK_REFERENCES_CAPABILITY,
+  TASK_RUNTIME_REFERENCE_MANIFEST_CAPABILITY,
   TASK_RUNTIME_REFERENCES_CAPABILITY,
   TRANSCRIPT_CAPABILITY,
   isUnknownTdspCommand,
@@ -47,6 +48,7 @@ test("taskListPayload wraps the local tasks in a versioned envelope", async () =
     NODE_CONTROL_CAPABILITY,
     TASK_REFERENCES_CAPABILITY,
     TASK_RUNTIME_REFERENCES_CAPABILITY,
+    TASK_RUNTIME_REFERENCE_MANIFEST_CAPABILITY,
     TRANSCRIPT_CAPABILITY,
   ]);
   assert.equal(payload.tasks.length, 1);
@@ -193,7 +195,7 @@ function fakeDeps(db: Database.Database) {
             mode: "reference",
             created_at: "now",
           },
-          load: "in-place" as const,
+          load: "manifest" as const,
           existing: false,
         };
       },
@@ -408,6 +410,7 @@ test("runCli list --json prints the versioned task envelope and exits 0", async 
   assert.ok(parsed.capabilities.includes(NODE_CONTROL_CAPABILITY));
   assert.ok(parsed.capabilities.includes(TASK_REFERENCES_CAPABILITY));
   assert.ok(parsed.capabilities.includes(TASK_RUNTIME_REFERENCES_CAPABILITY));
+  assert.ok(parsed.capabilities.includes(TASK_RUNTIME_REFERENCE_MANIFEST_CAPABILITY));
   assert.ok(parsed.capabilities.includes(TRANSCRIPT_CAPABILITY));
   assert.equal(parsed.tasks[0].title, "old");
 });
@@ -693,7 +696,7 @@ test("runCli add-reference decodes one runtime reference and invokes its owner-l
   const code = await runCli(["add-reference", "42", Buffer.from(JSON.stringify(input)).toString("base64")], f.deps);
   assert.equal(code, 0);
   assert.deepEqual(f.referenceCalls, [[42, input]]);
-  assert.equal(JSON.parse(f.out).load, "in-place");
+  assert.equal(JSON.parse(f.out).load, "manifest");
 });
 
 test("runCli add-reference rejects malformed requests without invoking the service", async () => {

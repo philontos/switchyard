@@ -114,6 +114,8 @@ export async function startSession(
     agent?: AgentKind;
     model?: string | null;
     addDirs?: string[];
+    workspaceInstructions?: string | null;
+    kimiAgentFile?: string | null;
   },
 ) {
   requireOwnerNode(runner);
@@ -124,7 +126,14 @@ export async function startSession(
   const agent = opts?.agent ?? "claude";
   const pre = envPrefix(opts?.env);
   const addDirs = await sessionAddDirs(runner, cwd, agent, opts?.addDirs);
-  const launch = agentArgv(agent, { prompt, model: opts?.model, resume: opts?.continue, addDirs });
+  const launch = agentArgv(agent, {
+    prompt,
+    model: opts?.model,
+    resume: opts?.continue,
+    addDirs,
+    workspaceInstructions: opts?.workspaceInstructions,
+    kimiAgentFile: opts?.kimiAgentFile,
+  });
   if (agent === "kimi") launch[0] = await kimiBinary(runner);
   const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...pre, ...launch];
   await tmux(runner, cmd);
@@ -136,61 +145,6 @@ export async function startSession(
     await waitForKimiReady(runner, session);
     await pasteSubmit(runner, session, prompt);
   }
-}
-
-export interface ReloadSessionOpts {
-  env?: Record<string, string>;
-  agent?: AgentKind;
-  model?: string | null;
-  addDirs?: string[];
-}
-
-/** Replace the process in a task's existing tmux pane, then resume the agent's
- * conversation in the same cwd. Attached browser/terminal clients stay on the
- * same tmux session; only the agent process is rebuilt with a new --add-dir set. */
-export async function reloadSession(
-  runner: CommandRunner,
-  session: string,
-  cwd: string,
-  opts: ReloadSessionOpts = {},
-): Promise<void> {
-  requireOwnerNode(runner);
-  if (!session?.trim()) throw new Error("A session is required");
-  const agent = opts.agent ?? "claude";
-  const pre = envPrefix(opts.env);
-  const addDirs = await sessionAddDirs(runner, cwd, agent, opts.addDirs);
-  const launch = agentArgv(agent, { model: opts.model, resume: true, addDirs });
-  if (agent === "kimi") launch[0] = await kimiBinary(runner);
-  // For a target-pane, bare "=name" means tmux's special {mouse} token. The
-  // trailing colon makes it an exact session component + its active pane.
-  await tmux(runner, ["respawn-pane", "-k", "-t", "=" + session + ":", "-c", cwd, ...pre, ...launch]);
-  await ensureSessionOptions(runner, session);
-}
-
-/** Load one new workspace root into a live task while retaining its conversation.
- * Claude has a native in-session command, so its TUI stays exactly where it is.
- * Codex and Kimi currently expose --add-dir at process start only; respawn the
- * existing pane and use their native resume command with the complete root set.
- * A dead session is left alone — the normal Resume path already supplies refs. */
-export async function loadSessionDirectory(
-  runner: CommandRunner,
-  session: string,
-  cwd: string,
-  newDirectory: string,
-  opts: ReloadSessionOpts = {},
-): Promise<"in-place" | "resumed" | "deferred"> {
-  requireOwnerNode(runner);
-  if (!(await hasSession(runner, session))) return "deferred";
-  const agent = opts.agent ?? "claude";
-  if (agent === "claude") {
-    // Reference roots are generated from a safe alias beneath DATA_DIR. Keep the
-    // slash command as one bracketed paste and quote the path for homes/profiles
-    // whose directory names contain spaces.
-    await pasteSubmit(runner, session, `/add-dir ${JSON.stringify(newDirectory)}`);
-    return "in-place";
-  }
-  await reloadSession(runner, session, cwd, opts);
-  return "resumed";
 }
 
 /**

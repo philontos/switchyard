@@ -132,7 +132,7 @@ export function connectNode(hostId, taskId) {
     ? { id: tk.id, nodeId: hostId }
     : null;
   const referenceTarget = tk.kind !== "local" && tk.hasWorktree
-    && state.fleet[hostId]?.capabilities?.includes("task-runtime-references-v1")
+    && state.fleet[hostId]?.capabilities?.includes("task-runtime-reference-manifest-v1")
     ? {
         id: tk.id,
         nodeId: hostId,

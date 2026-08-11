@@ -2,7 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { initSchema } from "../core/schema.ts";
-import { referencePrompt, resolveReferenceInputs } from "./references.ts";
+import {
+  externalReferenceWorktreePaths,
+  kimiWorkspaceAgentContent,
+  legacyReferenceRootPath,
+  pathIsInside,
+  referenceRootPath,
+  referenceRootPaths,
+  resolveReferenceInputs,
+  TASK_WORKSPACE_INSTRUCTIONS,
+} from "./references.ts";
 
 const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 
@@ -58,20 +67,36 @@ test("resolveReferenceInputs rejects remote-owned repositories and unsafe branch
   if (!unsafe.ok) assert.match(unsafe.error, /invalid reference branch/);
 });
 
-test("referencePrompt leaves ordinary prompts untouched and describes referenced roots", () => {
-  assert.equal(referencePrompt({ name: "primary", path: "/wt/primary" }, [], "work"), "work");
-  const prompt = referencePrompt(
-    { name: "primary", path: "/wt/primary" },
-    [{
-      alias: "api",
-      repo_name: "backend",
-      requested_ref: "develop",
-      resolved_commit: "a".repeat(40),
-      worktree_path: "/wt/refs/1/api",
-    }],
-    "compare contracts",
+test("task-local and legacy reference roots stay explicitly distinguishable", () => {
+  assert.equal(referenceRootPath("/data/worktrees/1-7"), "/data/worktrees/1-7/.tdsp/refs");
+  assert.equal(legacyReferenceRootPath("/data", 7), "/data/worktrees/refs/7");
+  assert.deepEqual(referenceRootPaths("/data", 7, "/data/worktrees/1-7"), [
+    "/data/worktrees/1-7/.tdsp/refs",
+    "/data/worktrees/refs/7",
+  ]);
+  assert.equal(pathIsInside("/data/worktrees/1-7", "/data/worktrees/1-7/.tdsp/refs/api"), true);
+  assert.equal(pathIsInside("/data/worktrees/1-7", "/data/worktrees/refs/7/api"), false);
+});
+
+test("the persistent workspace instruction points agents at the dynamic alias manifest", () => {
+  assert.match(TASK_WORKSPACE_INSTRUCTIONS, /\.tdsp\/refs\.json/);
+  assert.match(TASK_WORKSPACE_INSTRUCTIONS, /exact alias first/);
+  const kimi = kimiWorkspaceAgentContent();
+  assert.match(kimi, /\$\{base_prompt\}/);
+  assert.match(kimi, /Switchyard manages this task workspace/);
+});
+
+test("only legacy external Refs need an additional workspace root on Resume", () => {
+  const db = seed();
+  db.prepare(
+    "INSERT INTO tasks (id,repo_id,base_branch,work_branch,title,worktree_path,session,status) " +
+      "VALUES (7,1,'main','feat/7','task','/data/worktrees/1-7','tdsp-7','running')",
+  ).run();
+  const insert = db.prepare(
+    "INSERT INTO task_references (task_id,repo_id,alias,requested_ref,resolved_commit,worktree_path) VALUES (7,1,?,?,?,?)",
   );
-  assert.match(prompt || "", /ref:api \(reference-only\)/);
-  assert.match(prompt || "", /aaaaaaaaaaaa/);
-  assert.match(prompt || "", /User task:\ncompare contracts/);
+  insert.run("api", "main", "a".repeat(40), "/data/worktrees/1-7/.tdsp/refs/api");
+  insert.run("old", "main", "b".repeat(40), "/data/worktrees/refs/7/old");
+  const task = db.prepare("SELECT id,worktree_path FROM tasks WHERE id=7").get() as any;
+  assert.deepEqual(externalReferenceWorktreePaths(db, task), ["/data/worktrees/refs/7/old"]);
 });

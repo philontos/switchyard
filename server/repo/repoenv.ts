@@ -5,12 +5,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { addDetachedWorktreeFromBranch, addWorktreeFromBranch, removeWorktree } from "./git.js";
+import { addReferenceSnapshotFromBranch, addWorktreeFromBranch, removeWorktree } from "./git.js";
 import { startSession } from "../session/tmux.js";
 import { hookSettingsJson } from "../session/hooks.js";
 import type { Runner } from "../fleet/runner.js";
 import type { RepoTaskEnv } from "../task/createtask.js";
-import { referenceRootPath } from "../task/references.js";
+import { legacyReferenceRootPath, referenceRootPath } from "../task/references.js";
 import type Database from "better-sqlite3";
 
 type DB = Database.Database;
@@ -41,11 +41,19 @@ function setupWorktreeOn(runner: Runner, ns: string): RepoTaskEnv["setupWorktree
       fs.writeFileSync(path.join(hooksTmp, "settings.local.json"), hookSettingsJson(worktree));
       await runner.putDir(hooksTmp, path.join(worktree, ".claude"));
       fs.rmSync(path.dirname(hooksTmp), { recursive: true, force: true });
-      await runner.exec("sh", ["-c",
-        `cd ${JSON.stringify(worktree)} && p=$(git rev-parse --git-path info/exclude) && ` +
-        `for f in '.claude/settings.local.json' '.claude/waiting' '.claude/session-id'; do grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
-      ]).catch(() => {});
     }
+    // Switchyard's task-local control plane is generated after checkout. Keep it
+    // out of the user's branch for every agent; Claude's hook files remain local
+    // metadata too. Git's common info/exclude covers every linked worktree.
+    const excluded = [".tdsp/"];
+    if ((agent ?? "claude") === "claude") {
+      excluded.push(".claude/settings.local.json", ".claude/waiting", ".claude/session-id");
+    }
+    await runner.exec("sh", ["-c",
+      `cd ${JSON.stringify(worktree)} && p=$(git rev-parse --git-path info/exclude) && ` +
+      `for f in ${excluded.map((value) => JSON.stringify(value)).join(" ")}; do ` +
+      `grep -qxF "$f" "$p" || printf '%s\\n' "$f" >> "$p"; done`,
+    ]).catch(() => {});
     return baseCommit;
   };
 }
@@ -69,10 +77,13 @@ export function buildRepoTaskEnv(opts: RepoEnvOpts): RepoTaskEnv {
     writeManifest: opts.writeManifest,
     setupWorktree: setupWorktreeOn(opts.runner, opts.ns),
     setupReference: ({ mirror, worktree, requestedRef }) =>
-      addDetachedWorktreeFromBranch(opts.runner, mirror, worktree, requestedRef),
+      addReferenceSnapshotFromBranch(opts.runner, mirror, worktree, requestedRef),
     startSession: (session, worktree, opening, sopts) => startSession(opts.runner, session, worktree, opening, sopts),
     removeWorktree: (mirror, worktree, workBranch) => removeWorktree(opts.runner, mirror, worktree, workBranch).then(() => {}),
     removeReference: (mirror, worktree) => removeWorktree(opts.runner, mirror, worktree).then(() => {}),
-    removeReferenceRoot: (taskId) => opts.runner.rmrf(referenceRootPath(opts.runner.dataDir, taskId)),
+    removeReferenceRoots: async (taskId, taskWorktree) => {
+      if (taskWorktree) await opts.runner.rmrf(referenceRootPath(taskWorktree));
+      await opts.runner.rmrf(legacyReferenceRootPath(opts.runner.dataDir, taskId));
+    },
   };
 }

@@ -27,10 +27,8 @@ function envFor(db: Database.Database) {
   const setup: any[] = [];
   const removed: any[] = [];
   const manifests: number[] = [];
-  const loads: any[] = [];
   const env: AddTaskReferenceEnv = {
     db,
-    dataDir: "/data",
     exists: async () => true,
     setupReference: async (args) => {
       setup.push(args);
@@ -38,33 +36,26 @@ function envFor(db: Database.Database) {
     },
     removeReference: async (...args) => { removed.push(args); },
     writeManifest: async (id) => { manifests.push(id); },
-    loadReference: async (...args) => {
-      loads.push(args);
-      return "in-place";
-    },
   };
-  return { env, setup, removed, manifests, loads };
+  return { env, setup, removed, manifests };
 }
 
-test("addTaskReference materializes, persists and loads a runtime reference", async () => {
+test("addTaskReference materializes and manifests a task-local runtime reference without a session callback", async () => {
   const db = seed();
   const s = envFor(db);
   const result = await addTaskReference(s.env, 7, { repo_id: 2, ref: "develop", alias: "web" });
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.equal(result.load, "in-place");
+  assert.equal(result.load, "manifest");
   assert.equal(result.reference.alias, "web");
   assert.deepEqual(s.setup, [{
     mirror: "/data/mirrors/2-frontend.git",
-    worktree: "/data/worktrees/refs/7/web",
+    worktree: "/data/worktrees/1-7/.tdsp/refs/web",
     requestedRef: "develop",
   }]);
   const row = db.prepare("SELECT * FROM task_references WHERE task_id=7 AND alias='web'").get() as any;
   assert.equal(row.resolved_commit, "a".repeat(40));
   assert.deepEqual(s.manifests, [7]);
-  assert.equal(s.loads.length, 1);
-  assert.equal(s.loads[0][1], "/data/worktrees/refs/7/web");
-  assert.deepEqual(s.loads[0][2], ["/data/worktrees/refs/7/web"]);
 });
 
 test("addTaskReference avoids an existing alias and returns duplicate repo/ref idempotently", async () => {
@@ -87,15 +78,14 @@ test("addTaskReference avoids an existing alias and returns duplicate repo/ref i
   assert.equal(s.setup.length, 1, "an idempotent retry does not create another worktree");
 });
 
-test("addTaskReference keeps a durable reference when the live agent reload fails", async () => {
+test("addTaskReference is valid even when the task session is not running", async () => {
   const db = seed();
+  db.prepare("UPDATE tasks SET status='cleaned' WHERE id=7").run();
   const s = envFor(db);
-  s.env.loadReference = async () => { throw new Error("agent exited"); };
   const result = await addTaskReference(s.env, 7, { repo_id: 2, ref: "develop" });
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.equal(result.load, "deferred");
-  assert.match(result.warning || "", /resumed/);
+  assert.equal(result.load, "manifest");
   assert.equal((db.prepare("SELECT count(*) AS c FROM task_references WHERE task_id=7").get() as any).c, 1);
 });
 
@@ -108,13 +98,13 @@ test("addTaskReference rejects the primary repo before touching Git", async () =
   assert.equal(s.setup.length, 0);
 });
 
-test("addTaskReference cleans a partial checkout when materialization fails", async () => {
+test("addTaskReference trusts atomic materialization cleanup and never deletes a competing destination", async () => {
   const db = seed();
   const s = envFor(db);
   s.env.setupReference = async () => { throw new Error("fetch failed"); };
   const result = await addTaskReference(s.env, 7, { repo_id: 2, ref: "develop", alias: "web" });
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.error, "materializeFailed");
-  assert.deepEqual(s.removed, [["/data/mirrors/2-frontend.git", "/data/worktrees/refs/7/web"]]);
+  assert.deepEqual(s.removed, []);
   assert.equal((db.prepare("SELECT count(*) AS c FROM task_references").get() as any).c, 0);
 });

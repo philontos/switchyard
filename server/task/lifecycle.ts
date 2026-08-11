@@ -38,7 +38,7 @@ export interface ResumeTaskEnv extends ManifestEnv {
 export interface CleanupTaskEnv extends ManifestEnv {
   killSession(session: string): Promise<void>;
   removeWorktree(mirror: string, worktree: string, workBranch?: string): Promise<void>;
-  removeReferenceRoot?(taskId: number): Promise<void>;
+  removeReferenceRoots?(taskId: number, taskWorktree: string): Promise<void>;
 }
 
 export interface DeleteTaskEnv {
@@ -95,10 +95,10 @@ export async function cleanupTask(env: CleanupTaskEnv, id: number): Promise<Life
         await env.removeWorktree(referenceRepo.mirror_path, reference.worktree_path);
       }
     }
+    await env.removeReferenceRoots?.(id, task.worktree_path);
     if (repo?.mirror_path && task.worktree_path) {
       await env.removeWorktree(repo.mirror_path, task.worktree_path, task.work_branch);
     }
-    await env.removeReferenceRoot?.(id);
     removeTaskReferenceRows(env.db, id);
     env.db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(id);
     await env.writeManifest(id);

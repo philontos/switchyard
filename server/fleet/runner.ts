@@ -35,6 +35,8 @@ export interface Runner extends CommandRunner {
   /** Read a local text file; null if it is missing. */
   readText(p: string): Promise<string | null>;
   rmrf(p: string): Promise<void>;
+  /** Atomically rename a local file or directory on the same filesystem. */
+  rename?(source: string, dest: string): Promise<void>;
   /** Copy a local directory tree to another local path. */
   putDir(localSrc: string, dest: string): Promise<void>;
   /** Copy a local file to another local path. */
@@ -57,6 +59,7 @@ export class LocalRunner implements Runner {
   async exists(p: string) { return fs.existsSync(p); }
   async readText(p: string) { try { return fs.readFileSync(p, "utf8"); } catch { return null; } }
   async rmrf(p: string) { fs.rmSync(p, { recursive: true, force: true }); }
+  async rename(source: string, dest: string) { fs.renameSync(source, dest); }
   async putDir(localSrc: string, dest: string) {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.cpSync(localSrc, dest, { recursive: true });

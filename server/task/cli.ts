@@ -79,13 +79,19 @@ export const TASK_LIST_VERSION = 3;
 export const ARCHIVED_TASK_LIFECYCLE_CAPABILITY = "archived-task-lifecycle-v1";
 export const NODE_CONTROL_CAPABILITY = "node-control-v1";
 export const TASK_REFERENCES_CAPABILITY = "task-references-v1";
+// v1 nodes may reload a live agent to expose a runtime Ref. Manifest capability
+// guarantees the task-local, non-interrupting architecture; advertise both so
+// older controllers remain able to call a newer node while newer controllers do
+// not offer the unstable behavior against an older node.
 export const TASK_RUNTIME_REFERENCES_CAPABILITY = "task-runtime-references-v1";
+export const TASK_RUNTIME_REFERENCE_MANIFEST_CAPABILITY = "task-runtime-reference-manifest-v1";
 export const TASK_CAPABILITIES = [
   ARCHIVED_TASK_LIFECYCLE_CAPABILITY,
   CODE_VIEW_CAPABILITY,
   NODE_CONTROL_CAPABILITY,
   TASK_REFERENCES_CAPABILITY,
   TASK_RUNTIME_REFERENCES_CAPABILITY,
+  TASK_RUNTIME_REFERENCE_MANIFEST_CAPABILITY,
   TRANSCRIPT_CAPABILITY,
 ] as const;
 

@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import path from "node:path";
-import type { Repo, TaskReference } from "../core/db.js";
+import type { Repo, Task, TaskReference } from "../core/db.js";
 import { getOwnedRepo } from "../core/ownership.js";
 
 type DB = Database.Database;
@@ -22,6 +22,23 @@ export interface TaskReferenceRecord extends TaskReference {
   repo_name: string;
   mirror_path: string | null;
 }
+
+export const TASK_REFERENCE_MANIFEST = ".tdsp/refs.json";
+export const TASK_REFERENCE_ROOT = ".tdsp/refs";
+export const KIMI_WORKSPACE_AGENT = ".tdsp/kimi-agent.md";
+
+/** Stable launch-time contract. The paths and commits deliberately do not live
+ * here: refs.json is rewritten atomically whenever a Ref is attached, so a
+ * long-running agent can discover new repositories without being restarted. */
+export const TASK_WORKSPACE_INSTRUCTIONS = [
+  "Switchyard manages this task workspace.",
+  "The primary repository in the current working directory is editable.",
+  `Repository references may change while the session is running; their authoritative alias map is ${TASK_REFERENCE_MANIFEST}.`,
+  "Read that manifest once at session start; whenever the user later mentions a Ref, repository, or alias, reread it and resolve by exact alias first, then repo_name, before inspecting files.",
+  "Use the path recorded in the manifest and treat entries whose mode is reference as read-only unless the user explicitly asks to modify or promote one.",
+  "Reference paths are generated Git-ignored metadata, so inspect or search them by explicit path instead of relying on workspace-wide indexes.",
+  "Before relying on a referenced repository, follow any repository-local agent instructions inside it.",
+].join(" ");
 
 export type ResolveReferencesResult =
   | { ok: true; references: ResolvedReferenceInput[] }
@@ -112,32 +129,60 @@ export function referenceWorktreePaths(db: DB, taskId: number): string[] {
   return listTaskReferences(db, taskId).map((reference) => reference.worktree_path).filter(Boolean);
 }
 
-export function referenceRootPath(dataDir: string, taskId: number): string {
+/** New task-local Ref root. Because it is below the primary workspace, agents
+ * can see newly attached snapshots without a runtime --add-dir or TUI reload. */
+export function referenceRootPath(taskWorktree: string): string {
+  return path.join(taskWorktree, TASK_REFERENCE_ROOT);
+}
+
+/** Pre-manifest layout retained for discovery and cleanup of existing tasks. */
+export function legacyReferenceRootPath(dataDir: string, taskId: number): string {
   return path.join(dataDir, "worktrees", "refs", String(taskId));
+}
+
+export function referenceRootPaths(dataDir: string, taskId: number, taskWorktree?: string | null): string[] {
+  return [
+    ...(taskWorktree ? [referenceRootPath(taskWorktree)] : []),
+    legacyReferenceRootPath(dataDir, taskId),
+  ];
+}
+
+export function kimiWorkspaceAgentPath(taskWorktree: string): string {
+  return path.join(taskWorktree, KIMI_WORKSPACE_AGENT);
+}
+
+export function kimiWorkspaceAgentContent(): string {
+  return [
+    "---",
+    "name: switchyard-task",
+    "description: Switchyard coding task with dynamic repository references",
+    "---",
+    "",
+    "${base_prompt}",
+    "",
+    TASK_WORKSPACE_INSTRUCTIONS,
+    "",
+  ].join("\n");
+}
+
+export function pathIsInside(parent: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(candidate));
+  return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
+}
+
+/** Only legacy Refs sit outside the primary workspace and still need --add-dir
+ * when an old task is resumed. New task-local snapshots need no adapter work. */
+export function externalReferenceWorktreePaths(
+  db: DB,
+  task: Pick<Task, "id" | "worktree_path">,
+): string[] {
+  return referenceWorktreePaths(db, task.id).filter((referencePath) =>
+    !task.worktree_path || !pathIsInside(task.worktree_path, referencePath),
+  );
 }
 
 export function removeTaskReferenceRows(db: DB, taskId: number): void {
   db.prepare("DELETE FROM task_references WHERE task_id=?").run(taskId);
-}
-
-export function referencePrompt(
-  primary: { name: string; path: string },
-  references: Array<Pick<TaskReferenceRecord, "alias" | "repo_name" | "requested_ref" | "resolved_commit" | "worktree_path">>,
-  userPrompt?: string | null,
-): string | null {
-  if (!references.length) return userPrompt?.trim() ? userPrompt : null;
-  const lines = [
-    "Switchyard workspace:",
-    `- Primary repository (editable): ${primary.name} at ${primary.path}`,
-    ...references.map((reference) =>
-      `- ref:${reference.alias} (reference-only): ${reference.repo_name}/${reference.requested_ref}` +
-      `@${reference.resolved_commit.slice(0, 12)} at ${reference.worktree_path}`,
-    ),
-    "Treat reference worktrees as read-only unless the user explicitly asks to modify them.",
-    "Before relying on a reference repository, inspect its repository-local agent instructions.",
-  ];
-  if (userPrompt?.trim()) lines.push("", "User task:", userPrompt);
-  return lines.join("\n");
 }
 
 export function publicTaskReferences(db: DB, taskId: number) {

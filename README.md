@@ -117,7 +117,7 @@ Manual SSH host entry remains available as an advanced fallback when automatic d
 
 A host reboot or killed tmux session does not destroy the working tree. As long as the worktree remains, **Resume** recreates the session with the saved agent, model, and endpoint. You can also create a repo-free shell from any node's **Shells** group for debugging and one-off commands.
 
-Repository references are resolved on the target node, pinned to an exact commit, and checked out detached under `worktrees/refs/<task-id>/<alias>`. They are restored on Resume, described in the task's `workspace.json`, and presented to the agent as reference-only workspace roots.
+Repository references are resolved on the target node, pinned to an exact commit, and exported as plain code snapshots under `<task-worktree>/.tdsp/refs/<alias>`. The atomically updated `.tdsp/refs.json` is the authoritative alias map. A persistent launch instruction tells Claude Code, Codex, and Kimi Code to reread that manifest when a Ref is mentioned, so attaching one at runtime never restarts or writes into the live terminal session. Existing tasks using the older external `worktrees/refs/<task-id>/<alias>` layout remain supported until cleanup.
 
 ## Agents and models
 

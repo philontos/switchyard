@@ -1,4 +1,5 @@
 import path from "node:path";
+import crypto from "node:crypto";
 import { Runner } from "../fleet/runner.js";
 
 export function canonicalGitUrl(value: string): string {
@@ -7,13 +8,19 @@ export function canonicalGitUrl(value: string): string {
 
 // Run a git command through the given machine's Runner. The env keeps git from
 // hanging on an interactive SSH/host-key/credential prompt — fail fast instead.
-async function git(runner: Runner, cwd: string | null, args: string[]): Promise<string> {
+async function git(
+  runner: Runner,
+  cwd: string | null,
+  args: string[],
+  extraEnv: Record<string, string> = {},
+): Promise<string> {
   return runner.exec("git", args, {
     cwd: cwd ?? undefined,
     // extras only — the Runner merges these over the (local or remote) base env.
     env: {
       GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes -o ConnectTimeout=15",
       GIT_TERMINAL_PROMPT: "0",
+      ...extraEnv,
     },
   });
 }
@@ -136,6 +143,48 @@ export async function addDetachedWorktreeFromBranch(
   await runner.mkdirp(path.dirname(dest));
   await git(runner, mirror, ["worktree", "add", "--detach", dest, commit]);
   return commit;
+}
+
+/** Materialize an immutable, provider-neutral reference snapshot. Unlike a Git
+ * linked worktree this directory has no .git pointer and can safely live below
+ * the primary task worktree. A private temporary index checks out every tracked
+ * path without honoring archive-only export-ignore attributes, then the complete
+ * directory is published with one rename so agents never observe a partial Ref. */
+export async function addReferenceSnapshotFromBranch(
+  runner: Runner,
+  mirror: string,
+  dest: string,
+  baseBranch: string,
+): Promise<string> {
+  await fetchBranch(runner, mirror, baseBranch);
+  const startPoint = `origin/${baseBranch}`;
+  const commit = (await git(runner, mirror, ["rev-parse", "--verify", `${startPoint}^{commit}`])).trim();
+  if (!commit) throw new Error(`could not resolve reference branch ${baseBranch}`);
+  if (await runner.exists(dest)) throw new Error(`reference destination already exists: ${dest}`);
+
+  const parent = path.dirname(dest);
+  const token = `${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
+  const staging = path.join(parent, `.tmp-${path.basename(dest)}-${token}`);
+  const indexFile = path.join(parent, `.tmp-${path.basename(dest)}-${token}.index`);
+  await runner.mkdirp(parent);
+  try {
+    await runner.mkdirp(staging);
+    const indexEnv = { GIT_INDEX_FILE: indexFile };
+    await git(runner, mirror, ["read-tree", commit], indexEnv);
+    await git(runner, mirror, [
+      `--work-tree=${staging}`,
+      "checkout-index",
+      "--all",
+      "--force",
+    ], indexEnv);
+    if (runner.rename) await runner.rename(staging, dest);
+    else await runner.exec("mv", [staging, dest]);
+    return commit;
+  } finally {
+    await runner.rmrf(indexFile).catch(() => {});
+    await runner.rmrf(`${indexFile}.lock`).catch(() => {});
+    await runner.rmrf(staging).catch(() => {});
+  }
 }
 
 export async function removeWorktree(runner: Runner, mirror: string, dest: string, workBranch?: string) {

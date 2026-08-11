@@ -203,8 +203,8 @@ function makeRepoEnv(overrides: Partial<RepoTaskEnv> = {}) {
     removeReference: async (mirror, worktree) => {
       calls.push(`remove-ref:${mirror}:${worktree}`);
     },
-    removeReferenceRoot: async (taskId) => {
-      calls.push(`remove-ref-root:${taskId}`);
+    removeReferenceRoots: async (taskId, taskWorktree) => {
+      calls.push(`remove-ref-roots:${taskId}:${taskWorktree}`);
     },
     ...overrides,
   };
@@ -242,7 +242,7 @@ test("createRepoTask inserts a running task, prepares the worktree, starts the s
   }
 });
 
-test("createRepoTask materializes pinned repository references and gives them to the agent", async () => {
+test("createRepoTask materializes pinned task-local references and installs the manifest contract", async () => {
   const { env, dir, db, calls, getStart } = makeRepoEnv();
   try {
     const r = await createRepoTask(env, REPO, {
@@ -255,7 +255,8 @@ test("createRepoTask materializes pinned repository references and gives them to
     assert.equal(r.ok, true);
     if (!r.ok) return;
 
-    const refPath = path.resolve(`/data/worktrees/refs/${r.id}/api`);
+    const taskPath = path.resolve(`/data/worktrees/4-${r.id}`);
+    const refPath = path.join(taskPath, ".tdsp", "refs", "api");
     const reference = db.prepare("SELECT * FROM task_references WHERE task_id=?").get(r.id) as any;
     assert.equal(reference.repo_id, REFERENCE_REPO.id);
     assert.equal(reference.requested_ref, "develop");
@@ -264,10 +265,10 @@ test("createRepoTask materializes pinned repository references and gives them to
     assert.ok(calls.includes(`ref:${REFERENCE_REPO.mirror_path}:${refPath}:develop`));
 
     const started = getStart();
-    assert.deepEqual(started.opts.addDirs, [refPath]);
-    assert.match(started.opening, /Primary repository \(editable\): switchyard/);
-    assert.match(started.opening, /ref:api \(reference-only\): backend\/develop@bbbbbbbbbbbb/);
-    assert.match(started.opening, /trace the API contract/);
+    assert.equal(started.opts.addDirs, undefined, "task-local refs need no additional sandbox root");
+    assert.match(started.opts.workspaceInstructions, /\.tdsp\/refs\.json/);
+    assert.equal(started.opts.kimiAgentFile, path.join(taskPath, ".tdsp", "kimi-agent.md"));
+    assert.equal(started.opening, "trace the API contract");
     assert.equal(
       (db.prepare("SELECT prompt FROM tasks WHERE id=?").get(r.id) as { prompt: string }).prompt,
       "trace the API contract",
@@ -328,7 +329,7 @@ test("createRepoTask rolls back a partially-created reference worktree", async (
       "setup",
       "ref-failed",
       `remove-ref:${REFERENCE_REPO.mirror_path}:${attemptedPath}`,
-      `remove-ref-root:${r.id}`,
+      `remove-ref-roots:${r.id}:${path.resolve(`/data/worktrees/4-${r.id}`)}`,
       "remove",
     ]);
     assert.equal((db.prepare("SELECT count(*) AS c FROM task_references").get() as { c: number }).c, 0);
@@ -447,7 +448,12 @@ test("createRepoTask cleans up when the session fails to start after the worktre
   try {
     const r = await createRepoTask(env, REPO, { baseBranch: "m", title: "t" });
     assert.equal(r.ok, false);
-    assert.deepEqual(calls, ["setup", "remove"], "worktree prepared then torn down");
+    if (r.ok || r.error === "invalidReference") return;
+    assert.deepEqual(calls, [
+      "setup",
+      `remove-ref-roots:${r.id}:${path.resolve(`/data/worktrees/4-${r.id}`)}`,
+      "remove",
+    ], "worktree metadata and checkout are torn down");
     const row = db.prepare("SELECT status FROM tasks WHERE title='t'").get() as { status: string };
     assert.equal(row.status, "error");
   } finally {

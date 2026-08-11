@@ -11,7 +11,7 @@ import QRCode from "qrcode";
 import { db, Repo, Task, Host, Provider } from "../core/db.js";
 import { renameTask } from "../task/tasks.js";
 import { removeWorktree } from "../repo/git.js";
-import { startSession, startShellSession, hasSession, killSession, listSessions, loadSessionDirectory } from "../session/tmux.js";
+import { startSession, startShellSession, hasSession, killSession, listSessions } from "../session/tmux.js";
 import { asAgentKind } from "../session/agent.js";
 import {
   isTranscriptReadRequest,
@@ -35,9 +35,12 @@ import { addTaskReference, type AddTaskReferenceResult } from "../task/addrefere
 import {
   listTaskReferences,
   publicTaskReferences,
-  referenceRootPath,
+  externalReferenceWorktreePaths,
+  kimiWorkspaceAgentPath,
+  referenceRootPaths,
   referenceWorktreePaths,
   removeTaskReferenceRows,
+  TASK_WORKSPACE_INSTRUCTIONS,
 } from "../task/references.js";
 import { buildRepoTaskEnv } from "../repo/repoenv.js";
 import { probeHost } from "../fleet/liveness.js";
@@ -151,7 +154,9 @@ const ownedRepoEnv: OwnedRepoEnv = {
   removeTaskManifest: (id) => removeTaskManifest(DATA_DIR, id),
   killSession: (session) => killSession(localRunner, session),
   syncTaskManifest: (id) => syncTaskManifest(id),
-  removeReferenceRoot: (id) => localRunner.rmrf(referenceRootPath(DATA_DIR, id)),
+  removeReferenceRoots: async (id, taskWorktree) => {
+    for (const root of referenceRootPaths(DATA_DIR, id, taskWorktree)) await localRunner.rmrf(root);
+  },
 };
 
 function sendRepoFailure(req: Request, res: Response, result: any) {
@@ -547,20 +552,10 @@ async function addReferenceOnThisNode(taskId: number, input: any) {
   const repoEnv = repoTaskEnvFor();
   return addTaskReference({
     db,
-    dataDir: DATA_DIR,
     exists: (target) => localRunner.exists(target),
     setupReference: repoEnv.setupReference,
     removeReference: repoEnv.removeReference,
     writeManifest: (id) => syncTaskManifest(id),
-    loadReference: async (task, newReferencePath, allReferencePaths) => {
-      const provider = task.provider_id ? (getProvider.get(task.provider_id) as Provider | undefined) : undefined;
-      return loadSessionDirectory(localRunner, task.session, task.worktree_path, newReferencePath, {
-        env: providerEnv(provider),
-        agent: asAgentKind(task.agent),
-        model: task.agent_model,
-        addDirs: allReferencePaths,
-      });
-    },
   }, taskId, input);
 }
 
@@ -602,9 +597,8 @@ app.post("/api/tasks", async (req, res) => {
   return res.status(500).json({ error: r.message });
 });
 
-// Add a pinned repository checkout to an already-running task. The durable
-// reference is created first; the agent adapter then exposes it in the existing
-// conversation (Claude in-place, Codex/Kimi by pane respawn + native resume).
+// Add a pinned task-local repository snapshot and update .tdsp/refs.json. The
+// live tmux pane is deliberately untouched, even while an agent is responding.
 app.post("/api/tasks/:id/references", async (req, res) => {
   const taskId = Number(req.params.id);
   if (!Number.isInteger(taskId)) return res.status(400).json({ error: "invalid task id" });
@@ -703,7 +697,9 @@ app.post("/api/tasks/:id/cleanup", async (req, res) => {
       }
     }
     if (repo?.mirror_path) await removeWorktree(localRunner, repo.mirror_path, task.worktree_path, task.work_branch);
-    await localRunner.rmrf(referenceRootPath(DATA_DIR, task.id));
+    for (const root of referenceRootPaths(DATA_DIR, task.id, task.worktree_path)) {
+      await localRunner.rmrf(root);
+    }
     removeTaskReferenceRows(db, task.id);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
     syncTaskManifest(task.id);
@@ -743,7 +739,9 @@ app.post("/api/tasks/:id/resume", async (req, res) => {
       env: providerEnv(provider),
       agent: asAgentKind(task.agent),
       model: task.agent_model,
-      addDirs: referencePaths,
+      addDirs: externalReferenceWorktreePaths(db, task),
+      workspaceInstructions: TASK_WORKSPACE_INSTRUCTIONS,
+      kimiAgentFile: kimiWorkspaceAgentPath(task.worktree_path),
     });
     db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(task.id);
     syncTaskManifest(task.id);
@@ -1195,6 +1193,16 @@ app.post("/api/sessions/:name/kill", async (req, res) => {
   if (task) {
     if (removeWt) {
       const repo = getRepo.get(task.repo_id) as Repo | undefined;
+      for (const reference of listTaskReferences(db, task.id)) {
+        const referenceRepo = getRepo.get(reference.repo_id) as Repo | undefined;
+        if (referenceRepo?.mirror_path && reference.worktree_path) {
+          await removeWorktree(localRunner, referenceRepo.mirror_path, reference.worktree_path);
+        }
+      }
+      for (const root of referenceRootPaths(DATA_DIR, task.id, task.worktree_path)) {
+        await localRunner.rmrf(root);
+      }
+      removeTaskReferenceRows(db, task.id);
       if (repo?.mirror_path) await removeWorktree(localRunner, repo.mirror_path, task.worktree_path, task.work_branch);
       db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
       syncTaskManifest(task.id);

@@ -1,27 +1,24 @@
 // Runtime repository-reference attachment. Unlike dispatch-time references,
-// this operates on an existing task: materialize one pinned detached worktree,
-// persist it in the task manifest, then ask the task's current agent adapter to
-// make the new directory available without creating a new conversation.
+// this operates on an existing task: materialize one pinned task-local snapshot
+// and atomically update its manifest. Because the Ref lives below the primary
+// workspace, the current agent sees it without any tmux/session mutation.
 import path from "node:path";
 import type Database from "better-sqlite3";
-import type { Task } from "../core/db.js";
 import { getOwnedTask } from "../core/ownership.js";
 import {
   listTaskReferences,
   publicTaskReferences,
   referenceRootPath,
-  referenceWorktreePaths,
   resolveReferenceInputs,
   type TaskReferenceInput,
 } from "./references.js";
 
 type DB = Database.Database;
 
-export type RuntimeReferenceLoad = "in-place" | "resumed" | "deferred";
+export type RuntimeReferenceLoad = "manifest";
 
 export interface AddTaskReferenceEnv {
   db: DB;
-  dataDir: string;
   exists(target: string): Promise<boolean>;
   setupReference(args: {
     mirror: string;
@@ -30,11 +27,6 @@ export interface AddTaskReferenceEnv {
   }): Promise<string>;
   removeReference(mirror: string, worktree: string): Promise<void>;
   writeManifest(taskId: number): void | Promise<void>;
-  loadReference(
-    task: Task,
-    newReferencePath: string,
-    allReferencePaths: string[],
-  ): Promise<RuntimeReferenceLoad>;
 }
 
 export type AddTaskReferenceResult =
@@ -43,7 +35,6 @@ export type AddTaskReferenceResult =
       reference: ReturnType<typeof publicTaskReferences>[number];
       load: RuntimeReferenceLoad | "already";
       existing: boolean;
-      warning?: string;
     }
   | {
       ok: false;
@@ -51,9 +42,8 @@ export type AddTaskReferenceResult =
       message: string;
     };
 
-/** Attach one repository snapshot to an owner-local task. The reference is
- * durable before the session is touched: if an agent reload fails, Resume can
- * still pick up every recorded --add-dir on the next launch. */
+/** Attach one repository snapshot to an owner-local task. The reference and its
+ * alias are durable before returning; the live session is never interrupted. */
 export async function addTaskReference(
   env: AddTaskReferenceEnv,
   taskId: number,
@@ -86,7 +76,7 @@ export async function addTaskReference(
     return { ok: false, error: "limit", message: "A task can reference at most 8 repositories" };
   }
 
-  const worktree = path.join(referenceRootPath(env.dataDir, task.id), selected.alias);
+  const worktree = path.join(referenceRootPath(task.worktree_path), selected.alias);
   let commit: string;
   try {
     commit = await env.setupReference({
@@ -95,7 +85,9 @@ export async function addTaskReference(
       requestedRef: selected.requested_ref,
     });
   } catch {
-    await env.removeReference(selected.repo.mirror_path, worktree).catch(() => {});
+    // setupReference publishes by atomic rename and owns its temporary cleanup.
+    // Never delete `worktree` here: a concurrent request may have won the alias
+    // race and published a valid snapshot at that path.
     return {
       ok: false,
       error: "materializeFailed",
@@ -118,15 +110,6 @@ export async function addTaskReference(
     return { ok: false, error: "persistFailed", message: "Could not save the repository reference" };
   }
 
-  let load: RuntimeReferenceLoad = "deferred";
-  let warning: string | undefined;
-  try {
-    load = await env.loadReference(task, worktree, referenceWorktreePaths(env.db, task.id));
-  } catch {
-    // Do not roll back a valid, durable checkout because an interactive agent
-    // happened to exit while it was being loaded. A later Resume includes it.
-    warning = "The reference was saved and will be loaded when the task is resumed";
-  }
   const reference = publicTaskReferences(env.db, task.id).find((candidate) => candidate.alias === selected.alias)!;
-  return { ok: true, reference, load, existing: false, ...(warning ? { warning } : {}) };
+  return { ok: true, reference, load: "manifest", existing: false };
 }
