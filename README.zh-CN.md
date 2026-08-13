@@ -115,7 +115,7 @@ tdsp serve
   <img src="docs/screenshots/dispatch-modal.png" alt="把一个 Kimi K3 任务派发到新的隔离 worktree" width="100%">
 </p>
 
-主机重启或 tmux 会话意外结束不会破坏工作目录。只要 worktree 还在，点击 **恢复** 就会用原来的 Agent、模型和端点重建会话。每个节点的 **Shells** 分组还可以创建不绑定仓库的终端，用于临时排查和一次性命令。
+主机重启或 tmux 会话意外结束不会破坏工作目录。只要 worktree 还在，点击 **恢复** 就会用原来的 Agent、模型和端点重建会话。它会沿用原会话名创建一个新的 tmux 会话，而不是恢复旧进程的快照；Switchyard 会回到保留的 worktree，再调用 Agent 自带的会话继续命令。真正提供连续性的是 worktree、Switchyard 保存的任务元数据和 Agent 落盘的对话记录，而不是 tmux 跨重启存活。每个节点的 **Shells** 分组还可以创建不绑定仓库的终端，用于临时排查和一次性命令。
 
 引用仓库由目标节点解析并固定到准确 commit，以 detached worktree 放在 `worktrees/refs/<task-id>/<alias>`；恢复任务时会重新挂载，并写入任务的 `workspace.json`，作为只读语义的参考目录交给 Agent。
 
