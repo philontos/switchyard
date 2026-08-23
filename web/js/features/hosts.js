@@ -9,6 +9,7 @@ import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
 import { taskLifecycle } from "../core/task-lifecycle.js";
 import { remoteFollowTasks } from "../core/host-follow.js";
+import { replaceHostList } from "../core/host-list-scroll.js";
 import { state } from "../core/state.js";
 import { repoGroupHead, repaintRepoDetails } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask, connect,
@@ -32,6 +33,7 @@ let selfUpdating = false;
 // Invalidated (set null) whenever renderList bails mid-edit/drag, since those mutate
 // #m-list out of band and the cache would otherwise wrongly believe it's in sync.
 let lastListHtml = null, lastListHost = null;
+const listScrollByHost = new Map(); // host id -> #m-list scrollTop for this session
 
 // ---- machines: col1 is a vertical icon rail; col2 (renderList, added next)
 // lists the active machine's repos + tasks. loadHosts/loadRepos/loadTasks all
@@ -532,9 +534,10 @@ function renderListHtml() {
   // restart animations and flicker. paintSelection() still runs after us (rerender)
   // to keep the highlight exact even on a skipped rebuild.
   if (html === lastListHtml && lastListHost === state.activeHostId) return;
+  const list = $("m-list");
+  replaceHostList(list, html, lastListHost, state.activeHostId, listScrollByHost);
   lastListHtml = html;
   lastListHost = state.activeHostId;
-  $("m-list").innerHTML = html;
 }
 export function toggleRepo(id) { collapsedRepos.has(id) ? collapsedRepos.delete(id) : collapsedRepos.add(id); renderList(); }
 // Force a repo group open (no re-render — the caller renders). Used on dispatch so a
