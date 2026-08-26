@@ -19,10 +19,12 @@ const MAX_JSON_NODES = 5000;
 const MAX_JSON_CHILDREN = 1000;
 let context = null;                 // { scope, id, nodeId, name }
 let tab = "files";
-let tree = null, treeMeta = null, changes = null;
+let tree = null, treeMeta = null, changes = null, changeTree = null;
+let changesByPath = new Map();
 let selectedFile = null, selectedChange = null, currentPayload = null;
 let fileView = null;                // null (choose default), "structure", or "source"
 let openDirs = new Set();
+let openChangeDirs = new Set();
 let requestSerial = 0;
 let activeRequest = null;
 
@@ -52,10 +54,12 @@ function setBusy(on) {
 }
 
 function resetState() {
-  tree = treeMeta = changes = currentPayload = null;
+  tree = treeMeta = changes = changeTree = currentPayload = null;
+  changesByPath = new Map();
   selectedFile = selectedChange = null;
   fileView = null;
   openDirs = new Set();
+  openChangeDirs = new Set();
   $("code-modal").classList.remove("detail");
   $("cv-banner").className = "cv-banner";
   $("cv-banner").textContent = "";
@@ -142,14 +146,14 @@ function showSelectFile() {
   stateBox($("cv-content"), t(tab === "files" ? "code.selectFile" : "code.selectChange"));
 }
 
-function renderTreeNode(node, parent, depth) {
+function renderTreeNode(node, parent, depth, expandedDirs, rerender, renderFileNode) {
   const { dirs, files } = sortedTreeChildren(node);
   for (const dir of dirs) {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "cv-item cv-dir";
     row.style.setProperty("--depth", depth);
-    const isOpen = openDirs.has(dir.path);
+    const isOpen = expandedDirs.has(dir.path);
     row.setAttribute("aria-expanded", String(isOpen));
     const caret = document.createElement("span");
     caret.className = "cv-caret";
@@ -160,29 +164,31 @@ function renderTreeNode(node, parent, depth) {
     label.textContent = dir.name;
     row.append(caret, label);
     row.onclick = () => {
-      isOpen ? openDirs.delete(dir.path) : openDirs.add(dir.path);
-      renderTree();
+      isOpen ? expandedDirs.delete(dir.path) : expandedDirs.add(dir.path);
+      rerender();
     };
     parent.append(row);
-    if (isOpen) renderTreeNode(dir, parent, depth + 1);
+    if (isOpen) renderTreeNode(dir, parent, depth + 1, expandedDirs, rerender, renderFileNode);
   }
-  for (const file of files) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "cv-item cv-file";
-    row.classList.toggle("selected", selectedFile === file.path);
-    row.style.setProperty("--depth", depth);
-    row.title = file.path;
-    const mark = document.createElement("span");
-    mark.className = "cv-file-mark";
-    mark.setAttribute("aria-hidden", "true");
-    const label = document.createElement("span");
-    label.className = "cv-item-label";
-    label.textContent = file.name;
-    row.append(mark, label);
-    row.onclick = () => selectFile(file.path);
-    parent.append(row);
-  }
+  for (const file of files) renderFileNode(file, parent, depth);
+}
+
+function renderFileNode(file, parent, depth) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "cv-item cv-file";
+  row.classList.toggle("selected", selectedFile === file.path);
+  row.style.setProperty("--depth", depth);
+  row.title = file.path;
+  const mark = document.createElement("span");
+  mark.className = "cv-file-mark";
+  mark.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.className = "cv-item-label";
+  label.textContent = file.name;
+  row.append(mark, label);
+  row.onclick = () => selectFile(file.path);
+  parent.append(row);
 }
 
 function renderTree() {
@@ -192,8 +198,35 @@ function renderTree() {
   if (!treeMeta?.files?.length) return stateBox(nav, t("code.emptyRepo"));
   const list = document.createElement("div");
   list.className = "cv-list";
-  renderTreeNode(tree, list, 0);
+  renderTreeNode(tree, list, 0, openDirs, renderTree, renderFileNode);
   nav.append(list);
+}
+
+function expandTree(node, expandedDirs) {
+  for (const dir of node.dirs.values()) {
+    expandedDirs.add(dir.path);
+    expandTree(dir, expandedDirs);
+  }
+}
+
+function renderChangeNode(file, parent, depth) {
+  const change = changesByPath.get(file.path);
+  if (!change) return;
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "cv-item cv-change";
+  row.classList.toggle("selected", selectedChange === file.path);
+  row.style.setProperty("--depth", depth);
+  row.title = change.oldPath ? `${change.oldPath} → ${file.path}` : file.path;
+  const status = document.createElement("span");
+  status.className = `cv-status s-${change.status === "?" ? "new" : change.status.toLowerCase()}`;
+  status.textContent = change.status === "?" ? "A" : change.status;
+  const label = document.createElement("span");
+  label.className = "cv-item-label";
+  label.textContent = file.name;
+  row.append(status, label);
+  row.onclick = () => selectChange(file.path);
+  parent.append(row);
 }
 
 function renderChanges() {
@@ -203,22 +236,7 @@ function renderChanges() {
   if (!changes.files.length) return stateBox(nav, t("code.noChanges"));
   const list = document.createElement("div");
   list.className = "cv-list cv-change-list";
-  for (const file of changes.files) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "cv-item cv-change";
-    row.classList.toggle("selected", selectedChange === file.path);
-    row.title = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
-    const status = document.createElement("span");
-    status.className = `cv-status s-${file.status === "?" ? "new" : file.status.toLowerCase()}`;
-    status.textContent = file.status === "?" ? "A" : file.status;
-    const label = document.createElement("span");
-    label.className = "cv-item-label";
-    label.textContent = file.path;
-    row.append(status, label);
-    row.onclick = () => selectChange(file.path);
-    list.append(row);
-  }
+  renderTreeNode(changeTree, list, 0, openChangeDirs, renderChanges, renderChangeNode);
   nav.append(list);
 }
 
@@ -244,6 +262,10 @@ async function loadChanges() {
   banner();
   try {
     changes = await inspect("changes");
+    changesByPath = new Map(changes.files.map((file) => [file.path, file]));
+    changeTree = buildFileTree(changes.files.map((file) => file.path));
+    openChangeDirs = new Set();
+    expandTree(changeTree, openChangeDirs);
     setRevision(changes);
     updateChrome();
     renderChanges();
@@ -553,10 +575,12 @@ export async function refreshCodeView() {
   if (!context) return;
   setBusy(true);
   activeRequest?.abort();
-  tree = treeMeta = changes = currentPayload = null;
+  tree = treeMeta = changes = changeTree = currentPayload = null;
+  changesByPath = new Map();
   fileView = null;
   selectedFile = selectedChange = null;
   openDirs = new Set();
+  openChangeDirs = new Set();
   $("code-modal").classList.remove("detail");
   updateChrome();
   try {

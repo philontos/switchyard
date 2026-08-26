@@ -122,7 +122,6 @@
   color: color-mix(in srgb, var(--accent) 55%, var(--muted)); opacity: .96; }
 .cv-dir .cv-item-label { font-weight: 600; }
 .cv-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cv-change { padding-left: 7px; }
 .cv-status { flex: none; width: 20px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center;
   font: 700 10px/1 Menlo, Consolas, monospace; color: var(--muted); background: var(--surface-2); }
 .cv-status.s-a, .cv-status.s-new { color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
@@ -226,7 +225,6 @@
   .cv-view-switch button { min-height: 28px; padding: 4px 8px; font-size: 11px; }
   .cv-item { min-height: 42px; padding-top: 8px; padding-bottom: 8px; padding-left: calc(8px + var(--depth, 0) * 16px);
     border-radius: 9px; font-size: 14px; }
-  .cv-change { padding-left: 8px; }
   /* Keep vertical reading anchored on touch screens. Wide preview formats own
      only their horizontal axis, so diagonal swipes cannot drift both axes. */
   .cv-content { overflow-x: hidden; overflow-y: auto; }

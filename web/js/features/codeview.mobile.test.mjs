@@ -41,3 +41,10 @@ test("code tree icons use accessible state and stable vector masks", () => {
   assert.match(css, /\.cv-caret\.open\s*\{\s*transform:\s*rotate\(90deg\)/);
   assert.match(css, /\.cv-file-mark\s*\{[^}]*-webkit-mask:/s);
 });
+
+test("change navigation reuses the collapsible file tree", () => {
+  assert.match(feature, /changeTree = buildFileTree\(changes\.files\.map\(\(file\) => file\.path\)\)/);
+  assert.match(feature, /renderTreeNode\(changeTree, list, 0, openChangeDirs, renderChanges, renderChangeNode\)/);
+  assert.match(feature, /expandTree\(changeTree, openChangeDirs\)/);
+  assert.match(feature, /label\.textContent = file\.name/);
+});
