@@ -10,7 +10,7 @@
 import { $ } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 import { createCodexUserMarkerOverlay } from "./codex-terminal-markers.js";
-import { activateCodexUnicode } from "./terminal-unicode.js";
+import { activateCanvasRenderer } from "./terminal-canvas.js";
 
 // taskId -> { id, pane, term, fit, ws, query, agent, title, attach,
 //             codeTarget, referenceTarget, resizeKey }
@@ -66,7 +66,7 @@ export function fitActiveNow() {
   const p = activeId != null ? panes.get(activeId) : null;
   if (p) {
     try {
-      fitPane(p);
+      p.fit.fit();
       sendResize(p);
       p.term.scrollToBottom();
       p.term.refresh(0, p.term.rows - 1);
@@ -90,51 +90,6 @@ export function applyTermTheme() {
   for (const p of panes.values()) { try { p.term.options.theme = termTheme(); } catch {} }
 }
 
-// Fit the terminal to its pane from geometry measured DIRECTLY, instead of
-// trusting FitAddon's proposal. xterm's Viewport measures its scrollbar width
-// once, in its constructor — and our panes are display:none at that point, so
-// the measurement reads 0 and xterm's `|| 15` fallback locks in a phantom 15px
-// scrollbar that FitAddon then subtracts forever: a permanent ~2-column dead
-// band on the right (macOS overlay scrollbars take no layout space). Measure
-// the live values instead — pane content box, the xterm element's own padding,
-// the viewport's real scrollbar (0 for overlay), the renderer's cell size —
-// and clamp the result against what actually fits, so the canvas can never
-// overhang the pane's clip edge at any width, zoom, or devicePixelRatio.
-function fitPane(p) {
-  const core = p.term._core;
-  const cell = core?._renderService?.dimensions?.css?.cell;
-  const vp = p.pane.querySelector(".xterm-viewport");
-  const sa = p.pane.querySelector(".xterm-scroll-area");
-  if (!cell?.width || !cell?.height || !vp || !sa) return;
-  const cs = getComputedStyle(p.term.element);
-  const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-  const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
-  const sb = Math.max(0, vp.offsetWidth - sa.offsetWidth);
-  const availW = p.pane.clientWidth - padX - sb;
-  const availH = p.pane.clientHeight - padY;
-  if (availW <= 0 || availH <= 0) return;   // hidden pane; showPane fits on show
-  let cols = Math.max(2, Math.floor(availW / cell.width));
-  let rows = Math.max(1, Math.floor(availH / cell.height));
-  while (cols > 2 && cols * cell.width > availW) cols--;
-  while (rows > 1 && rows * cell.height > availH) rows--;
-  if (p.term.cols !== cols || p.term.rows !== rows) {
-    try { core._renderService.clear(); } catch {}
-    p.term.resize(cols, rows);
-  }
-}
-
-// True when xterm's screen (canvas) currently sticks out past the pane's
-// paintable area — i.e. its right edge crosses the xterm element's right
-// padding. fitPane() can only be right for the cell size it measured; if xterm
-// re-measures its font LATER (font settling, late measure) it rebuilds the
-// canvas wider with no resize event, and the right edge then clips mid-glyph.
-function paneOverfit(p) {
-  const s = p.pane.querySelector(".xterm-screen");
-  if (!s || !p.term.element) return false;
-  const padR = parseFloat(getComputedStyle(p.term.element).paddingRight) || 0;
-  return s.getBoundingClientRect().right > p.pane.getBoundingClientRect().right - padR + 0.5;
-}
-
 // Re-fit the visible pane (background panes can't be measured while display:none,
 // and are re-fit when next shown). Coalesced to one fit per frame: rAF both
 // batches a burst of resize notifications and defers the measurement until after
@@ -148,7 +103,7 @@ function fitActive() {
     const p = activeId != null ? panes.get(activeId) : null;
     if (p) {
       try {
-        fitPane(p);
+        p.fit.fit();
         sendResize(p);
         p.codexMarkers?.scan();
       } catch {}
@@ -163,12 +118,8 @@ export function initTerm() {
   });
   window.addEventListener("pageshow", reconnectActive);
   window.addEventListener("online", reconnectActive);
-  // A one-shot fit (showPane / ws.onopen) can run before the layout is final and
-  // over-count columns; xterm then renders wider than the visible box, so the
-  // right edge is clipped and typing there pushes the cursor — and the whole
-  // page — sideways. Re-fitting whenever #term's box actually changes (first
-  // paint settling, a scrollbar toggling, browser zoom, window resize) keeps the
-  // column count matched to the real width, so neither happens.
+  // #term can resize without a window resize (for example while mobile views
+  // switch), so keep the active terminal fitted to its actual container.
   try { new ResizeObserver(fitActive).observe($("term")); } catch {}
   $("term-code").addEventListener("click", () => {
     const target = activeId != null ? panes.get(activeId)?.codeTarget : null;
@@ -291,43 +242,20 @@ function createPane(id, query, agent) {
   const term = new Terminal({
     fontSize: 13, fontFamily: "Menlo, monospace", cursorBlink: true,
     theme: termTheme(),
-    // xterm's built-in table is Unicode 6 (2010), while current TUIs calculate
-    // widths from much newer data. Codex is the path where a one-cell mismatch
-    // at the right edge is especially visible, so enable xterm's stable Unicode
-    // 11 provider there. The proposed flag is required by xterm 5.5's API.
-    allowProposedApi: agent === "codex",
+    // Menlo falls back to a CJK font on macOS whose glyph can exceed its two
+    // cells. Let the canvas renderer scale such glyphs into the cell boundary.
+    rescaleOverlappingGlyphs: true,
     macOptionClickForcesSelection: true,   // mac: Option+拖拽 强制本地选区(绕开 TUI 鼠标模式)
     rightClickSelectsWord: true,
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
-  if (agent === "codex") {
-    try {
-      if (!activateCodexUnicode(term, agent)) throw new Error("addon script did not load");
-    } catch (e) {
-      console.warn("xterm Unicode 11 provider unavailable; using built-in widths", e);
-    }
-  }
   term.open(pane);
-
-  // Self-healing geometry: the .xterm-screen box tracks the canvas exactly, so
-  // any post-fit cell-size drift shows up here as a size change. Refit with the
-  // NOW-current cell width, which shrinks cols until the canvas sits inside the
-  // pane again. Converges (a correct fit is not overfit, so nothing re-fires)
-  // and skips hidden panes — those are refit by showPane() anyway.
-  try {
-    const screen = pane.querySelector(".xterm-screen");
-    let driftQueued = false;
-    new ResizeObserver(() => {
-      if (driftQueued || activeId !== p.id) return;
-      driftQueued = true;
-      requestAnimationFrame(() => {
-        driftQueued = false;
-        if (activeId !== p.id || !paneOverfit(p)) return;
-        try { fitPane(p); sendResize(p); } catch {}
-      });
-    }).observe(screen);
-  } catch {}
+  if (!activateCanvasRenderer(term)) {
+    // Canvas is an enhancement; if the script or 2D context is unavailable,
+    // xterm keeps the DOM renderer installed by term.open().
+    console.warn("xterm canvas renderer unavailable; using DOM renderer");
+  }
 
   // mobile: all input goes through the on-screen quick-input bar, so make xterm's
   // hidden helper textarea readOnly + inputmode=none. Tapping the terminal then
@@ -390,7 +318,7 @@ function ensureSocket(p) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = p.ws = new WebSocket(`${proto}://${location.host}/pty?${p.query}&lang=${I18N.lang}`);
   p.resizeKey = "";       // a new pty needs one initial size even if dimensions match the old socket
-  ws.onopen = () => { if (activeId === p.id) { try { fitPane(p); } catch {} } sendResize(p); };
+  ws.onopen = () => { if (activeId === p.id) { try { p.fit.fit(); } catch {} } sendResize(p); };
   ws.onmessage = (e) => {
     if (typeof e.data !== "string") return;
     if (p.agent === "codex") {
@@ -411,14 +339,14 @@ function ensureSocket(p) {
 // and grab the keyboard.
 function showPane(p) {
   if (onShow) onShow(p.id);   // mobile: flip to the terminal view BEFORE fitting, so the
-                          // pane's box is visible (measurable) when fitPane() runs
+                          // pane's box is visible (measurable) when p.fit.fit() runs
                           // — and hand over the id so the quick-input swaps to this task's draft
   hidePendingView();   // a real pane takes over the dock → drop any placeholder overlay
   for (const o of panes.values()) o.pane.style.display = o === p ? "block" : "none";
   activeId = p.id;
   hideTermEmpty();
   applyBar(p);
-  try { fitPane(p); } catch {}
+  try { p.fit.fit(); } catch {}
   try { p.term.scrollToBottom(); } catch {}              // attach lands at the newest output
   try { p.term.refresh(0, p.term.rows - 1); } catch {}   // canvas can blank while hidden
   try { p.codexMarkers?.scan(); } catch {}
