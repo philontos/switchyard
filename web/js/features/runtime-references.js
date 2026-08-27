@@ -10,6 +10,9 @@ let target = null; // { id, nodeId, repoId, title, agent, references[] }
 let branchRequest = null;
 let branchesLoading = false;
 let submitting = false;
+let submissionStartedAt = 0;
+let submissionTimer = null;
+let dismissedWhileSubmitting = false;
 let refreshLocal = async () => {};
 let refreshFleet = async () => {};
 
@@ -17,11 +20,14 @@ function agentName(agent) {
   return agent === "codex" ? "Codex" : agent === "kimi" ? "Kimi Code" : "Claude Code";
 }
 
-function catalog() {
-  const repos = target?.nodeId == null
+function nodeRepos() {
+  return target?.nodeId == null
     ? state.repos
     : (state.fleet[target.nodeId]?.repos || []);
-  return repos.filter((repo) =>
+}
+
+function catalog() {
+  return nodeRepos().filter((repo) =>
     Number(repo.id) !== Number(target?.repoId) && (!repo.status || repo.status === "ready"),
   );
 }
@@ -57,14 +63,61 @@ function setStatus(message = "", error = false) {
   el.classList.toggle("error", !!error);
 }
 
+function renderSubmittingStatus() {
+  if (!submitting) return;
+  const seconds = Math.max(0, Math.floor((Date.now() - submissionStartedAt) / 1000));
+  setStatus(I18N.t(seconds ? "runtimeRef.addingElapsed" : "runtimeRef.adding", { seconds }));
+}
+
+function renderCurrentReferences() {
+  const references = Array.isArray(target?.references) ? target.references.filter(Boolean) : [];
+  const section = $("rr-current");
+  section.hidden = references.length === 0;
+  $("rr-current-count").textContent = `${references.length}/${MAX_REFERENCES}`;
+  const repos = nodeRepos();
+  const rows = references.map((reference) => {
+    const row = document.createElement("div");
+    row.className = "runtime-ref-current-row";
+    const copy = document.createElement("div");
+    copy.className = "runtime-ref-current-copy";
+    const alias = document.createElement("code");
+    alias.className = "runtime-ref-current-alias";
+    alias.textContent = `ref:${reference.alias}`;
+    const repo = repos.find((candidate) => Number(candidate.id) === Number(reference.repo_id));
+    const source = document.createElement("span");
+    source.className = "runtime-ref-current-source";
+    source.textContent = `${reference.repo_name || repo?.name || `#${reference.repo_id}`}/${reference.requested_ref || "?"}`;
+    const commit = document.createElement("code");
+    commit.className = "runtime-ref-current-commit";
+    commit.textContent = String(reference.resolved_commit || "").slice(0, 8) || "—";
+    commit.title = reference.resolved_commit || "";
+    copy.append(alias, source);
+    row.append(copy, commit);
+    return row;
+  });
+  $("rr-current-list").replaceChildren(...rows);
+}
+
 function setSubmitting(on) {
   submitting = on;
+  if (submissionTimer) clearInterval(submissionTimer);
+  submissionTimer = null;
   $("rr-repo").disabled = on;
   $("rr-branch").disabled = on || branchesLoading;
   $("rr-alias").disabled = on;
-  $("rr-cancel").disabled = on;
+  // Closing only dismisses the modal; the owner node safely finishes its
+  // atomic snapshot in the background and the eventual result still toasts.
+  $("rr-cancel").disabled = false;
+  $("rr-cancel").textContent = I18N.t(on ? "dialog.close" : "dialog.cancel");
   $("rr-submit").disabled = on || branchesLoading;
-  $("rr-submit").textContent = I18N.t(on ? "runtimeRef.adding" : "runtimeRef.submit");
+  $("rr-submit").classList.toggle("loading", on);
+  $("rr-submit").textContent = I18N.t(on ? "runtimeRef.submitting" : "runtimeRef.submit");
+  if (on) {
+    submissionStartedAt = Date.now();
+    dismissedWhileSubmitting = false;
+    renderSubmittingStatus();
+    submissionTimer = setInterval(renderSubmittingStatus, 1000);
+  }
 }
 
 function renderDynamicCopy() {
@@ -78,7 +131,10 @@ function renderDynamicCopy() {
   });
   $("rr-agent-hint").textContent = I18N.t("runtimeRef.manifestHint");
   $("rr-alias").placeholder = I18N.t("runtimeRef.aliasPh");
-  if (!submitting) $("rr-submit").textContent = I18N.t("runtimeRef.submit");
+  $("rr-submit").textContent = I18N.t(submitting ? "runtimeRef.submitting" : "runtimeRef.submit");
+  $("rr-cancel").textContent = I18N.t(submitting ? "dialog.close" : "dialog.cancel");
+  renderCurrentReferences();
+  renderSubmittingStatus();
 }
 
 async function loadBranches(repo, preferred = null) {
@@ -120,19 +176,27 @@ function chooseRepo(repo) {
 
 export function openRuntimeReference(nextTarget) {
   if (!nextTarget) return;
+  if (submitting) {
+    renderDynamicCopy();
+    $("runtime-ref-modal").style.display = "flex";
+    return;
+  }
   target = {
     ...nextTarget,
     agent: nextTarget.agent === "codex" || nextTarget.agent === "kimi" ? nextTarget.agent : "claude",
     references: Array.isArray(nextTarget.references) ? nextTarget.references : [],
   };
-  if (target.references.length >= MAX_REFERENCES) {
-    target = null;
-    return toast(I18N.t("runtimeRef.limit"), "error");
-  }
   const repos = catalog();
-  if (!repos.length) {
-    target = null;
-    return toast(I18N.t("runtimeRef.noRepos"), "error");
+  const canAdd = target.references.length < MAX_REFERENCES && repos.length > 0;
+  $("rr-add-form").hidden = !canAdd;
+  $("rr-submit").hidden = !canAdd;
+  setSubmitting(false);
+  renderDynamicCopy();
+  $("runtime-ref-modal").style.display = "flex";
+  if (!canAdd) {
+    setStatus(I18N.t(target.references.length >= MAX_REFERENCES ? "runtimeRef.limit" : "runtimeRef.noRepos"));
+    setTimeout(() => $("rr-cancel").focus(), 30);
+    return;
   }
 
   const usedRepos = new Set(target.references.map((reference) => Number(reference.repo_id)));
@@ -140,15 +204,17 @@ export function openRuntimeReference(nextTarget) {
   $("rr-repo").replaceChildren(...repos.map((repo) => new Option(repo.name, String(repo.id), false, Number(repo.id) === Number(first.id))));
   $("rr-alias").value = uniqueAlias(first.name, first.id);
   setStatus();
-  setSubmitting(false);
-  renderDynamicCopy();
-  $("runtime-ref-modal").style.display = "flex";
   void loadBranches(first);
   setTimeout(() => $("rr-repo").focus(), 30);
 }
 
 export function closeRuntimeReference() {
-  if (submitting) return;
+  if (submitting) {
+    $("runtime-ref-modal").style.display = "none";
+    if (!dismissedWhileSubmitting) toast(I18N.t("runtimeRef.background"), "success", 4000);
+    dismissedWhileSubmitting = true;
+    return;
+  }
   branchRequest?.abort();
   branchRequest = null;
   target = null;
@@ -177,7 +243,6 @@ export async function submitRuntimeReference() {
 
   const activeTarget = target;
   setSubmitting(true);
-  setStatus(I18N.t("runtimeRef.adding"));
   try {
     const url = activeTarget.nodeId == null
       ? `/api/tasks/${activeTarget.id}/references`
@@ -187,7 +252,7 @@ export async function submitRuntimeReference() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ repo_id: Number(repo.id), ref: branch, alias }),
     });
-    if (!activeTarget.references.some((reference) => reference.alias === result.reference?.alias)) {
+    if (result.reference && !activeTarget.references.some((reference) => reference.alias === result.reference.alias)) {
       activeTarget.references.push(result.reference);
     }
     const key = result.existing ? "runtimeRef.already" : "runtimeRef.attached";

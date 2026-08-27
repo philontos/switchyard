@@ -191,6 +191,9 @@ function sendReferenceFailure(req: Request, res: Response, result: Exclude<AddTa
   if (result.error === "notReady" || result.error === "limit") {
     return res.status(409).json({ error: result.message });
   }
+  if (result.error === "materializeTimeout") {
+    return res.status(504).json({ error: tr(lang, "reference.timeout") });
+  }
   return res.status(500).json({ error: result.message });
 }
 
