@@ -667,6 +667,10 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .term-code { width: 28px; padding: 0; }
 .term-ref { width: auto; padding: 0 8px; gap: 2px; color: var(--accent-text); font-size: 11.5px; }
 .term-ref-plus { font-size: 14px; line-height: 1; }
+.term-ref-count { min-width: 16px; height: 16px; margin-left: 3px; padding: 0 4px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); font-size: 9.5px; font-weight: 650; }
+.term-ref-count[hidden] { display: none; }
 .term-code:hover, .term-ref:hover { color: var(--text); border-color: var(--accent); background: var(--surface-2); }
 .term-code[hidden], .term-ref[hidden] { display: none; }
 /* Claude session id: show the full UUID when the bar has room, ellipsis it when
@@ -690,11 +694,25 @@ a { color: var(--accent-bar); }
 .runtime-ref-modal { width: 460px; }
 .runtime-ref-modal h2 { margin-bottom: 5px; }
 .runtime-ref-task { margin-bottom: 14px; color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-ref-current { margin: -3px 0 14px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
+.runtime-ref-current-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 7px;
+  color: var(--faint); font-size: 10.5px; font-weight: 650; letter-spacing: .3px; text-transform: uppercase; }
+.runtime-ref-current-list { display: flex; flex-direction: column; gap: 5px; max-height: 150px; overflow: auto; }
+.runtime-ref-current-row { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 5px 7px;
+  border: 1px solid var(--surface-2); border-radius: 6px; background: var(--surface); }
+.runtime-ref-current-copy { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; }
+.runtime-ref-current-alias { flex: none; color: var(--accent-text); font: 10.5px/1.5 Menlo, Consolas, monospace; }
+.runtime-ref-current-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10.5px; }
+.runtime-ref-current-commit { flex: none; color: var(--faint); font: 9.5px/1.5 Menlo, Consolas, monospace; }
 .runtime-ref-hint { margin: 5px 0 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px;
   background: var(--bg); color: var(--muted); font-size: 11.5px; line-height: 1.5; }
 .runtime-ref-status { min-height: 19px; margin-top: 7px; color: var(--faint); font-size: 11.5px; }
 .runtime-ref-status.error { color: var(--red-text); }
-.runtime-ref-modal .dlg-actions { margin-top: 5px; }
+.runtime-ref-modal .dlg-actions { margin-top: 5px; align-items: stretch; }
+.runtime-ref-modal .dlg-actions button { white-space: nowrap; }
+#rr-submit { min-width: 96px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+#rr-submit.loading::before { content: ""; width: 11px; height: 11px; flex: none;
+  border: 2px solid #ffffff66; border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
 /* Repository information: a read-only sheet that leaves the active task/terminal
    untouched. Optional owner-private fields are simply omitted for remote nodes. */
 .repo-info-modal { width: 500px; padding: 0; overflow: hidden; box-shadow: 0 18px 60px var(--shadow); }
@@ -958,9 +976,11 @@ a { color: var(--accent-bar); }
   #term-attach, .term-claude { display: none; }
   #term-title { flex: 1; max-width: none; font-size: 13px; text-align: left; padding-right: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .term-code, .term-ref { width: 44px; height: 44px; padding: 0; border-radius: 12px; background: transparent; }
+  .term-ref { position: relative; }
   .term-code .code-ico { width: 16px; height: 16px; }
   .term-ref-label { display: none; }
   .term-ref-plus { font-size: 21px; font-weight: 300; }
+  .term-ref-count { position: absolute; top: 4px; right: 3px; min-width: 15px; height: 15px; padding: 0 3px; font-size: 9px; }
   .term-code:active, .term-ref:active { color: var(--text); background: var(--surface-2); }
 
   /* ===== 阅读 / Reading view (mobile only) =========================================

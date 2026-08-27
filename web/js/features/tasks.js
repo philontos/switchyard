@@ -7,7 +7,7 @@ import { toast, showLoading, hideLoading } from "../core/feedback.js";
 import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
 import { state } from "../core/state.js";
-import { openPty, disposePty, prunePanes, setClaudeSession,
+import { openPty, disposePty, prunePanes, setClaudeSession, setTaskReferences,
          openPending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
 import { rerender, expandRepo, loadFleet, connectNode } from "./hosts.js";
 import { refreshProviders, selectedProviderId, setProviderTarget } from "./providers.js";
@@ -715,7 +715,10 @@ export async function loadTasks() {
   taskOrder = tasks.map(t => t.id);          // preserve the API's id-DESC order
   // push each task's latest Claude session id into its live pane so the term-bar
   // chip lights up as soon as claude writes its id — no reconnect needed.
-  for (const t of tasks) setClaudeSession(t.id, t.claude_session || "");
+  for (const t of tasks) {
+    setClaudeSession(t.id, t.claude_session || "");
+    setTaskReferences(t.id, null, t.references || []);
+  }
   // drop kept-alive terminals whose task is gone or whose session was killed
   // (status 'cleaned' == not connectable, mirrors taskCard's `active`). If the
   // open card was one of them, clear the now-dangling selection.

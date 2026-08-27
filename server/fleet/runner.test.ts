@@ -35,6 +35,13 @@ test("LocalRunner.readText returns file contents, and null when missing", async 
   assert.equal(await localRunner.readText(path.join(tmp, "nope")), null);
 });
 
+test("LocalRunner.exec terminates a command at its requested deadline", async () => {
+  await assert.rejects(
+    localRunner.exec(process.execPath, ["-e", "setTimeout(() => {}, 2000)"], { timeoutMs: 50 }),
+    (error: any) => error?.name === "TimeoutError" && /50ms/.test(error.message),
+  );
+});
+
 test("sshControlPath stays below macOS's unix-socket limit for deep profiles", () => {
   const deep = "/Users/example/.task-dispatcher/profiles/tailscale-test/data/12345678";
   const controlPath = sshControlPath(deep, 501);

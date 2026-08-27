@@ -39,6 +39,7 @@ const messages: Record<Lang, Record<string, string>> = {
     "paste.badType": "unsupported image type",
     "paste.empty": "empty image data",
     "paste.noTarget": "this task has no working directory for pasted images",
+    "reference.timeout": "preparing the Ref timed out; check repository network access and try again",
   },
   zh: {
     "repo.fieldsRequired": "名称和 git url 必填",
@@ -60,6 +61,7 @@ const messages: Record<Lang, Record<string, string>> = {
     "paste.badType": "不支持的图片类型",
     "paste.empty": "空图片数据",
     "paste.noTarget": "该任务没有可存放粘贴图片的工作目录",
+    "reference.timeout": "创建 Ref 超时，请检查仓库网络或访问权限后重试",
   },
 };
 

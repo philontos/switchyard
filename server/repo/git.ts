@@ -2,6 +2,11 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { Runner } from "../fleet/runner.js";
 
+// Runtime Ref creation needs a deadline of its own on the owner node (local
+// operations have no SSH transport deadline). Keep it inside the controller's
+// 120s remote-node deadline so a useful domain error can still make it back.
+export const REFERENCE_GIT_TIMEOUT_MS = 90_000;
+
 export function canonicalGitUrl(value: string): string {
   return String(value || "").trim().replace(/\/+$/, "").replace(/\.git$/i, "");
 }
@@ -13,15 +18,23 @@ async function git(
   cwd: string | null,
   args: string[],
   extraEnv: Record<string, string> = {},
+  timeoutMs?: number,
 ): Promise<string> {
   return runner.exec("git", args, {
     cwd: cwd ?? undefined,
     // extras only — the Runner merges these over the (local or remote) base env.
     env: {
-      GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes -o ConnectTimeout=15",
+      GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ||
+        "ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3",
       GIT_TERMINAL_PROMPT: "0",
+      GCM_INTERACTIVE: "Never",
+      // Git maps these to libcurl's low-speed guard for HTTPS remotes. The
+      // process deadline above remains the final bound for DNS and helpers.
+      GIT_HTTP_LOW_SPEED_LIMIT: "1024",
+      GIT_HTTP_LOW_SPEED_TIME: "45",
       ...extraEnv,
     },
+    timeoutMs,
   });
 }
 
@@ -85,8 +98,14 @@ export async function listBranches(runner: Runner, mirror: string): Promise<stri
  * whenever the base was itself a live task's branch. Tracking refs are never
  * checked out, so this is always safe.
  */
-export async function fetchBranch(runner: Runner, mirror: string, branch: string) {
-  await git(runner, mirror, ["fetch", "--filter=blob:none", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`]);
+export async function fetchBranch(runner: Runner, mirror: string, branch: string, timeoutMs?: number) {
+  await git(
+    runner,
+    mirror,
+    ["fetch", "--filter=blob:none", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+    {},
+    timeoutMs,
+  );
 }
 
 /** Manual full refresh of all branches (the repo card's "fetch" button). Keeps
@@ -136,12 +155,18 @@ export async function addDetachedWorktreeFromBranch(
   // A reference selected from the repository catalog means the remote branch's
   // current tip. Unlike a primary task base (which may intentionally be an
   // unpushed local work branch), do not silently fall back to stale/local state.
-  await fetchBranch(runner, mirror, baseBranch);
+  await fetchBranch(runner, mirror, baseBranch, REFERENCE_GIT_TIMEOUT_MS);
   const startPoint = `origin/${baseBranch}`;
-  const commit = (await git(runner, mirror, ["rev-parse", "--verify", `${startPoint}^{commit}`])).trim();
+  const commit = (await git(
+    runner,
+    mirror,
+    ["rev-parse", "--verify", `${startPoint}^{commit}`],
+    {},
+    REFERENCE_GIT_TIMEOUT_MS,
+  )).trim();
   if (!commit) throw new Error(`could not resolve reference branch ${baseBranch}`);
   await runner.mkdirp(path.dirname(dest));
-  await git(runner, mirror, ["worktree", "add", "--detach", dest, commit]);
+  await git(runner, mirror, ["worktree", "add", "--detach", dest, commit], {}, REFERENCE_GIT_TIMEOUT_MS);
   return commit;
 }
 
@@ -156,9 +181,15 @@ export async function addReferenceSnapshotFromBranch(
   dest: string,
   baseBranch: string,
 ): Promise<string> {
-  await fetchBranch(runner, mirror, baseBranch);
+  await fetchBranch(runner, mirror, baseBranch, REFERENCE_GIT_TIMEOUT_MS);
   const startPoint = `origin/${baseBranch}`;
-  const commit = (await git(runner, mirror, ["rev-parse", "--verify", `${startPoint}^{commit}`])).trim();
+  const commit = (await git(
+    runner,
+    mirror,
+    ["rev-parse", "--verify", `${startPoint}^{commit}`],
+    {},
+    REFERENCE_GIT_TIMEOUT_MS,
+  )).trim();
   if (!commit) throw new Error(`could not resolve reference branch ${baseBranch}`);
   if (await runner.exists(dest)) throw new Error(`reference destination already exists: ${dest}`);
 
@@ -170,13 +201,13 @@ export async function addReferenceSnapshotFromBranch(
   try {
     await runner.mkdirp(staging);
     const indexEnv = { GIT_INDEX_FILE: indexFile };
-    await git(runner, mirror, ["read-tree", commit], indexEnv);
+    await git(runner, mirror, ["read-tree", commit], indexEnv, REFERENCE_GIT_TIMEOUT_MS);
     await git(runner, mirror, [
       `--work-tree=${staging}`,
       "checkout-index",
       "--all",
       "--force",
-    ], indexEnv);
+    ], indexEnv, REFERENCE_GIT_TIMEOUT_MS);
     if (runner.rename) await runner.rename(staging, dest);
     else await runner.exec("mv", [staging, dest]);
     return commit;

@@ -15,7 +15,7 @@ import { repoGroupHead, repaintRepoDetails } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask, connect,
          pendingRepoCards, pendingNodeRepoCards, pendingShellCards,
          isShadowedByPending, isShadowedByNodePending, pendingCard } from "./tasks.js";
-import { detachDock, openPty, pruneNodePanes } from "./terminal.js";
+import { detachDock, openPty, pruneNodePanes, setTaskReferences } from "./terminal.js";
 import { duringAutoFollow } from "./mobile.js";
 import { orderTasks, isDraggingTask } from "./reorder.js";
 
@@ -100,7 +100,10 @@ export async function loadFleet() {
   const keep = new Set();
   for (const n of f.nodes) {
     if (n.kind === "local") continue;
-    for (const tk of n.tasks || []) if (tk.status !== "cleaned") keep.add(`n${n.node.id}:${tk.id}`);
+    for (const tk of n.tasks || []) {
+      if (tk.status !== "cleaned") keep.add(`n${n.node.id}:${tk.id}`);
+      setTaskReferences(tk.id, n.node.id, tk.references || []);
+    }
   }
   if (pruneNodePanes(keep).includes(state.selectedTaskId)) state.selectedTaskId = null;
   renderList();

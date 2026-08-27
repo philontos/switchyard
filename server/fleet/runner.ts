@@ -15,6 +15,8 @@ export interface ExecOpts {
   env?: Record<string, string>;
   /** Bound captured stdout/stderr for read-heavy commands such as code previews. */
   maxBuffer?: number;
+  /** Kill a command after this elapsed-time deadline. Omitted means no deadline. */
+  timeoutMs?: number;
 }
 
 /** Minimal command transport used by bootstrap and interactive tmux relays. */
@@ -48,12 +50,23 @@ export class LocalRunner implements Runner {
   dataDir = DATA_DIR;
 
   async exec(file: string, args: string[], opts: ExecOpts = {}): Promise<string> {
-    const { stdout } = await pexec(file, args, {
-      cwd: opts.cwd,
-      env: { ...process.env, ...opts.env },
-      maxBuffer: opts.maxBuffer ?? 1024 * 1024 * 64,
-    });
-    return stdout;
+    try {
+      const { stdout } = await pexec(file, args, {
+        cwd: opts.cwd,
+        env: { ...process.env, ...opts.env },
+        maxBuffer: opts.maxBuffer ?? 1024 * 1024 * 64,
+        timeout: opts.timeoutMs,
+        killSignal: "SIGTERM",
+      });
+      return stdout;
+    } catch (error: any) {
+      if (opts.timeoutMs && error?.killed) {
+        const timeout = new Error(`command timed out after ${opts.timeoutMs}ms`, { cause: error });
+        timeout.name = "TimeoutError";
+        throw timeout;
+      }
+      throw error;
+    }
   }
   async mkdirp(dir: string) { fs.mkdirSync(dir, { recursive: true }); }
   async exists(p: string) { return fs.existsSync(p); }
@@ -141,6 +154,7 @@ export class RemoteRunner implements CommandRunner {
   async exec(file: string, args: string[], opts: ExecOpts = {}): Promise<string> {
     return localRunner.exec("ssh", [...sshBaseArgs(this.managed, this.port), this.target, this.remoteCmd(file, args, opts)], {
       maxBuffer: opts.maxBuffer,
+      timeoutMs: opts.timeoutMs,
     });
   }
 }

@@ -9,6 +9,7 @@ import {
   addWorktreeFromBranch,
   fetchBranch,
   fetchMirror,
+  REFERENCE_GIT_TIMEOUT_MS,
   removeWorktree,
 } from "./git.ts";
 import { localRunner } from "../fleet/runner.ts";
@@ -17,11 +18,14 @@ import type { Runner } from "../fleet/runner.ts";
 // --- unit: pin the refspecs (the whole fix is "write the tracking ref, never the
 // local head", so the refspec target is the contract worth guarding) ----------
 
-function fakeRunner() {
-  const calls: { file: string; args: string[] }[] = [];
+function fakeRunner(outputFor: (args: string[]) => string = () => "") {
+  const calls: { file: string; args: string[]; opts?: any }[] = [];
   const runner = {
     kind: "local", dataDir: "/tmp",
-    exec: async (file: string, args: string[]) => { calls.push({ file, args }); return ""; },
+    exec: async (file: string, args: string[], opts?: any) => {
+      calls.push({ file, args, opts });
+      return outputFor(args);
+    },
     async mkdirp() {}, async exists() { return false; }, async rmrf() {},
     async putDir() {}, async putFile() {},
   } as unknown as Runner;
@@ -44,6 +48,17 @@ test("fetchBranch writes the remote-tracking ref, never the checked-out local he
     !fetch!.args.some((a) => a.endsWith(":refs/heads/feat/10-explore")),
     "fetchBranch must NOT write the local head refs/heads/<branch>",
   );
+  assert.match(fetch!.opts.env.GIT_SSH_COMMAND, /ServerAliveInterval=15/);
+  assert.equal(fetch!.opts.env.GIT_TERMINAL_PROMPT, "0");
+});
+
+test("reference snapshots bound every Git phase on the owner node", async () => {
+  const commit = "a".repeat(40);
+  const { runner, calls } = fakeRunner((args) => args[0] === "rev-parse" ? commit : "");
+  await addReferenceSnapshotFromBranch(runner, "/m.git", "/task/.tdsp/refs/api", "main");
+  const gitCalls = calls.filter((call) => call.file === "git");
+  assert.ok(gitCalls.length >= 4);
+  assert.ok(gitCalls.every((call) => call.opts.timeoutMs === REFERENCE_GIT_TIMEOUT_MS));
 });
 
 test("fetchMirror refreshes into the remote-tracking namespace (prune), not local heads", async () => {

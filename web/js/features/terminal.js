@@ -396,7 +396,29 @@ function applyReferenceTarget(target) {
   const el = $("term-ref");
   el.hidden = !target;
   el.disabled = !target;
-  el.setAttribute("aria-label", I18N.t("runtimeRef.open"));
+  const references = Array.isArray(target?.references) ? target.references.filter(Boolean) : [];
+  const count = references.length;
+  const countEl = $("term-ref-count");
+  countEl.hidden = count === 0;
+  countEl.textContent = count ? String(count) : "";
+  const label = count
+    ? I18N.t("runtimeRef.openWithCount", {
+        count,
+        aliases: references.map((reference) => `ref:${reference.alias}`).join(", "),
+      })
+    : I18N.t("runtimeRef.open");
+  el.setAttribute("aria-label", label);
+  el.title = label;
+}
+
+// Keep an already-open pane's Ref badge current as the task/fleet poll learns
+// about attachments made here, in the background, or from another controller.
+export function setTaskReferences(taskId, nodeId, references) {
+  const paneId = nodeId == null ? Number(taskId) : `n${nodeId}:${taskId}`;
+  const p = panes.get(paneId);
+  if (!p?.referenceTarget) return;
+  p.referenceTarget.references = Array.isArray(references) ? references : [];
+  if (activeId === paneId) applyReferenceTarget(p.referenceTarget);
 }
 
 // Update a task's stored Claude session id and, if it's the visible pane, the bar.

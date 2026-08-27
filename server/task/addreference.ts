@@ -38,7 +38,7 @@ export type AddTaskReferenceResult =
     }
   | {
       ok: false;
-      error: "notFound" | "notRepoTask" | "notReady" | "invalidReference" | "limit" | "materializeFailed" | "persistFailed";
+      error: "notFound" | "notRepoTask" | "notReady" | "invalidReference" | "limit" | "materializeFailed" | "materializeTimeout" | "persistFailed";
       message: string;
     };
 
@@ -84,14 +84,17 @@ export async function addTaskReference(
       worktree,
       requestedRef: selected.requested_ref,
     });
-  } catch {
+  } catch (error) {
     // setupReference publishes by atomic rename and owns its temporary cleanup.
     // Never delete `worktree` here: a concurrent request may have won the alias
     // race and published a valid snapshot at that path.
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
     return {
       ok: false,
-      error: "materializeFailed",
-      message: `Could not prepare ${selected.repo.name}/${selected.requested_ref}`,
+      error: timedOut ? "materializeTimeout" : "materializeFailed",
+      message: timedOut
+        ? `Timed out while preparing ${selected.repo.name}/${selected.requested_ref}`
+        : `Could not prepare ${selected.repo.name}/${selected.requested_ref}`,
     };
   }
 

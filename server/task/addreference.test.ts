@@ -108,3 +108,17 @@ test("addTaskReference trusts atomic materialization cleanup and never deletes a
   assert.deepEqual(s.removed, []);
   assert.equal((db.prepare("SELECT count(*) AS c FROM task_references").get() as any).c, 0);
 });
+
+test("addTaskReference reports a materialization timeout distinctly", async () => {
+  const db = seed();
+  const s = envFor(db);
+  s.env.setupReference = async () => {
+    const error = new Error("command timed out");
+    error.name = "TimeoutError";
+    throw error;
+  };
+  const result = await addTaskReference(s.env, 7, { repo_id: 2, ref: "develop", alias: "web" });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error, "materializeTimeout");
+  assert.equal((db.prepare("SELECT count(*) AS c FROM task_references").get() as any).c, 0);
+});
