@@ -57,8 +57,17 @@ test("reference snapshots bound every Git phase on the owner node", async () => 
   const { runner, calls } = fakeRunner((args) => args[0] === "rev-parse" ? commit : "");
   await addReferenceSnapshotFromBranch(runner, "/m.git", "/task/.tdsp/refs/api", "main");
   const gitCalls = calls.filter((call) => call.file === "git");
-  assert.ok(gitCalls.length >= 4);
+  assert.ok(gitCalls.length >= 3);
   assert.ok(gitCalls.every((call) => call.opts.timeoutMs === REFERENCE_GIT_TIMEOUT_MS));
+  assert.ok(
+    gitCalls.some((call) => call.args[0] === "worktree" && call.args[1] === "add" && call.args.includes("--detach")),
+    "snapshot export uses checkout's batched missing-blob prefetch",
+  );
+  assert.equal(
+    gitCalls.some((call) => call.args.includes("checkout-index")),
+    false,
+    "snapshot export must not lazily fetch one blob at a time through checkout-index",
+  );
 });
 
 test("fetchMirror refreshes into the remote-tracking namespace (prune), not local heads", async () => {
@@ -203,6 +212,11 @@ test("task-local reference snapshots are atomically exported without Git metadat
       "a reference includes tracked files even when Git archives would export-ignore them",
     );
     assert.equal(fs.existsSync(path.join(snapshot, ".git")), false, "a Ref is a plain code snapshot");
+    assert.equal(
+      (await git(mirror, "worktree", "list", "--porcelain")).includes(".tmp-api-"),
+      false,
+      "the temporary linked-worktree registration is pruned",
+    );
     assert.deepEqual(
       fs.readdirSync(path.dirname(snapshot)).filter((name) => name.startsWith(".tmp-")),
       [],
@@ -217,6 +231,50 @@ test("task-local reference snapshots are atomically exported without Git metadat
 
     await removeWorktree(localRunner, mirror, snapshot);
     assert.equal(fs.existsSync(snapshot), false, "normal task cleanup also removes plain snapshots");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reference snapshots batch-hydrate a cold blobless mirror", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sw-git-partial-ref-"));
+  try {
+    const { origin, seed, mirror } = await scaffold(root);
+    await git(origin, "config", "uploadpack.allowFilter", "true");
+    await git(mirror, "remote", "set-url", "origin", `file://${origin}`);
+
+    const files = path.join(seed, "batch");
+    fs.mkdirSync(files);
+    for (let index = 0; index < 24; index++) {
+      fs.writeFileSync(path.join(files, `${index}.txt`), `unique blob ${index}\n`);
+    }
+    await git(seed, "add", "batch");
+    await git(seed, "commit", "-m", "add batch hydration fixture");
+    await git(seed, "push", "origin", "feat/base");
+
+    await fetchBranch(localRunner, mirror, "feat/base");
+    assert.equal((await git(mirror, "config", "--get", "remote.origin.partialclonefilter")).trim(), "blob:none");
+    const missingBlob = (await git(seed, "rev-parse", "feat/base:batch/0.txt")).trim();
+    await assert.rejects(
+      localRunner.exec("git", ["cat-file", "-e", missingBlob], {
+        cwd: mirror,
+        env: { GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0" },
+      }),
+      "the fixture mirror must start without the referenced file blobs",
+    );
+
+    const packDir = path.join(mirror, "objects", "pack");
+    const packCount = () => fs.readdirSync(packDir).filter((name) => name.endsWith(".pack")).length;
+    const before = packCount();
+    const snapshot = path.join(root, "task", ".tdsp", "refs", "api");
+    await addReferenceSnapshotFromBranch(localRunner, mirror, snapshot, "feat/base");
+    const addedPacks = packCount() - before;
+
+    assert.equal(fs.readFileSync(path.join(snapshot, "batch", "23.txt"), "utf8"), "unique blob 23\n");
+    assert.ok(
+      addedPacks <= 2,
+      `normal checkout should batch missing blobs instead of creating one promisor pack per file (added ${addedPacks})`,
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

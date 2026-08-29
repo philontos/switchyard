@@ -172,9 +172,11 @@ export async function addDetachedWorktreeFromBranch(
 
 /** Materialize an immutable, provider-neutral reference snapshot. Unlike a Git
  * linked worktree this directory has no .git pointer and can safely live below
- * the primary task worktree. A private temporary index checks out every tracked
- * path without honoring archive-only export-ignore attributes, then the complete
- * directory is published with one rename so agents never observe a partial Ref. */
+ * the primary task worktree. Materialize through Git's normal worktree checkout:
+ * on a blobless partial clone that path batches missing-object prefetches, whereas
+ * checkout-index lazily fetches blobs one at a time and can time out on an otherwise
+ * healthy remote. Remove the temporary worktree link before atomically publishing
+ * the complete directory so agents never observe Git metadata or a partial Ref. */
 export async function addReferenceSnapshotFromBranch(
   runner: Runner,
   mirror: string,
@@ -196,25 +198,33 @@ export async function addReferenceSnapshotFromBranch(
   const parent = path.dirname(dest);
   const token = `${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
   const staging = path.join(parent, `.tmp-${path.basename(dest)}-${token}`);
-  const indexFile = path.join(parent, `.tmp-${path.basename(dest)}-${token}.index`);
   await runner.mkdirp(parent);
   try {
-    await runner.mkdirp(staging);
-    const indexEnv = { GIT_INDEX_FILE: indexFile };
-    await git(runner, mirror, ["read-tree", commit], indexEnv, REFERENCE_GIT_TIMEOUT_MS);
-    await git(runner, mirror, [
-      `--work-tree=${staging}`,
-      "checkout-index",
-      "--all",
-      "--force",
-    ], indexEnv, REFERENCE_GIT_TIMEOUT_MS);
+    await git(
+      runner,
+      mirror,
+      ["worktree", "add", "--detach", staging, commit],
+      {},
+      REFERENCE_GIT_TIMEOUT_MS,
+    );
+    // The checkout above is only a batching mechanism. The published Ref is a
+    // plain snapshot, not a linked worktree, so discard its pointer before the
+    // atomic rename. The finally-prune removes the matching common-dir record.
+    await runner.rmrf(path.join(staging, ".git"));
     if (runner.rename) await runner.rename(staging, dest);
     else await runner.exec("mv", [staging, dest]);
     return commit;
   } finally {
-    await runner.rmrf(indexFile).catch(() => {});
-    await runner.rmrf(`${indexFile}.lock`).catch(() => {});
     await runner.rmrf(staging).catch(() => {});
+    // Also repairs a worktree-add that was interrupted after registering its
+    // temporary path. Never let best-effort metadata cleanup hide the real error.
+    await git(
+      runner,
+      mirror,
+      ["worktree", "prune", "--expire=now"],
+      {},
+      REFERENCE_GIT_TIMEOUT_MS,
+    ).catch(() => {});
   }
 }
 
