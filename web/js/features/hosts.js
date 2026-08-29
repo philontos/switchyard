@@ -8,6 +8,7 @@ import { hideLoading, showLoading, toast } from "../core/feedback.js";
 import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
 import { taskLifecycle } from "../core/task-lifecycle.js";
+import { orderTasks, repoOrderKey } from "../core/task-order.js";
 import { remoteFollowTasks } from "../core/host-follow.js";
 import { replaceHostList } from "../core/host-list-scroll.js";
 import { state } from "../core/state.js";
@@ -17,7 +18,7 @@ import { paintSelection, taskCard, allTasks, isEditingTask, connect,
          isShadowedByPending, isShadowedByNodePending, pendingCard } from "./tasks.js";
 import { detachDock, openPty, pruneNodePanes, setTaskReferences } from "./terminal.js";
 import { duringAutoFollow } from "./mobile.js";
-import { orderTasks, isDraggingTask } from "./reorder.js";
+import { isDraggingTask } from "./reorder.js";
 
 let hostsOrder = [];               // API order: local machine first. Active machine is state.activeHostId.
 const collapsedRepos = new Set();  // collapsed repo groups (repo id) — read by renderList
@@ -234,7 +235,7 @@ function fleetDot(tk) {
 // A card for a task owned by a remote node (from the fleet snapshot). Its actions
 // mirror taskCard: stop while active; resume/remove-worktree/delete-record once
 // archived. Only a live active session is connectable.
-function fleetCard(hostId, tk) {
+function fleetCard(hostId, tk, orderKey = null) {
   const paneId = `n${hostId}:${tk.id}`;
   // selection is painted post-render by paintSelection, not baked into the markup
   // (keeps renderList's rebuild cache selection-agnostic — see pendingCard's note).
@@ -259,7 +260,10 @@ function fleetCard(hostId, tk) {
     ? `<button class="t-resume" title="${t("task.resumeTitle")}" onclick="event.stopPropagation();resumeNodeTask(${hostId},${tk.id})">⟳ ${t("task.resume")}</button>`
     : "";
   const open = lifecycle.connectable ? ` clickable" onclick="connectNode(${hostId},${tk.id})` : "";
-  return `<div class="card task task-${agent}${open}" data-pane="${paneId}">
+  const drag = orderKey && tk.kind === "repo" && tk.status !== "cleaned"
+    ? ` data-id="${tk.id}" data-order-key="${orderKey}"`
+    : "";
+  return `<div class="card task task-${agent}${open}" data-pane="${paneId}"${drag}>
       <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
       <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname" title="${t("task.renameHint")}" ondblclick="renameTask(event,${tk.id},${hostId})">${tk.title}</span></div>
       ${meta}
@@ -377,7 +381,7 @@ function followHostTask(hostId) {
   if (remembered && connectable(remembered)) { connect(remembered.id); return; }
 
   for (const r of state.repos) {
-    const mine = orderTasks(r.id, tasks.filter(tk => tk.repo_id === r.id && connectable(tk)));
+    const mine = orderTasks(repoOrderKey(null, r.id), tasks.filter(tk => tk.repo_id === r.id && connectable(tk)));
     if (mine.length) { connect(mine[0].id); return; }
   }
   const shell = tasks.find(tk => tk.kind === "local" && tk.host_id === hostId && connectable(tk));
@@ -478,9 +482,10 @@ function renderListHtml() {
   if (isLocal) {
     const repoBlocks = state.repos.map(r => {
       const collapsed = collapsedRepos.has(r.id);
-      const mine = orderTasks(r.id, tasks.filter(tk => tk.kind !== "local" && tk.repo_id === r.id && tk.status !== "cleaned" && !isShadowedByPending(tk)));
+      const orderKey = repoOrderKey(null, r.id);
+      const mine = orderTasks(orderKey, tasks.filter(tk => tk.kind !== "local" && tk.repo_id === r.id && tk.status !== "cleaned" && !isShadowedByPending(tk)));
       const pend = pendingRepoCards(r.id).map(pendingCard).join("");
-      const cards = pend + mine.map(tk => taskCard(tk, true)).join("");
+      const cards = pend + mine.map(tk => taskCard(tk, true, orderKey)).join("");
       const body = collapsed ? pend : (cards || `<div class="grp-empty">${t("repo.noTasks")}</div>`);
       return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, true, collapsed, mine)}${body}</div>`;
     }).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`;
@@ -502,9 +507,10 @@ function renderListHtml() {
     const canCode = fl.capabilities?.includes("code-view-v1");
     const repoGroups = repos.map(r => {
       const ready = !r.status || r.status === "ready";
+      const orderKey = repoOrderKey(h.id, r.id);
       const pend = pendingNodeRepoCards(h.id, r.id).map(pendingCard).join("");
-      const mine = live.filter(tk => tk.kind === "repo" && tk.repo_id === r.id && !isShadowedByNodePending(h.id, tk));
-      const cards = pend + mine.map(tk => fleetCard(h.id, tk)).join("");
+      const mine = orderTasks(orderKey, live.filter(tk => tk.kind === "repo" && tk.repo_id === r.id && !isShadowedByNodePending(h.id, tk)));
+      const cards = pend + mine.map(tk => fleetCard(h.id, tk, orderKey)).join("");
       const code = canCode && ready
         ? `<button class="grp-code" title="${t("code.open")}" onclick="event.stopPropagation();openRepoCode(${r.id},${h.id})"><span class="code-ico" aria-hidden="true"></span></button>` : "";
       const del = remoteReady ? `<button class="grp-del" title="${t("repo.delTitle")}" onclick="event.stopPropagation();delNodeRepo(${h.id},${r.id})">🗑</button>` : "";

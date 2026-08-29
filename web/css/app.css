@@ -582,7 +582,7 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .card-x.stop:hover { color: color-mix(in srgb, var(--red-text) 45%, var(--faint));
   background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
 .card-x.stop:hover .stop-ico { border-color: color-mix(in srgb, var(--red) 62%, var(--border)); }
-/* drag-to-reorder (reorder.js): repo task cards carry data-repo. touch-action:pan-y
+/* drag-to-reorder (reorder.js): repo task cards carry data-order-key. touch-action:pan-y
    lets the browser own VERTICAL scrolling (so a swipe over a card still scrolls the
    list — `none` here silently killed touch-scroll, since cards blanket the list),
    while a STATIONARY long-press (no pan started) still escalates to a drag: reorder.js
@@ -590,7 +590,7 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    While held the card becomes a position:fixed float (left/top set inline) that
    tracks the pointer; .reordering kills text selection on the group and shows the
    grab cursor; .task-ph is the placeholder marking where the card will land. */
-.task[data-repo] { touch-action: pan-y; }
+.task[data-order-key] { touch-action: pan-y; }
 .grp.reordering { user-select: none; cursor: grabbing; }
 /* pickup: scale up + deepen the shadow, animated. reorder.js sets the float's
    position inline (left/top) every move, so those are deliberately NOT in the
