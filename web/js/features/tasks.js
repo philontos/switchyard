@@ -600,7 +600,7 @@ export function isShadowedByNodePending(hostId, tk) {
 }
 // One placeholder card: a pulsing "creating" dot + the title, selected while its
 // loading window is the active dock view, clickable to re-focus that window. No
-// data-id/data-repo — it isn't connectable or drag-reorderable until it's real.
+// data-id/data-order-key — it isn't connectable or drag-reorderable until it's real.
 // NOTE: no selection class in the markup — selection is painted AFTER render by
 // paintSelection (all three card kinds). Baking it into the HTML made the list's
 // byte-identical rebuild cache miss on every selection change, so switching tasks
@@ -651,7 +651,7 @@ function rejectPending(tmpId, message) {
   toast(t("toast.dispatchFailed", { error: message }), "error", 6000);
 }
 
-export function taskCard(t, online) {
+export function taskCard(t, online, orderKey = null) {
   const active = t.status !== "cleaned";
   // agent picks the card's colour (task-claude / task-codex / task-kimi accent bar + tint).
   const agent = normalizeAgent(t.agent);
@@ -696,9 +696,10 @@ export function taskCard(t, online) {
   const open = (active && t.alive) ? ` clickable" onclick="connect(${t.id})` : "";
   // selection is painted post-render by paintSelection, NOT baked into the markup —
   // see pendingCard's note (keeps the list's rebuild cache selection-agnostic).
-  // data-repo marks a card as drag-reorderable (reorder.js) — only active repo
-  // tasks: shells have no repo group, archived/cleaned ones aren't reorderable.
-  const drag = active && t.kind !== "local" ? ` data-repo="${t.repo_id}"` : "";
+  // data-order-key marks a card as drag-reorderable (reorder.js). The renderer
+  // supplies a machine-scoped repo key only for active cards inside a repo group;
+  // shells, archived cards, and orphaned remote tasks therefore stay fixed.
+  const drag = active && t.kind !== "local" && orderKey ? ` data-order-key="${orderKey}"` : "";
   return `<div class="card task task-${agent}${open}" data-id="${t.id}"${drag}>
     <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
     ${head}${note}${resumeBtn}

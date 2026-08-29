@@ -55,6 +55,16 @@ test("local and remote task titles share inline rename with a visible saving sta
   assert.match(css, /\.tname-save-state \.sync-icon\s*\{[^}]*animation:\s*spin/s);
 });
 
+test("local and remote repo tasks share machine-scoped drag ordering", () => {
+  assert.match(tasks, /data-order-key="\$\{orderKey\}"/);
+  assert.match(hosts, /const orderKey = repoOrderKey\(null, r\.id\)/);
+  assert.match(hosts, /const orderKey = repoOrderKey\(h\.id, r\.id\)/);
+  assert.match(hosts, /orderTasks\(orderKey, live\.filter/);
+  assert.match(hosts, /fleetCard\(h\.id, tk, orderKey\)/);
+  assert.match(hosts, /data-order-key="\$\{orderKey\}"/);
+  assert.match(css, /\.task\[data-order-key\]\s*\{\s*touch-action:\s*pan-y/);
+});
+
 test("desktop dispatch branch picker uses a larger drawn chevron", () => {
   assert.match(css, /@media \(min-width: 761px\)\s*\{[\s\S]*?#task-modal #t-base \.cs-caret\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/);
   assert.match(css, /#task-modal #t-base \.cs-caret::before\s*\{[^}]*border-right:\s*2px solid currentColor;[^}]*border-bottom:\s*2px solid currentColor;/s);

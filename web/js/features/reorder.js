@@ -15,28 +15,16 @@
 // stays put in the DOM as a position:fixed float (capture preserved) and only a
 // non-captured placeholder is moved among the siblings.
 //
-// State (orders) lives here so hosts.js renderList() can apply it on every paint
-// and the 4s/5s pollers can rebuild #m-list freely between drags. isDraggingTask()
-// stays true through the drop animation too, so a poll can't yank the card out
-// mid-gesture or mid-settle (mirrors isEditingTask).
+// Remembered orders live in core/task-order.js so hosts.js can apply them on every
+// paint; gesture state stays here. The 4s/5s pollers may rebuild #m-list between
+// drags, while isDraggingTask() stays true through the drop animation so a poll
+// can't yank the card out mid-gesture or mid-settle (mirrors isEditingTask).
+import { rememberTaskOrder } from "../core/task-order.js";
 import { rerender } from "./hosts.js";
 
-const orders = new Map();   // repoId -> [taskId, ...] in user-chosen order
 let dragging = false;
 
 export function isDraggingTask() { return dragging; }
-
-// Apply a repo group's custom order to its (incoming id-DESC) active-task list.
-// Tasks dispatched this session that aren't in the saved order float to the top
-// (keeps "newest on top"); saved ids that have since disappeared just drop out.
-// Stable sort preserves the incoming order among same-rank (unknown) tasks.
-export function orderTasks(repoId, tasks) {
-  const ord = orders.get(repoId);
-  if (!ord) return tasks;
-  const rank = new Map(ord.map((id, i) => [id, i]));
-  return [...tasks].sort((a, b) =>
-    (rank.has(a.id) ? rank.get(a.id) : -1) - (rank.has(b.id) ? rank.get(b.id) : -1));
-}
 
 const PRESS_MS = 400;     // hold this long before a press becomes a drag
 const MOVE_TOL = 8;       // px of movement during the hold = scroll/click, abort
@@ -66,7 +54,7 @@ export function initReorder() {
 
 function onDown(e) {
   if (dragging || pressTimer || e.button || !e.isPrimary) return;   // primary button/pointer only
-  const el = e.target.closest(".task[data-repo]");                  // only active repo task cards carry data-repo
+  const el = e.target.closest(".task[data-order-key]");             // only active repo task cards carry an order key
   if (!el || e.target.closest(".card-x, .tname-edit")) return;      // not the corner action / rename input
   card = el;
   pointerId = e.pointerId;
@@ -151,7 +139,7 @@ function moveFloat() {
 // the siblings that shift so they slide smoothly instead of snapping. The
 // placeholder isn't pointer-captured, so moving it never disturbs the gesture.
 function placePlaceholder() {
-  const sibs = [...grp.querySelectorAll(`.task[data-repo="${card.dataset.repo}"]`)].filter(c => c !== card);
+  const sibs = [...grp.querySelectorAll(`.task[data-order-key="${card.dataset.orderKey}"]`)].filter(c => c !== card);
   const before = sibs.find(c => {
     const r = c.getBoundingClientRect();
     return lastY < r.top + r.height / 2;
@@ -209,8 +197,8 @@ function finalizeDrop() {
 }
 
 function commitOrder() {
-  const ids = [...grp.querySelectorAll(`.task[data-repo="${card.dataset.repo}"]`)].map(c => Number(c.dataset.id));
-  orders.set(Number(card.dataset.repo), ids);
+  const ids = [...grp.querySelectorAll(`.task[data-order-key="${card.dataset.orderKey}"]`)].map(c => Number(c.dataset.id));
+  rememberTaskOrder(card.dataset.orderKey, ids);
 }
 
 function onClickCapture(e) {
