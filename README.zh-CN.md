@@ -19,6 +19,8 @@
 
 Switchyard 是运行在用户自己电脑上的、**本地优先的 AI Coding Agent 控制平面**。每个任务都有真实的 git worktree 和 tmux 会话；得到授权的任意浏览器，看到的都是这份持续存在的工作现场。
 
+Switchyard 不替代 Agent 自身的推理、规划或工具调用循环：Claude Code、Codex 与 Kimi Code 仍是真正执行任务的 Agent；Switchyard 提供它们外围的执行与控制层，包括工作区隔离、生命周期与恢复、上下文挂载、可观测性、人机接管和远程路由。它可以并发运行多个异构 Agent 会话，但不是 Supervisor/Worker 式的多 Agent 协作框架。
+
 - **关掉浏览器，任务仍然继续。** 会话由 tmux 持有，网页只是入口。
 - **多个任务并行，互不覆盖。** 每个任务有独立的分支、worktree 和终端。
 - **在电脑与手机之间切换，现场不丢。** 随时看进度、回答确认，或进入真实 TUI 接管。
@@ -117,19 +119,19 @@ tdsp serve
 
 主机重启或 tmux 会话意外结束不会破坏工作目录。只要 worktree 还在，点击 **恢复** 就会用原来的 Agent、模型和端点重建会话。它会沿用原会话名创建一个新的 tmux 会话，而不是恢复旧进程的快照；Switchyard 会回到保留的 worktree，再调用 Agent 自带的会话继续命令。真正提供连续性的是 worktree、Switchyard 保存的任务元数据和 Agent 落盘的对话记录，而不是 tmux 跨重启存活。每个节点的 **Shells** 分组还可以创建不绑定仓库的终端，用于临时排查和一次性命令。
 
-引用仓库由目标节点解析并固定到准确 commit，以 detached worktree 放在 `worktrees/refs/<task-id>/<alias>`；恢复任务时会重新挂载，并写入任务的 `workspace.json`，作为只读语义的参考目录交给 Agent。
+引用仓库由目标节点解析并固定到准确 commit，以纯代码快照发布到 `<task-worktree>/.tdsp/refs/<alias>`。原子更新的 `.tdsp/refs.json` 是权威 alias 映射；持久化的启动指令要求 Claude Code、Codex 和 Kimi Code 在用户提到 Ref 时重新读取它，因此运行中添加引用不需要重启 Agent，也不会向实时终端注入内容。使用旧版外部 `worktrees/refs/<task-id>/<alias>` 布局的已有任务会继续兼容，直到任务被清理。
 
 ## Agent 与模型
 
 | Agent | 任务配置 | 当前 Switchyard 能力 |
 |---|---|---|
-| **Claude Code** | 本机登录，或经过连通性验证的 Anthropic 兼容端点 | 实时终端、恢复、图片粘贴、原生权限等待状态、本机移动端会话阅读 |
-| **Codex** | 本机登录与可选模型 ID | 实时终端、恢复、图片粘贴、全权限启动、本机移动端会话阅读 |
-| **Kimi Code / Kimi K3** | 本机登录与可选模型 ID，例如 `k3` | 交互式 `--auto` 终端、恢复、图片粘贴、本机移动端会话阅读 |
+| **Claude Code** | 本机登录，或经过连通性验证的 Anthropic 兼容端点 | 实时终端、恢复、图片粘贴、原生权限等待状态、本机与远程移动端会话阅读 |
+| **Codex** | 本机登录与可选模型 ID | 实时终端、恢复、图片粘贴、全权限启动、本机与远程移动端会话阅读 |
+| **Kimi Code / Kimi K3** | 本机登录与可选模型 ID，例如 `k3` | 交互式 `--auto` 终端、恢复、图片粘贴、本机与远程移动端会话阅读 |
 
 所选 Agent 与模型属于任务本身，恢复时会被保留。Provider 凭据只留在真正运行任务的机器，不会复制给其它节点。
 
-当前能力边界：黄色「需要你」权限状态只支持 Claude Code；远程节点的会话记录暂未接入 **阅读** 模式，这些任务会直接进入实时终端。
+当前能力边界：黄色「需要你」权限状态只支持 Claude Code。远程 **阅读** 需要节点支持 `transcript-v1`；旧版本节点上的任务会直接进入实时终端，更新该节点后即可使用。
 
 ## 为手机完整适配
 

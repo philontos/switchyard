@@ -19,6 +19,8 @@
 
 Switchyard is a **local-first control plane for AI coding agents**. It runs on your development machine, gives every task a real git worktree and tmux session, and exposes the same working state to any browser you authorize.
 
+Switchyard does not replace an agent's reasoning, planning, or tool loop. Claude Code, Codex, and Kimi Code remain the agents; Switchyard supplies the execution and control layer around them: workspace isolation, lifecycle and recovery, context attachment, observability, human handoff, and remote routing. It can run many heterogeneous agent sessions concurrently, but it is not a supervisor/worker multi-agent collaboration framework.
+
 - **Close the browser; the task keeps running.** tmux, not the page, owns the session.
 - **Run several tasks without collisions.** Every task has its own branch, worktree, and terminal.
 - **Move between laptop and phone without losing context.** Read progress, answer a prompt, or enter the live TUI.
