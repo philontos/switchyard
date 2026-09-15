@@ -11,6 +11,7 @@ import { $ } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 import { createCodexUserMarkerOverlay } from "./codex-terminal-markers.js";
 import { activateCanvasRenderer } from "./terminal-canvas.js";
+import { mountTerminalImeGuard } from "./terminal-ime.js";
 
 // taskId -> { id, pane, term, fit, ws, query, agent, title, attach,
 //             codeTarget, referenceTarget, resizeKey }
@@ -269,10 +270,15 @@ function createPane(id, query, agent) {
     mountTouchScroll(pane);
   }
 
+  const textarea = pane.querySelector(".xterm-helper-textarea");
+  const isMac = navigator.platform.toUpperCase().includes("MAC");
+  const imeGuard = mountTerminalImeGuard(term, textarea, { enabled: isMac });
+
   const p = {
     id, pane, term, fit, ws: null, query, agent,
     title: "", desc: "", attach: "", claude: "",
     resizeKey: "",
+    imeGuard,
     codexMarkers: agent === "codex" ? createCodexUserMarkerOverlay(term) : null,
   };
 
@@ -284,13 +290,9 @@ function createPane(id, query, agent) {
   // 键盘复制: mac=Cmd+C, 其他=Ctrl+Shift+C; 仅在有选区时拦截,避免吃掉 ^C(SIGINT)
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown") return true;
-    // 组字途中按 CapsLock(macOS 切换中/英输入法的常用键)时,xterm 的 keydown 处理会先于
-    // compositionHelper 跑:它不在 229/Shift/Ctrl/Alt 的"忽略"名单里,于是被当成提交键,
-    // _finalizeComposition(false) 先把组字内容上屏一次;紧接着系统真正的 compositionend
-    // 又上屏一次 → 同一段拼音发两遍("nihao" 变 "ni haonihao")。CapsLock 和那几个修饰键
-    // 一样不该结束组字,组字途中直接吃掉它,让上屏只走 compositionend 一条路。
-    if (e.isComposing && e.keyCode === 20) return false;
-    const isMac = navigator.platform.toUpperCase().includes("MAC");
+    // CapsLock is the macOS 中/英 switch. Let the IME's compositionend be the
+    // sole commit path instead of allowing xterm to finalize the same text too.
+    if (imeGuard.shouldIgnoreKeydown(e)) return false;
     const isCopy = isMac ? (e.metaKey && e.code === "KeyC") : (e.ctrlKey && e.shiftKey && e.code === "KeyC");
     if (isCopy && term.hasSelection()) {
       navigator.clipboard.writeText(term.getSelection()).catch(() => {});
@@ -631,6 +633,7 @@ export function disposePty(id) {
   if (!p) return;
   panes.delete(id);
   try { if (p.ws) { p.ws.onclose = null; p.ws.onmessage = null; p.ws.close(); } } catch {}
+  try { p.imeGuard?.dispose(); } catch {}
   try { p.codexMarkers?.dispose(); } catch {}
   try { p.term.dispose(); } catch {}
   p.pane.remove();
