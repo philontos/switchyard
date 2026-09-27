@@ -640,16 +640,18 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
    background, so it never competes with terminal text. */
 .codex-user-marker-layer { position: absolute; top: 0; right: 0; bottom: 0; left: -5px;
   z-index: 8; pointer-events: none; overflow: hidden; }
-.codex-user-marker { --user-ink: color-mix(in srgb, var(--accent-bar) 76%, transparent);
-  position: absolute; left: 2px; width: 5px;
+.codex-user-marker { --user-ink: color-mix(in srgb, var(--accent-bar) 92%, transparent);
+  --user-halo: color-mix(in srgb, var(--accent-bar) 30%, transparent);
+  position: absolute; left: 3px; width: 6px;
+  filter: drop-shadow(0 0 1px var(--user-halo));
   background: linear-gradient(to bottom,
-    transparent 0, var(--user-ink) 4px,
-    var(--user-ink) calc(100% - 3px), transparent 100%) left top / 1px 100% no-repeat; }
+    transparent 0, var(--user-ink) 3px,
+    var(--user-ink) calc(100% - 2px), transparent 100%) left top / 2px 100% no-repeat; }
 /* Short oblique terminals make a quiet brush bracket instead of a generic
    status bar. Both strokes connect to the rule, so no ornament floats alone. */
 .codex-user-marker::before, .codex-user-marker::after { content: ""; position: absolute; left: 0;
-  width: 4px; height: 1px; border-radius: 999px; background: var(--user-ink);
-  transform-origin: left center; opacity: .72; }
+  width: 5px; height: 2px; border-radius: 999px; background: var(--user-ink);
+  transform-origin: left center; opacity: .88; }
 .codex-user-marker::before { top: 3px; transform: rotate(22deg); }
 .codex-user-marker::after { bottom: 2px; transform: rotate(-22deg); }
 .term-empty { position: absolute; inset: 38px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--faint-2); pointer-events: none; }
