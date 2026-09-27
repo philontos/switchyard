@@ -266,7 +266,9 @@ process.exitCode = await runCli(process.argv.slice(2), {
     try {
       return {
         ok: true as const,
-        transcript: await readTranscript(localRunner, task, request.since, request.source),
+        transcript: await readTranscript(localRunner, task, request.since, request.source, {
+          userOnly: request.userOnly,
+        }),
       };
     } catch {
       // A controller gets a stable semantic failure, never an owner-local path

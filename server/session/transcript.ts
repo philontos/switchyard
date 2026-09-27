@@ -40,6 +40,8 @@ export interface TranscriptResult {
   cursor: number;
   /** More complete lines are ready. The client may fetch the next page immediately. */
   hasMore?: boolean;
+  /** Proof that Codex entries came from semantic user_message events. */
+  mode?: "codex-user-message-v1";
 }
 
 export const TRANSCRIPT_CAPABILITY = "transcript-v1";
@@ -47,6 +49,7 @@ export interface TranscriptReadRequest {
   taskId: number;
   since: number;
   source: string | null;
+  userOnly?: boolean;
 }
 export type TranscriptCommandResult =
   | { ok: true; transcript: TranscriptResult }
@@ -65,7 +68,8 @@ export function isTranscriptReadRequest(value: unknown): value is TranscriptRead
   return !!request
     && Number.isSafeInteger(request.taskId) && Number(request.taskId) > 0
     && Number.isSafeInteger(request.since) && Number(request.since) >= 0
-    && (request.source === null || (typeof request.source === "string" && request.source.length <= SOURCE_CAP));
+    && (request.source === null || (typeof request.source === "string" && request.source.length <= SOURCE_CAP))
+    && (request.userOnly === undefined || typeof request.userOnly === "boolean");
 }
 
 function isEntry(value: unknown): value is Entry {
@@ -95,7 +99,8 @@ export function isTranscriptResult(value: unknown): value is TranscriptResult {
     && (result.source === null || (typeof result.source === "string" && result.source.length <= SOURCE_CAP))
     && Number.isSafeInteger(result.cursor) && Number(result.cursor) >= 0
     && Array.isArray(result.entries) && result.entries.every(isEntry)
-    && (result.hasMore === undefined || typeof result.hasMore === "boolean");
+    && (result.hasMore === undefined || typeof result.hasMore === "boolean")
+    && (result.mode === undefined || result.mode === "codex-user-message-v1");
 }
 
 // Best one-liner for a tool call's summary row: the command / file / pattern it acts on.
@@ -156,7 +161,9 @@ export function parseClaudeLine(o: any): Entry[] {
   const c = o.message?.content;
   const out: Entry[] = [];
   if (typeof c === "string") {
-    if (c.trim() && !isClaudeNoise(c)) out.push({ t: "user", text: c });
+    if (c.trim() && !(t === "user" && isClaudeNoise(c))) {
+      out.push({ t: t === "user" ? "user" : "assistant", text: c });
+    }
     return out;
   }
   if (!Array.isArray(c)) return out;
@@ -254,16 +261,34 @@ export function parseKimiLine(o: any): Entry[] {
   return [];
 }
 
+// The event stream is the strongest source for identifying what the person
+// actually submitted. Unlike response_item(role=user), user_message events do
+// not contain injected <environment_context> or other synthetic context. Keep
+// this separate from parseCodexLine: the normal transcript uses response_item as
+// its canonical all-role stream and would otherwise render every prompt twice.
+export function parseCodexUserLine(o: any): Entry[] {
+  if (!o || o.type !== "event_msg" || o.payload?.type !== "user_message") return [];
+  const text = typeof o.payload.message === "string" ? o.payload.message : "";
+  return text.trim() ? [{ t: "user", text }] : [];
+}
+
 // ---- file location ----
 
 const escapeClaudeCwd = (cwd: string) => cwd.replace(/[/.]/g, "-");
 
 // Locate a task's Codex rollout: the newest rollout whose session_meta.cwd is the
-// worktree. Cached per task once found (the file only grows). One shell round-trip.
+// worktree. Normal transcript reads reuse the cache; semantic live-turn checks can
+// refresh it to notice a new rollout after /new or a process restart.
 const codexPathCache = new Map<number, string>();
-async function locateCodex(runner: Runner, home: string, cwd: string, taskId: number): Promise<string | null> {
+async function locateCodex(
+  runner: Runner,
+  home: string,
+  cwd: string,
+  taskId: number,
+  refresh = false,
+): Promise<string | null> {
   const cached = codexPathCache.get(taskId);
-  if (cached && (await runner.exists(cached).catch(() => false))) return cached;
+  if (!refresh && cached && (await runner.exists(cached).catch(() => false))) return cached;
   const dir = `${home}/.codex/sessions`;
   const needle = `"cwd"[[:space:]]*:[[:space:]]*${ere(JSON.stringify(cwd))}`;
   // newest-first (the ISO date lives in the path), stop at the first rollout whose
@@ -366,17 +391,22 @@ export async function readTranscript(
   task: Task,
   since = 0,
   knownSource: string | null = null,
+  options: { userOnly?: boolean } = {},
 ): Promise<TranscriptResult> {
   if (runner.kind !== "local") throw new Error("Transcript must be read by the node that owns the task");
   const agent = asAgentKind(task.agent);
+  const userOnly = agent === "codex" && options.userOnly === true;
+  const mode = userOnly ? "codex-user-message-v1" as const : undefined;
   const cwd = task.worktree_path;
-  if (!cwd) return { agent, source: null, entries: [], cursor: 0, hasMore: false };
+  if (!cwd) return { agent, source: null, entries: [], cursor: 0, hasMore: false, mode };
   const home = os.homedir();
 
   let file: string | null = null;
   let source: string | null = null;
   if (agent === "codex") {
-    file = await locateCodex(runner, home, cwd, task.id);
+    // Semantic marker reads refresh discovery so /new or a restarted Codex
+    // process cannot leave the client attached to the previous rollout.
+    file = await locateCodex(runner, home, cwd, task.id, userOnly);
     source = file ? `codex:${path.basename(file)}` : null;
   } else if (agent === "kimi") {
     const located = await locateKimi(runner, home, cwd);
@@ -389,13 +419,15 @@ export async function readTranscript(
       source = `claude:${sid}`;
     }
   }
-  if (!file || !source) return { agent, source: null, entries: [], cursor: 0, hasMore: false };
+  if (!file || !source) return { agent, source: null, entries: [], cursor: 0, hasMore: false, mode };
 
   const from = knownSource && knownSource !== source ? 0 : since;   // source changed → reload
   const tail = await tailFrom(runner, file, from);
-  if (!tail) return { agent, source, entries: [], cursor: from, hasMore: false };
+  if (!tail) return { agent, source, entries: [], cursor: from, hasMore: false, mode };
 
-  const parse = agent === "codex" ? parseCodexLine : agent === "kimi" ? parseKimiLine : parseClaudeLine;
+  const parse = agent === "codex"
+    ? (userOnly ? parseCodexUserLine : parseCodexLine)
+    : agent === "kimi" ? parseKimiLine : parseClaudeLine;
   const entries: Entry[] = [];
   let cursor = from;
   let payloadBytes = 0;
@@ -418,5 +450,5 @@ export async function readTranscript(
     cursor += lineBytes;
   }
   cursor = Math.min(cursor, tail.cursor);
-  return { agent, source, entries, cursor, hasMore: cursor < tail.cursor };
+  return { agent, source, entries, cursor, hasMore: cursor < tail.cursor, mode };
 }

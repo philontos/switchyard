@@ -4,7 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import type { Task } from "../core/db.ts";
 import type { Runner } from "../fleet/runner.ts";
-import { isTranscriptReadRequest, isTranscriptResult, parseKimiLine, readTranscript } from "./transcript.ts";
+import {
+  isTranscriptReadRequest,
+  isTranscriptResult,
+  parseClaudeLine,
+  parseCodexUserLine,
+  parseKimiLine,
+  readTranscript,
+} from "./transcript.ts";
 
 function task(agent: Task["agent"] = "kimi"): Task {
   return {
@@ -16,6 +23,63 @@ function task(agent: Task["agent"] = "kimi"): Task {
   };
 }
 
+test("Claude string messages preserve their semantic role", () => {
+  assert.deepEqual(parseClaudeLine({
+    type: "assistant", message: { content: "answer" },
+  }), [{ t: "assistant", text: "answer" }]);
+  assert.deepEqual(parseClaudeLine({
+    type: "user", message: { content: "question" },
+  }), [{ t: "user", text: "question" }]);
+});
+
+test("Codex user-only parsing uses semantic user_message events", () => {
+  assert.deepEqual(parseCodexUserLine({
+    type: "event_msg",
+    payload: { type: "user_message", message: "first\n\nsecond" },
+  }), [{ t: "user", text: "first\n\nsecond" }]);
+  assert.deepEqual(parseCodexUserLine({
+    type: "response_item",
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text: "duplicate" }] },
+  }), [], "response_item mirror is ignored in the user-only event stream");
+  assert.deepEqual(parseCodexUserLine({
+    type: "event_msg",
+    payload: { type: "agent_message", message: "assistant" },
+  }), []);
+});
+
+test("Codex user-only reads advertise their semantic event mode", async () => {
+  const file = "/codex/rollout-test.jsonl";
+  const body = [
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "synthetic mirror" }] } },
+    { type: "event_msg", payload: { type: "user_message", message: "actual input" } },
+    { type: "event_msg", payload: { type: "agent_message", message: "answer" } },
+  ].map((record) => JSON.stringify(record)).join("\n") + "\n";
+  const runner = {
+    kind: "local" as const,
+    dataDir: "/data",
+    async exec(command: string, args: string[]) {
+      if (command === "sh") return file;
+      if (command === "wc") return `${Buffer.byteLength(body, "utf8")} ${file}\n`;
+      if (command === "tail") {
+        const from = Math.max(0, Number((args[1] || "+1").slice(1)) - 1);
+        return Buffer.from(body, "utf8").subarray(from).toString("utf8");
+      }
+      throw new Error(`unexpected exec: ${command}`);
+    },
+    async exists(p: string) { return p === file; },
+    async readText() { return null; },
+    async mkdirp() {},
+    async rmrf() {},
+    async putDir() {},
+    async putFile() {},
+  } satisfies Runner;
+
+  const result = await readTranscript(runner, task("codex"), 0, null, { userOnly: true });
+  assert.equal(result.mode, "codex-user-message-v1");
+  assert.equal(result.source, "codex:rollout-test.jsonl");
+  assert.deepEqual(result.entries, [{ t: "user", text: "actual input" }]);
+});
+
 test("transcript reading refuses a remote runner", async () => {
   const remote = { kind: "ssh" } as Runner;
   await assert.rejects(() => readTranscript(remote, task("claude")), /node that owns the task/);
@@ -24,6 +88,8 @@ test("transcript reading refuses a remote runner", async () => {
 test("transcript cursor requests accept only bounded owner-opaque values", () => {
   assert.equal(isTranscriptReadRequest({ taskId: 7, since: 0, source: null }), true);
   assert.equal(isTranscriptReadRequest({ taskId: 7, since: 42, source: "kimi:session-7" }), true);
+  assert.equal(isTranscriptReadRequest({ taskId: 7, since: 42, source: null, userOnly: true }), true);
+  assert.equal(isTranscriptReadRequest({ taskId: 7, since: 42, source: null, userOnly: "yes" }), false);
   assert.equal(isTranscriptReadRequest({ taskId: 0, since: 0, source: null }), false);
   assert.equal(isTranscriptReadRequest({ taskId: 7, since: -1, source: null }), false);
   assert.equal(isTranscriptReadRequest({ taskId: 7, since: 0, source: "x".repeat(4097) }), false);
@@ -38,6 +104,13 @@ test("transcript cursor requests accept only bounded owner-opaque values", () =>
     source: "kimi:session-7",
     entries: [{ t: "assistant", text: 7 }],
     cursor: 42,
+  }), false);
+  assert.equal(isTranscriptResult({
+    agent: "codex",
+    source: "codex:rollout.jsonl",
+    entries: [],
+    cursor: 42,
+    mode: "ordinary-transcript",
   }), false);
 });
 

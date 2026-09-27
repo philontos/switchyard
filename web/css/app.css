@@ -13,6 +13,7 @@
   --surface-2: #2a241e;     /* raised: buttons, faint dividers, rename field, toast */
   --surface-3: #352d24;     /* button hover */
   --card-hover: #2a231c;    /* clickable card hover */
+  --term-bg: #1a1613;       /* xterm canvas; also masks tiny marker ornaments */
   /* borders */
   --border: #352e27;
   --border-hover: #473d33;  /* custom-select trigger hover */
@@ -242,6 +243,7 @@
   --surface-2: #efe9df;
   --surface-3: #e7e0d2;
   --card-hover: #f0ebe1;
+  --term-bg: #fbf8f2;
   --border: #e3d9c9;
   --border-hover: #d6c9b4;
   --text: #2c2620;
@@ -630,17 +632,29 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .term-pane { position: absolute; inset: 0; min-width: 0; min-height: 0; }
 /* The inset lives on .xterm because FitAddon subtracts padding from that node. */
 .term-pane > .xterm { width: 100%; height: 100%; padding: 6px; }
-/* Codex user-turn markers live above xterm's canvases because tmux keeps the
-   outer terminal in the alternate buffer, where xterm line decorations are not
-   painted. The overlay spans the submitted message rows (including continuations)
-   and never handles input, so terminal geometry and interaction remain untouched. */
-.codex-user-marker-layer { position: absolute; inset: 0; z-index: 8; pointer-events: none; overflow: hidden; }
-.codex-user-marker { position: absolute; left: 0;
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--codex-accent) 25%, transparent) 0,
-    color-mix(in srgb, var(--codex-accent) 14%, transparent) 72%,
-    color-mix(in srgb, var(--codex-accent) 5%, transparent) 100%);
-  box-shadow: inset 4px 0 var(--codex-accent); }
+/* Semantically confirmed Codex user turns are marked like a restrained 朱批
+   (a traditional vermilion margin note): one hairline, a tiny seal-like knot,
+   and a short brush-tail. The motif lives in xterm's 6px left padding rather
+   than washing the message with a background, so it reads as an annotation and
+   never competes with terminal text. Warm terracotta identifies the human voice
+   across agents; Codex's blue-green remains reserved for agent/task identity. */
+.codex-user-marker-layer { position: absolute; top: 0; right: 0; bottom: 0; left: -5px;
+  z-index: 8; pointer-events: none; overflow: hidden; }
+.codex-user-marker { --user-ink: color-mix(in srgb, var(--accent-bar) 76%, transparent);
+  position: absolute; left: 2px; width: 5px;
+  background: linear-gradient(to bottom,
+    transparent 0, var(--user-ink) 4px,
+    var(--user-ink) calc(100% - 3px), transparent 100%) left top / 1px 100% no-repeat; }
+/* The hollow diamond is a modernized seal / book-binding knot. Filling it with
+   the terminal surface keeps the vertical rule from showing through its centre. */
+.codex-user-marker::before { content: ""; position: absolute; top: 2px; left: -2px;
+  width: 4px; height: 4px; border: 1px solid var(--user-ink); border-radius: 1px;
+  background: var(--term-bg); transform: rotate(45deg); }
+/* A slightly oblique terminal stroke keeps the rule from looking like a generic
+   status bar, while remaining quiet at normal terminal scale. */
+.codex-user-marker::after { content: ""; position: absolute; left: 0; bottom: 2px;
+  width: 4px; height: 1px; border-radius: 999px; background: var(--user-ink);
+  transform: rotate(-26deg); transform-origin: left center; opacity: .72; }
 .term-empty { position: absolute; inset: 38px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--faint-2); pointer-events: none; }
 .term-empty.hidden { display: none; }
 .term-empty .te-ic { font-size: 34px; opacity: .6; }

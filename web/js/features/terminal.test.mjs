@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pasteImageUrl } from "./terminal.js";
+import { pasteImageUrl, transcriptUrl } from "./terminal.js";
 import { mountTerminalImeGuard } from "./terminal-ime.js";
 
 const flushTimers = () => new Promise((resolve) => setTimeout(resolve, 10));
@@ -102,4 +102,10 @@ test("IME guard preserves browser-reported CapsLock protection when cleanup is d
     keyCode: 20,
     isComposing: false,
   })), false);
+});
+
+test("transcriptUrl targets the task's owning node", () => {
+  assert.equal(transcriptUrl(7), "/api/tasks/7/transcript");
+  assert.equal(transcriptUrl("n3:42"), "/api/nodes/3/tasks/42/transcript");
+  assert.equal(transcriptUrl("pending-1"), null);
 });

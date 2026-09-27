@@ -647,6 +647,7 @@ function transcriptRequest(taskIdValue: string, req: Request): TranscriptReadReq
     taskId: Number(taskIdValue),
     since: req.query.since == null ? 0 : Number(req.query.since),
     source: req.query.source ? String(req.query.source) : null,
+    userOnly: req.query.user_only === "1",
   };
   return isTranscriptReadRequest(request) ? request : null;
 }
@@ -655,7 +656,10 @@ function transcriptRequest(taskIdValue: string, req: Request): TranscriptReadReq
 // "阅读 / Reading" view. Incremental: pass the previous ?since byte cursor + ?source id
 // to get only what's new; a changed source (e.g. /clear started a fresh Claude session)
 // makes the client reload from the top. Read-only + best-effort: a task with no
-// transcript yet returns an empty stream.
+// transcript yet returns an empty stream. `user_only=1` uses the agent's strongest
+// submitted-input event (Codex user_message) and is consumed by the live terminal's
+// fail-closed user-turn locator. Remote tasks use the owner-node relay below and
+// never fall back to controller-side filesystem access.
 app.get("/api/tasks/:id/transcript", async (req, res) => {
   const lang = langFromReq(req);
   const request = transcriptRequest(req.params.id, req);
@@ -664,7 +668,9 @@ app.get("/api/tasks/:id/transcript", async (req, res) => {
   if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
   res.setHeader("cache-control", "no-store");
   try {
-    res.json(await readTranscript(localRunner, task, request.since, request.source));
+    res.json(await readTranscript(localRunner, task, request.since, request.source, {
+      userOnly: request.userOnly,
+    }));
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
   }

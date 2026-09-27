@@ -443,7 +443,7 @@ test("runCli inspect-code rejects a parsed but invalid request shape", async () 
 
 test("runCli transcript decodes a typed cursor request and prints normalized entries", async () => {
   const f = fakeDeps(seed());
-  const request = { taskId: 7, since: 12, source: "kimi:session-7" };
+  const request = { taskId: 7, since: 12, source: "kimi:session-7", userOnly: true };
   const encoded = Buffer.from(JSON.stringify(request)).toString("base64");
   const code = await runCli(["transcript", encoded], f.deps);
   assert.equal(code, 0);
