@@ -579,19 +579,42 @@ app.post("/api/tasks/:id/paste-image", express.raw({ type: "image/*", limit: "25
 // "阅读 / Reading" view. Incremental: pass the previous ?since byte cursor + ?source id
 // to get only what's new; a changed source (e.g. /clear started a fresh Claude session)
 // makes the client reload from the top. Read-only + best-effort: a task with no
-// transcript yet returns an empty stream. Remote transcripts require a future
-// node-local read verb and never fall back to controller-side filesystem access.
+// transcript yet returns an empty stream. `user_only=1` uses the agent's strongest
+// submitted-input event (Codex user_message) and is consumed by the live terminal's
+// fail-closed user-turn locator. Remote tasks use the owner-node relay below and
+// never fall back to controller-side filesystem access.
 app.get("/api/tasks/:id/transcript", async (req, res) => {
   const lang = langFromReq(req);
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
   const since = Math.max(0, parseInt(String(req.query.since ?? "0"), 10) || 0);
   const source = req.query.source ? String(req.query.source) : null;
+  const userOnly = req.query.user_only === "1";
   try {
-    res.json(await readTranscript(localRunner, task, since, source));
+    res.json(await readTranscript(localRunner, task, since, source, { userOnly }));
   } catch (e: any) {
     res.status(500).json({ error: String(e.message || e) });
   }
+});
+
+// Remote transcript reads execute on the owner node, just like remote code reads.
+// The controller only relays the normalized stream and opaque source cursor.
+app.get("/api/nodes/:hostId/tasks/:taskId/transcript", async (req, res) => {
+  const host = remoteHost(req, res);
+  if (!host) return;
+  const taskId = Number(req.params.taskId);
+  if (!Number.isInteger(taskId)) return res.status(400).json({ error: "invalid task id" });
+  const request = {
+    task_id: taskId,
+    since: Math.max(0, parseInt(String(req.query.since ?? "0"), 10) || 0),
+    source: req.query.source ? String(req.query.source) : null,
+    user_only: req.query.user_only === "1",
+  };
+  const { out, result } = await runNodeJson(host, ["transcript", b64Json(request)]);
+  if (!result) return sendMissingNodeCommand(req, res, "transcript", out);
+  if (result.ok) return res.json(result.transcript);
+  const status = result.error === "notFound" ? 404 : 502;
+  return res.status(status).json({ error: result.message || result.error || "node transcript failed" });
 });
 
 // archive: end the tmux session but KEEP the worktree (moves task to archived tab)

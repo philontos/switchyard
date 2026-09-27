@@ -2,7 +2,31 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Task } from "../core/db.ts";
 import type { Runner } from "../fleet/runner.ts";
-import { readTranscript } from "./transcript.ts";
+import { parseClaudeLine, parseCodexUserLine, readTranscript } from "./transcript.ts";
+
+test("Claude string messages preserve their semantic role", () => {
+  assert.deepEqual(parseClaudeLine({
+    type: "assistant", message: { content: "answer" },
+  }), [{ t: "assistant", text: "answer" }]);
+  assert.deepEqual(parseClaudeLine({
+    type: "user", message: { content: "question" },
+  }), [{ t: "user", text: "question" }]);
+});
+
+test("Codex user-only parsing uses semantic user_message events", () => {
+  assert.deepEqual(parseCodexUserLine({
+    type: "event_msg",
+    payload: { type: "user_message", message: "first\n\nsecond" },
+  }), [{ t: "user", text: "first\n\nsecond" }]);
+  assert.deepEqual(parseCodexUserLine({
+    type: "response_item",
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text: "duplicate" }] },
+  }), [], "response_item mirror is ignored in the user-only event stream");
+  assert.deepEqual(parseCodexUserLine({
+    type: "event_msg",
+    payload: { type: "agent_message", message: "assistant" },
+  }), []);
+});
 
 test("transcript reading refuses a remote runner", async () => {
   const task = {

@@ -24,7 +24,7 @@ import { buildRepoTaskEnv } from "./repo/repoenv.js";
 import { removeTaskManifest, writeTaskManifest } from "./task/taskmanifest.js";
 import { checkProvider, insertCheckedProvider, providersForList, providerEnv } from "./provider/providers.js";
 import { inspectOwnedCode } from "./codeview/codeview.js";
-import { clearProviderFromOwnedTasks, getOwnedRepo } from "./core/ownership.js";
+import { clearProviderFromOwnedTasks, getOwnedRepo, listOwnedTasks } from "./core/ownership.js";
 import { branchesForOwnedRepo, deleteOwnedRepo, fetchOwnedRepo, registerOwnedRepo, type OwnedRepoEnv } from "./repo/owned.js";
 import { syncReposManifest } from "./repo/manifest.js";
 import { pasteImageIntoOwnedTask } from "./task/paste-service.js";
@@ -37,6 +37,7 @@ import {
   tailscaleStatus,
 } from "./network/tailscale.js";
 import { forgetOwnedServeRoute, recordOwnedServeRoute } from "./network/serve-ownership.js";
+import { readTranscript as readTaskTranscript } from "./session/transcript.js";
 
 // Ensure child processes (tmux/git/claude) find Homebrew binaries regardless of
 // how tdsp was launched — a bare non-interactive ssh PATH otherwise can't resolve
@@ -219,6 +220,22 @@ process.exitCode = await runCli(process.argv.slice(2), {
   repoBranches: (id) => branchesForOwnedRepo(ownedRepoEnv, id),
   repoDelete: (id, force) => deleteOwnedRepo(ownedRepoEnv, id, force),
   inspectCode: (request) => inspectOwnedCode(db, localRunner, request),
+  readTranscript: async (request) => {
+    const task = listOwnedTasks(db).find((candidate) => candidate.id === request.task_id);
+    if (!task) return { ok: false as const, error: "notFound" as const };
+    try {
+      const transcript = await readTaskTranscript(
+        localRunner,
+        task,
+        request.since,
+        request.source,
+        { userOnly: request.user_only },
+      );
+      return { ok: true as const, transcript };
+    } catch (error: any) {
+      return { ok: false as const, error: "readFailed" as const, message: String(error?.message || error) };
+    }
+  },
   // stop one of THIS node's tasks: kill its session, mark cleaned, re-manifest.
   stop: (id) =>
     stopTask(

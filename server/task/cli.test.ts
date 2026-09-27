@@ -128,6 +128,7 @@ function fakeDeps(db: Database.Database) {
   const branchCalls: number[] = [];
   const providerCalls: any[] = [];
   const inspectCalls: any[] = [];
+  const transcriptCalls: any[] = [];
   const installCalls: Array<string | undefined> = [];
   const uninstallCalls: Array<[string, boolean]> = [];
   const networkCalls: any[] = [];
@@ -196,6 +197,18 @@ function fakeDeps(db: Database.Database) {
         inspectCalls.push(request);
         return { ok: true as const, kind: "tree" as const, files: ["README.md"], truncated: false,
           revision: { label: "main", commit: "a".repeat(40) }, generatedAt: "now" };
+      },
+      readTranscript: async (request: any) => {
+        transcriptCalls.push(request);
+        return {
+          ok: true as const,
+          transcript: {
+            agent: "codex" as const,
+            source: "rollout-session.jsonl",
+            entries: [{ t: "user" as const, text: "hello" }],
+            cursor: 123,
+          },
+        };
       },
       providersList: () => [{ id: 2, name: "GLM", model: "glm-5.2" }],
       providersTest: async (body: any) => {
@@ -315,6 +328,7 @@ function fakeDeps(db: Database.Database) {
     branchCalls,
     providerCalls,
     inspectCalls,
+    transcriptCalls,
     installCalls,
     uninstallCalls,
     networkCalls,
@@ -375,6 +389,25 @@ test("runCli inspect-code rejects a parsed but invalid request shape", async () 
   const code = await runCli(["inspect-code", invalid], f.deps);
   assert.equal(code, 1);
   assert.equal(f.inspectCalls.length, 0);
+  assert.equal(JSON.parse(f.out).error, "invalidRequest");
+});
+
+test("runCli transcript relays an incremental semantic read request", async () => {
+  const f = fakeDeps(seed());
+  const request = { task_id: 7, since: 99, source: "rollout-old.jsonl", user_only: true };
+  const encoded = Buffer.from(JSON.stringify(request)).toString("base64");
+  assert.equal(await runCli(["transcript", encoded], f.deps), 0);
+  assert.deepEqual(f.transcriptCalls, [request]);
+  const result = JSON.parse(f.out);
+  assert.equal(result.ok, true);
+  assert.equal(result.transcript.entries[0].text, "hello");
+});
+
+test("runCli transcript rejects malformed requests without reading", async () => {
+  const f = fakeDeps(seed());
+  const encoded = Buffer.from(JSON.stringify({ task_id: "7", since: -1 })).toString("base64");
+  assert.equal(await runCli(["transcript", encoded], f.deps), 1);
+  assert.deepEqual(f.transcriptCalls, []);
   assert.equal(JSON.parse(f.out).error, "invalidRequest");
 });
 

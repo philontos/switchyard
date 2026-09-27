@@ -25,6 +25,7 @@ import type {
   ServeStopResult,
 } from "../core/serve-lifecycle.js";
 import type { ProfileUninstallResult } from "../fleet/profile-uninstall.js";
+import type { TranscriptResult } from "../session/transcript.js";
 export { CODE_VIEW_CAPABILITY } from "../codeview/codeview.js";
 
 // The spec A sends to `tdsp create` (base64-JSON over ssh argv, so a multiline
@@ -52,6 +53,17 @@ export interface ProviderInput {
   model?: string | null;
   small_fast_model?: string | null;
 }
+
+export interface TranscriptRequest {
+  task_id: number;
+  since: number;
+  source: string | null;
+  user_only: boolean;
+}
+
+export type NodeTranscriptResult =
+  | { ok: true; transcript: TranscriptResult }
+  | { ok: false; error: "notFound" | "readFailed"; message?: string };
 
 type DB = Database.Database;
 
@@ -284,6 +296,10 @@ export interface CliDeps {
   readStdin: () => Promise<Buffer>;
   // Typed, read-only repository/worktree inspection for remote controllers.
   inspectCode: (request: CodeInspectRequest) => Promise<CodeInspectResult>;
+  // Incremental conversation read on the owning node. Used for semantic user-turn
+  // confirmation; TranscriptResult.source is an opaque rollout filename, so
+  // owner-local filesystem coordinates never cross the node boundary.
+  readTranscript: (request: TranscriptRequest) => Promise<NodeTranscriptResult>;
   providersList: () => ProviderSummary[];
   providersTest: (body: ProviderInput) => Promise<{ ok: true } | { ok: false; error: string }>;
   providersCreate: (body: ProviderInput) => Promise<{ ok: true; id: number } | { ok: false; error: string }>;
@@ -655,6 +671,23 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.out(JSON.stringify(result));
       return result.ok ? 0 : 1;
     }
+    case "transcript": {
+      let request: TranscriptRequest;
+      try {
+        request = JSON.parse(Buffer.from(argv[1] ?? "", "base64").toString("utf8")) as TranscriptRequest;
+      } catch {
+        deps.out(JSON.stringify({ ok: false, error: "invalidRequest", message: "transcript expects a base64 JSON request" }));
+        return 1;
+      }
+      if (!request || !Number.isInteger(request.task_id) || !Number.isInteger(request.since) || request.since < 0 ||
+          (request.source !== null && typeof request.source !== "string") || typeof request.user_only !== "boolean") {
+        deps.out(JSON.stringify({ ok: false, error: "invalidRequest", message: "Invalid transcript request" }));
+        return 1;
+      }
+      const result = await deps.readTranscript(request);
+      deps.out(JSON.stringify(result));
+      return result.ok ? 0 : 1;
+    }
     case "create-local": {
       const f = parseFlags(argv.slice(1));
       const r = await deps.createLocal({ cwd: f.cwd ?? null, title: f.title ?? null });
@@ -866,7 +899,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve [status|stop|restart]|network|list|inspect-code|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|doctor|install|uninstall|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve [status|stop|restart]|network|list|inspect-code|transcript|create-local|create|repo-create|repo-fetch|repo-branches|repo-delete|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|doctor|install|uninstall|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

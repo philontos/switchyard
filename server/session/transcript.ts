@@ -30,7 +30,7 @@ export type Entry =
 
 export interface TranscriptResult {
   agent: AgentKind;
-  /** identity of the underlying file (Claude session id / Codex rollout path). When it
+  /** identity of the underlying file (Claude session id / Codex rollout filename). When it
    *  changes (e.g. /clear starts a new Claude session), the client drops its cursor. */
   source: string | null;
   entries: Entry[];
@@ -86,7 +86,9 @@ export function parseClaudeLine(o: any): Entry[] {
   const c = o.message?.content;
   const out: Entry[] = [];
   if (typeof c === "string") {
-    if (c.trim() && !isClaudeNoise(c)) out.push({ t: "user", text: c });
+    if (c.trim() && !(t === "user" && isClaudeNoise(c))) {
+      out.push({ t: t === "user" ? "user" : "assistant", text: c });
+    }
     return out;
   }
   if (!Array.isArray(c)) return out;
@@ -135,16 +137,34 @@ export function parseCodexLine(o: any): Entry[] {
   return [];
 }
 
+// The event stream is the strongest source for identifying what the person
+// actually submitted. Unlike response_item(role=user), user_message events do
+// not contain injected <environment_context> or other synthetic context. Keep
+// this separate from parseCodexLine: the normal transcript uses response_item as
+// its canonical all-role stream and would otherwise render every prompt twice.
+export function parseCodexUserLine(o: any): Entry[] {
+  if (!o || o.type !== "event_msg" || o.payload?.type !== "user_message") return [];
+  const text = typeof o.payload.message === "string" ? o.payload.message : "";
+  return text.trim() ? [{ t: "user", text }] : [];
+}
+
 // ---- file location ----
 
 const escapeClaudeCwd = (cwd: string) => cwd.replace(/[/.]/g, "-");
 
 // Locate a task's Codex rollout: the newest rollout whose session_meta.cwd is the
-// worktree. Cached per task once found (the file only grows). One shell round-trip.
+// worktree. Normal transcript reads reuse the cache; semantic live-turn checks can
+// refresh it to notice a new rollout after /new or a process restart.
 const codexPathCache = new Map<number, string>();
-async function locateCodex(runner: Runner, home: string, cwd: string, taskId: number): Promise<string | null> {
+async function locateCodex(
+  runner: Runner,
+  home: string,
+  cwd: string,
+  taskId: number,
+  refresh = false,
+): Promise<string | null> {
   const cached = codexPathCache.get(taskId);
-  if (cached && (await runner.exists(cached).catch(() => false))) return cached;
+  if (!refresh && cached && (await runner.exists(cached).catch(() => false))) return cached;
   const dir = `${home}/.codex/sessions`;
   const needle = `"cwd"[[:space:]]*:[[:space:]]*${ere(JSON.stringify(cwd))}`;
   // newest-first (the ISO date lives in the path), stop at the first rollout whose
@@ -189,6 +209,7 @@ export async function readTranscript(
   task: Task,
   since = 0,
   knownSource: string | null = null,
+  options: { userOnly?: boolean } = {},
 ): Promise<TranscriptResult> {
   if (runner.kind !== "local") throw new Error("Transcript must be read by the node that owns the task");
   const agent = asAgentKind(task.agent);
@@ -200,8 +221,13 @@ export async function readTranscript(
   let file: string | null = null;
   let source: string | null = null;
   if (agent === "codex") {
-    file = await locateCodex(runner, home, cwd, task.id);
-    source = file;
+    // The live marker asks only when it sees an unconfirmed turn, so it can
+    // afford to refresh discovery and detect a new rollout after /new/restart.
+    // Normal Reading polls retain the cached path and avoid repeated find calls.
+    file = await locateCodex(runner, home, cwd, task.id, !!options.userOnly);
+    // The rollout UUID in the filename is sufficient identity. Never expose the
+    // owner node's absolute home/worktree coordinates through the API.
+    source = file ? file.slice(file.lastIndexOf("/") + 1) : null;
   } else {
     const sid = task.claude_session;
     if (sid) { file = `${home}/.claude/projects/${escapeClaudeCwd(cwd)}/${sid}.jsonl`; source = sid; }
@@ -212,13 +238,16 @@ export async function readTranscript(
   const tail = await tailFrom(runner, file, from);
   if (!tail) return { agent, source, entries: [], cursor: from };
 
-  const parse = agent === "codex" ? parseCodexLine : parseClaudeLine;
+  const parse = agent === "codex"
+    ? (options.userOnly ? parseCodexUserLine : parseCodexLine)
+    : parseClaudeLine;
   const entries: Entry[] = [];
   for (const line of tail.text.split("\n")) {
     if (!line) continue;
     let o: any;
     try { o = JSON.parse(line); } catch { continue; }
-    entries.push(...parse(o));
+    const parsed = parse(o);
+    entries.push(...(options.userOnly ? parsed.filter((entry) => entry.t === "user") : parsed));
   }
   return { agent, source, entries, cursor: tail.cursor };
 }

@@ -7,7 +7,7 @@
 // from the list — see disposePty/prunePanes, called from tasks.js). The live-pane
 // set is therefore bounded by the set of active tasks; no separate eviction needed.
 // Terminal/FitAddon are the globals from the vendored xterm scripts.
-import { $ } from "../core/dom.js";
+import { $, api } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 import { createCodexUserMarkerOverlay } from "./codex-terminal-markers.js";
 import { activateCodexUnicode } from "./terminal-unicode.js";
@@ -16,6 +16,77 @@ import { activateCodexUnicode } from "./terminal-unicode.js";
 const panes = new Map();
 let activeId = null;   // the task whose pane is currently visible (null = none)
 let openCodeView = null;
+
+const USER_TURN_RETRY_MS = 400;
+const USER_TURN_RETRY_LIMIT = 8;
+
+function clearUserTurnRetry(p) {
+  if (p.userTurnRetry) clearTimeout(p.userTurnRetry);
+  p.userTurnRetry = null;
+}
+
+function resetUserTurns(p) {
+  clearUserTurnRetry(p);
+  p.userTurnSource = null;
+  p.userTurnCursor = 0;
+  p.userTurnMessages = [];
+  p.userTurnPending = false;
+  p.userTurnUnknowns = new Set();
+  p.userTurnRetries = 0;
+  p.codexMarkers?.setUserMessages([]);
+}
+
+// The terminal marker is intentionally fail-closed: a rendered Codex candidate
+// is styled only after the rollout transcript confirms its exact submitted text.
+// Fetch only when an unconfirmed candidate is visible; no permanent polling loop.
+function requestCodexUserTurns(p, normalizedText) {
+  const endpoint = transcriptUrl(p.id);
+  if (p.disposed || p.agent !== "codex" || !endpoint) return;
+  if (!p.userTurnUnknowns.has(normalizedText)) {
+    p.userTurnUnknowns.add(normalizedText);
+    p.userTurnRetries = 0;
+  }
+  if (p.userTurnPending || p.userTurnRetry || p.userTurnRetries >= USER_TURN_RETRY_LIMIT) return;
+
+  p.userTurnRetry = setTimeout(async () => {
+    p.userTurnRetry = null;
+    if (p.disposed || p.agent !== "codex") return;
+    p.userTurnPending = true;
+    p.userTurnRetries++;
+    const q = new URLSearchParams({
+      since: String(p.userTurnCursor),
+      user_only: "1",
+    });
+    if (p.userTurnSource) q.set("source", p.userTurnSource);
+    try {
+      const data = await api(`${endpoint}?${q}`);
+      if (p.disposed || p.agent !== "codex") return;
+      if (p.userTurnSource !== null && data.source !== p.userTurnSource) {
+        p.userTurnMessages = [];
+      }
+      p.userTurnSource = data.source ?? null;
+      p.userTurnCursor = data.cursor ?? p.userTurnCursor;
+      for (const entry of data.entries ?? []) {
+        if (entry.t === "user" && typeof entry.text === "string") {
+          p.userTurnMessages.push(entry.text);
+        }
+      }
+      p.codexMarkers?.setUserMessages(p.userTurnMessages);
+    } catch {
+      // Best effort. A later rendered candidate retries; terminal I/O is never
+      // delayed or modified by transcript availability.
+    } finally {
+      p.userTurnPending = false;
+      if (!p.disposed) p.codexMarkers?.schedule();
+    }
+  }, p.userTurnRetries ? USER_TURN_RETRY_MS : 0);
+}
+
+function createCodexMarkers(p) {
+  return createCodexUserMarkerOverlay(p.term, {
+    onUnconfirmed: (text) => requestCodexUserTurns(p, text),
+  });
+}
 
 // Mobile master-detail hooks (injected by main.js so terminal.js never imports
 // mobile.js — that would be a cycle, since mobile.js imports from here). onShow
@@ -67,7 +138,7 @@ export function fitActiveNow() {
       sendResize(p);
       p.term.scrollToBottom();
       p.term.refresh(0, p.term.rows - 1);
-      p.codexMarkers?.scan();
+      p.codexMarkers?.schedule();
     } catch {}
   }
 }
@@ -147,7 +218,7 @@ function fitActive() {
       try {
         fitPane(p);
         sendResize(p);
-        p.codexMarkers?.scan();
+        p.codexMarkers?.schedule();
       } catch {}
     }
   });
@@ -338,8 +409,13 @@ function createPane(id, query, agent) {
     id, pane, term, fit, ws: null, query, agent,
     title: "", desc: "", attach: "", claude: "",
     resizeKey: "",
-    codexMarkers: agent === "codex" ? createCodexUserMarkerOverlay(term) : null,
+    disposed: false,
+    codexMarkers: null,
+    userTurnSource: null, userTurnCursor: 0, userTurnMessages: [],
+    userTurnPending: false, userTurnRetry: null,
+    userTurnUnknowns: new Set(), userTurnRetries: 0,
   };
+  if (agent === "codex") p.codexMarkers = createCodexMarkers(p);
 
   // claude TUI 开了鼠标上报,普通拖拽会被转发给应用; Shift/Option 拖拽走本地选区,松手即复制
   term.element.addEventListener("mouseup", () => {
@@ -387,7 +463,7 @@ function ensureSocket(p) {
   ws.onmessage = (e) => {
     if (typeof e.data !== "string") return;
     if (p.agent === "codex") {
-      p.term.write(e.data, () => { if (p.agent === "codex") p.codexMarkers?.scan(); });
+      p.term.write(e.data, () => { if (p.agent === "codex") p.codexMarkers?.schedule(); });
     } else {
       p.term.write(e.data);
     }
@@ -414,7 +490,7 @@ function showPane(p) {
   try { fitPane(p); } catch {}
   try { p.term.scrollToBottom(); } catch {}              // attach lands at the newest output
   try { p.term.refresh(0, p.term.rows - 1); } catch {}   // canvas can blank while hidden
-  try { p.codexMarkers?.scan(); } catch {}
+  try { p.codexMarkers?.schedule(); } catch {}
   sendResize(p);
   // on mobile the keyboard is driven by the quick-input field, not the terminal —
   // don't focus the (readOnly) xterm textarea, which would just fight for focus.
@@ -510,6 +586,15 @@ export function pasteImageUrl(taskId) {
     return null;
   }
   return `/api/tasks/${taskId}/paste-image`;
+}
+
+export function transcriptUrl(taskId) {
+  if (typeof taskId === "string") {
+    const m = /^n(\d+):(\d+)$/.exec(taskId);
+    if (m) return `/api/nodes/${m[1]}/tasks/${m[2]}/transcript`;
+    return null;
+  }
+  return Number.isInteger(taskId) ? `/api/tasks/${taskId}/transcript` : null;
 }
 
 // Detach the dock from any task WITHOUT tearing panes down: hide every pane and
@@ -636,8 +721,9 @@ export function openPty(query, title, attach, taskId = null, claude = "", agent 
   else {
     p.query = query;                     // session normally unchanged; keep it fresh
     if (p.agent !== normalizedAgent) {
+      resetUserTurns(p);
       p.codexMarkers?.dispose();
-      p.codexMarkers = normalizedAgent === "codex" ? createCodexUserMarkerOverlay(p.term) : null;
+      p.codexMarkers = normalizedAgent === "codex" ? createCodexMarkers(p) : null;
     }
   }
   p.agent = normalizedAgent; p.title = title; p.attach = attach || ""; p.claude = claude || "";
@@ -653,6 +739,8 @@ export function disposePty(id) {
   const p = panes.get(id);
   if (!p) return;
   panes.delete(id);
+  p.disposed = true;
+  clearUserTurnRetry(p);
   try { if (p.ws) { p.ws.onclose = null; p.ws.onmessage = null; p.ws.close(); } } catch {}
   try { p.codexMarkers?.dispose(); } catch {}
   try { p.term.dispose(); } catch {}
