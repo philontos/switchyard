@@ -32,11 +32,26 @@ test("Claude string messages preserve their semantic role", () => {
   }), [{ t: "user", text: "question" }]);
 });
 
-test("Codex user-only parsing uses semantic user_message events", () => {
+test("Codex user-only parsing supports both semantic rollout event shapes", () => {
   assert.deepEqual(parseCodexUserLine({
     type: "event_msg",
     payload: { type: "user_message", message: "first\n\nsecond" },
   }), [{ t: "user", text: "first\n\nsecond" }]);
+  assert.deepEqual(parseCodexUserLine({
+    type: "event_msg",
+    payload: {
+      type: "item_completed",
+      item: {
+        type: "UserMessage",
+        id: "item-1",
+        client_id: "client-1",
+        content: [
+          { type: "text", text: "current\n\nformat", text_elements: [] },
+          { type: "image", image_url: "ignored" },
+        ],
+      },
+    },
+  }), [{ t: "user", text: "current\n\nformat" }]);
   assert.deepEqual(parseCodexUserLine({
     type: "response_item",
     payload: { type: "message", role: "user", content: [{ type: "input_text", text: "duplicate" }] },
@@ -45,13 +60,23 @@ test("Codex user-only parsing uses semantic user_message events", () => {
     type: "event_msg",
     payload: { type: "agent_message", message: "assistant" },
   }), []);
+  assert.deepEqual(parseCodexUserLine({
+    type: "event_msg",
+    payload: { type: "item_completed", item: { type: "AgentMessage", content: [{ type: "text", text: "assistant" }] } },
+  }), []);
 });
 
 test("Codex user-only reads advertise their semantic event mode", async () => {
   const file = "/codex/rollout-test.jsonl";
   const body = [
     { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "synthetic mirror" }] } },
-    { type: "event_msg", payload: { type: "user_message", message: "actual input" } },
+    {
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        item: { type: "UserMessage", content: [{ type: "text", text: "actual\n\ninput" }] },
+      },
+    },
     { type: "event_msg", payload: { type: "agent_message", message: "answer" } },
   ].map((record) => JSON.stringify(record)).join("\n") + "\n";
   const runner = {
@@ -77,7 +102,7 @@ test("Codex user-only reads advertise their semantic event mode", async () => {
   const result = await readTranscript(runner, task("codex"), 0, null, { userOnly: true });
   assert.equal(result.mode, "codex-user-message-v1");
   assert.equal(result.source, "codex:rollout-test.jsonl");
-  assert.deepEqual(result.entries, [{ t: "user", text: "actual input" }]);
+  assert.deepEqual(result.entries, [{ t: "user", text: "actual\n\ninput" }]);
 });
 
 test("transcript reading refuses a remote runner", async () => {

@@ -262,13 +262,37 @@ export function parseKimiLine(o: any): Entry[] {
 }
 
 // The event stream is the strongest source for identifying what the person
-// actually submitted. Unlike response_item(role=user), user_message events do
-// not contain injected <environment_context> or other synthetic context. Keep
-// this separate from parseCodexLine: the normal transcript uses response_item as
-// its canonical all-role stream and would otherwise render every prompt twice.
+// actually submitted. Codex has emitted this semantic event in two shapes:
+//
+//   historical: event_msg(user_message).message
+//   current:    event_msg(item_completed).item(UserMessage).content
+//
+// Unlike response_item(role=user), both exclude injected <environment_context>
+// and other synthetic context. Keep this separate from parseCodexLine: the
+// normal transcript uses response_item as its canonical all-role stream and
+// would otherwise render every prompt twice.
 export function parseCodexUserLine(o: any): Entry[] {
-  if (!o || o.type !== "event_msg" || o.payload?.type !== "user_message") return [];
-  const text = typeof o.payload.message === "string" ? o.payload.message : "";
+  if (!o || o.type !== "event_msg") return [];
+  const payload = o.payload ?? {};
+  let text = "";
+
+  if (payload.type === "user_message") {
+    text = typeof payload.message === "string" ? payload.message : "";
+  } else if (payload.type === "item_completed" && payload.item?.type === "UserMessage") {
+    const content = payload.item.content;
+    if (typeof content === "string") {
+      text = content;
+    } else if (Array.isArray(content)) {
+      text = content.map((part: any) => {
+        if (typeof part === "string") return part;
+        if ((part?.type === "text" || part?.type === "input_text") && typeof part.text === "string") {
+          return part.text;
+        }
+        return "";
+      }).join("");
+    }
+  }
+
   return text.trim() ? [{ t: "user", text }] : [];
 }
 
