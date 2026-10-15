@@ -1,8 +1,8 @@
 // One live xterm.js terminal PER task, all kept alive. openPty() shows a task's
 // pane (creating it on first open); switching cards just toggles which pane is
 // visible — no teardown, no reconnect, no flicker. Each pane owns its own xterm
-// instance + WebSocket. Mobile browsers may close background sockets, so closed
-// panes reconnect when shown/resumed; the tmux session itself stays alive. Panes
+// instance + WebSocket. Mobile background sockets are treated as stale on resume, and
+// the visible pane retries dropped connections; the tmux session stays alive. Panes
 // are disposed when their task goes away (archive / cleanup / delete / vanished
 // from the list — see disposePty/prunePanes, called from tasks.js). The live-pane
 // set is therefore bounded by the set of active tasks; no separate eviction needed.
@@ -18,6 +18,8 @@ import { mountTerminalImeGuard } from "./terminal-ime.js";
 const panes = new Map();
 let activeId = null;   // the task whose pane is currently visible (null = none)
 let openCodeView = null;
+const RETRY_MIN_MS = 500, RETRY_MAX_MS = 10000, CONNECT_TIMEOUT_MS = 10000;
+const STABLE_CONNECTION_MS = 10000;
 let openReference = null;
 
 const USER_TURN_RETRY_MS = 400;
@@ -142,6 +144,7 @@ export function reconnectActive() {
 export function fitActiveNow() {
   const p = activeId != null ? panes.get(activeId) : null;
   if (p) {
+    ensureSocket(p);
     try {
       p.fit.fit();
       sendResize(p);
@@ -192,9 +195,12 @@ export function initTerm() {
   window.addEventListener("resize", fitActive);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") reconnectActive();
+    else markBackgroundSocketsStale();
   });
+  window.addEventListener("pagehide", markBackgroundSocketsStale);
   window.addEventListener("pageshow", reconnectActive);
-  window.addEventListener("online", reconnectActive);
+  window.addEventListener("offline", markSocketsStale);
+  window.addEventListener("online", () => { markSocketsStale(); reconnectActive(); });
   // #term can resize without a window resize (for example while mobile views
   // switch), so keep the active terminal fitted to its actual container.
   try { new ResizeObserver(fitActive).observe($("term")); } catch {}
@@ -354,6 +360,8 @@ function createPane(id, query, agent) {
     id, pane, term, fit, ws: null, query, agent,
     title: "", desc: "", attach: "", claude: "",
     resizeKey: "",
+    needsReconnect: false, retryTimer: null, connectTimer: null,
+    retryDelay: RETRY_MIN_MS, disconnectNotified: false,
     imeGuard,
     disposed: false,
     codexMarkers: null,
@@ -393,28 +401,102 @@ function createPane(id, query, agent) {
   return p;
 }
 
-// Open the pane's socket if it isn't already live. Deliberately does NOT reset
-// the terminal — the existing (frozen) content stays put and the fresh tmux
-// attach repaints over it, so a reconnect never flashes to black.
+function clearSocketTimers(p) {
+  clearTimeout(p.retryTimer);
+  clearTimeout(p.connectTimer);
+  p.retryTimer = p.connectTimer = null;
+}
+
+function closeSocket(p) {
+  clearSocketTimers(p);
+  const ws = p.ws;
+  p.ws = null;
+  if (!ws) return;
+  ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+  try { ws.close(); } catch {}
+}
+
+function canReconnect(p) {
+  return panes.get(p.id) === p && activeId === p.id
+    && document.visibilityState !== "hidden";
+}
+
+// Mobile suspension can leave readyState OPEN (or CONNECTING) until AFTER the
+// foreground event. Desktop tab switching keeps healthy sockets and tmux's
+// history/copy mode intact; actual closes still retry on either platform.
+function markBackgroundSocketsStale() {
+  if (document.body.classList.contains("mobile")) markSocketsStale();
+}
+
+// Network changes invalidate every pane too. Replace only the selected pane;
+// other panes recover when selected. Keep their screen/scrollback.
+function markSocketsStale() {
+  for (const p of panes.values()) {
+    p.needsReconnect = true;
+    p.retryDelay = RETRY_MIN_MS;
+    clearSocketTimers(p);
+  }
+}
+
+function retrySocket(p) {
+  if (!canReconnect(p) || p.retryTimer !== null) return;
+  p.retryTimer = setTimeout(() => {
+    p.retryTimer = null;
+    ensureSocket(p);
+  }, p.retryDelay);
+  p.retryDelay = Math.min(p.retryDelay * 2, RETRY_MAX_MS);
+}
+
+// A new tmux attach repaints the current screen, including output produced while
+// disconnected. Keep the existing xterm until that arrives to avoid a blank flash.
 function ensureSocket(p) {
+  if (!canReconnect(p)) return;
+  if (p.needsReconnect) { closeSocket(p); p.needsReconnect = false; }
   if (p.ws && (p.ws.readyState === 0 || p.ws.readyState === 1)) return;   // CONNECTING/OPEN
+  closeSocket(p);
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = p.ws = new WebSocket(`${proto}://${location.host}/pty?${p.query}&lang=${I18N.lang}`);
+  const isCurrent = () => p.ws === ws && panes.get(p.id) === p;
+  let firstOutput = true;
+  let openedAt = null;
   p.resizeKey = "";       // a new pty needs one initial size even if dimensions match the old socket
-  ws.onopen = () => { if (activeId === p.id) { try { p.fit.fit(); } catch {} } sendResize(p); };
+  ws.onopen = () => {
+    if (!isCurrent()) return;
+    clearTimeout(p.connectTimer);
+    p.connectTimer = null;
+    openedAt = Date.now();
+    p.disconnectNotified = false;
+    if (activeId === p.id) { try { p.fit.fit(); } catch {} }
+    sendResize(p);
+  };
   ws.onmessage = (e) => {
-    if (typeof e.data !== "string") return;
-    if (p.agent === "codex") {
-      p.term.write(e.data, () => { if (p.agent === "codex") p.codexMarkers?.schedule(); });
-    } else {
-      p.term.write(e.data);
-    }
+    if (!isCurrent() || typeof e.data !== "string" || !e.data) return;
+    const restoreView = firstOutput;
+    firstOutput = false;
+    p.term.write(e.data, () => {
+      if (!isCurrent()) return;
+      if (restoreView && activeId === p.id) {
+        p.term.scrollToBottom();
+        p.term.refresh(0, p.term.rows - 1);
+      }
+      if (p.agent === "codex") p.codexMarkers?.schedule();
+    });
   };
-  ws.onclose = () => {
-    if (p.ws === ws) {
+  const disconnected = (event) => {
+    if (!isCurrent()) return;
+    // The WS handshake can succeed before tmux/SSH fails to attach. Only a
+    // sustained connection resets backoff, so repeated attach failures slow down.
+    if (openedAt !== null && Date.now() - openedAt >= STABLE_CONNECTION_MS) p.retryDelay = RETRY_MIN_MS;
+    closeSocket(p);
+    if (!p.disconnectNotified) {
       p.term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
+      p.disconnectNotified = true;
     }
+    if (event?.code !== 1008) retrySocket(p);   // invalid target is not a transient failure
   };
+  ws.onclose = disconnected;
+  ws.onerror = disconnected;
+  p.connectTimer = setTimeout(disconnected, CONNECT_TIMEOUT_MS);
 }
 
 // Make a pane the visible one: hide every other pane, show this one, refit (it
@@ -717,15 +799,15 @@ export function openPty(
 }
 
 // Tear down a task's pane: close its socket, dispose the xterm, drop the DOM node.
-// Null the onclose first so the closing socket doesn't write "disconnected" into a
-// terminal we're disposing. If it was the visible pane, fall back to the empty state.
+// Cancel retries and detach socket callbacks before disposing the terminal. If it
+// was the visible pane, fall back to the empty state.
 export function disposePty(id) {
   const p = panes.get(id);
   if (!p) return;
   panes.delete(id);
   p.disposed = true;
   clearUserTurnRetry(p);
-  try { if (p.ws) { p.ws.onclose = null; p.ws.onmessage = null; p.ws.close(); } } catch {}
+  closeSocket(p);
   try { p.imeGuard?.dispose(); } catch {}
   try { p.codexMarkers?.dispose(); } catch {}
   try { p.term.dispose(); } catch {}
