@@ -68,17 +68,42 @@ export async function initMirror(runner: Runner, gitUrl: string, token: string |
   if (await runner.exists(dest)) await runner.rmrf(dest);
   await git(runner, null, ["init", "--bare", dest]);
   await git(runner, dest, ["remote", "add", "origin", authUrl(gitUrl, token)]);
-  await git(runner, dest, ["ls-remote", "--heads", "origin"]); // throws on bad url/auth/host
+  return readRemoteBranches(runner, dest); // throws on bad url/auth/host
+}
+
+export interface RemoteBranches {
+  branches: string[];
+  defaultBranch: string | null;
+}
+
+/** Read HEAD and branch names together, without fetching any objects. */
+export async function readRemoteBranches(runner: Runner, mirror: string): Promise<RemoteBranches> {
+  const out = await git(runner, mirror, ["ls-remote", "--symref", "origin", "HEAD", "refs/heads/*"]);
+  const branches: string[] = [];
+  let defaultBranch: string | null = null;
+  for (const line of out.split(/\r?\n/)) {
+    const head = /^ref: refs\/heads\/(.+)\tHEAD$/.exec(line);
+    if (head) defaultBranch = head[1];
+    const branch = /^[0-9a-f]{40,64}\trefs\/heads\/(.+)$/i.exec(line);
+    if (branch) branches.push(branch[1]);
+  }
+  return { branches, defaultBranch };
+}
+
+export function selectRemoteBranch(remote: RemoteBranches, requested = "", allowFallback = false): string {
+  if (requested && remote.branches.includes(requested)) return requested;
+  if (requested && !allowFallback) throw new Error(`Branch "${requested}" does not exist on origin`);
+  if (remote.defaultBranch && remote.branches.includes(remote.defaultBranch)) return remote.defaultBranch;
+  // Some servers do not advertise a symbolic HEAD. A single branch is
+  // unambiguous; with multiple branches, require an explicit selection.
+  if (remote.branches.length === 1) return remote.branches[0];
+  if (!remote.branches.length) throw new Error("Repository has no branches; push an initial commit first");
+  throw new Error("Cannot determine the remote default branch; specify an existing branch");
 }
 
 /** Live list of remote branches — always current, no local staleness. */
 export async function listBranches(runner: Runner, mirror: string): Promise<string[]> {
-  const out = await git(runner, mirror, ["ls-remote", "--heads", "origin"]);
-  return out
-    .split("\n")
-    .map((l) => l.trim().split("\t")[1])
-    .filter(Boolean)
-    .map((ref) => ref.replace(/^refs\/heads\//, ""));
+  return (await readRemoteBranches(runner, mirror)).branches;
 }
 
 /**

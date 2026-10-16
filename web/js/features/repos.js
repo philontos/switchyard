@@ -215,7 +215,7 @@ export async function addRepo() {
   const body = {
     name: $("r-name").value.trim(), git_url: $("r-url").value.trim(),
     token: $("r-token").value.trim(),
-    default_branch: $("r-default").value.trim() || "main",
+    default_branch: $("r-default").value.trim(),
   };
   if (!body.name) return showRepoValidation("r-name", t("repo.nameRequired"));
   if (!body.git_url) return showRepoValidation("r-url", t("repo.urlRequired"));

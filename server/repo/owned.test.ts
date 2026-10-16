@@ -13,7 +13,7 @@ import {
 
 const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
 
-function setup() {
+function setup(remoteBranches = ["main", "develop"], remoteDefault: string | null = "main") {
   const db = new Database(":memory:");
   initSchema(db, opts);
   db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'A','','local','online')").run();
@@ -25,7 +25,11 @@ function setup() {
     dataDir: "/data",
     exec: async (file, args, execOpts = {}) => {
       calls.push({ file, args, cwd: execOpts.cwd });
-      if (args[0] === "ls-remote") return `${"a".repeat(40)}\trefs/heads/main\n${"b".repeat(40)}\trefs/heads/develop\n`;
+      if (args[0] === "ls-remote") return [
+        ...(remoteDefault ? [`ref: refs/heads/${remoteDefault}\tHEAD`, `${"a".repeat(40)}\tHEAD`] : []),
+        ...remoteBranches.map((branch) => `${"a".repeat(40)}\trefs/heads/${branch}`),
+        "",
+      ].join("\n");
       return "";
     },
     mkdirp: async () => {},
@@ -72,6 +76,47 @@ test("owner repo service refuses a repo row assigned to another machine", async 
   assert.deepEqual(await branchesForOwnedRepo(s.env, 22), { ok: false, error: "notFound" });
   assert.deepEqual(await deleteOwnedRepo(s.env, 22), { ok: false, error: "notFound" });
   assert.equal(s.calls.length, 0, "no git/filesystem operation runs for a remote-owned row");
+});
+
+test("registration detects master from remote HEAD and publishes the resolved default", async () => {
+  const s = setup(["develop", "master"], "master");
+  const snapshots: any[] = [];
+  s.env.syncRepos = () => { snapshots.push(s.db.prepare("SELECT default_branch,status FROM repos").get()); };
+  const result = await registerOwnedRepo(s.env, { name: "master-repo", git_url: "git@example/master", default_branch: "  " });
+  assert.equal(result.ok, true);
+  assert.deepEqual(snapshots.at(-1), { default_branch: "master", status: "ready" });
+  assert.equal(s.calls.some((call) => call.args[0] === "fetch"), false, "registration does not fetch objects");
+});
+
+test("registration preserves an explicit existing branch instead of replacing it with remote HEAD", async () => {
+  const s = setup();
+  const result = await registerOwnedRepo(s.env, { name: "release", git_url: "git@example/release", default_branch: " develop " });
+  assert.equal(result.ok, true);
+  assert.deepEqual(s.db.prepare("SELECT default_branch,status FROM repos").get(), { default_branch: "develop", status: "ready" });
+});
+
+test("registration rejects a missing explicit branch and can retry with automatic detection", async () => {
+  const s = setup(["master"], "master");
+  const input = { name: "master-repo", git_url: "git@example/master" };
+  const result = await registerOwnedRepo(s.env, { ...input, default_branch: "main" });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.message || "", /Branch "main" does not exist on origin/);
+  assert.deepEqual(s.db.prepare("SELECT default_branch,status FROM repos").get(), { default_branch: "main", status: "error" });
+
+  const retry = await registerOwnedRepo(s.env, input);
+  assert.equal(retry.ok, true);
+  if (retry.ok) assert.equal(retry.retrying, true);
+  assert.deepEqual(s.db.prepare("SELECT default_branch,status,error FROM repos").all(), [
+    { default_branch: "master", status: "ready", error: null },
+  ]);
+});
+
+test("registration requires a selection when remote HEAD is unavailable and multiple branches exist", async () => {
+  const s = setup(["develop", "master"], null);
+  const result = await registerOwnedRepo(s.env, { name: "ambiguous", git_url: "git@example/ambiguous" });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.message || "", /specify an existing branch/);
 });
 
 test("owner repo service refuses a RemoteRunner even for a local row", async () => {
