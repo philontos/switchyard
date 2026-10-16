@@ -3,7 +3,7 @@ import type { Task } from "../core/db.js";
 import type { Runner } from "../fleet/runner.js";
 import { getOwnedRepo, localHostId } from "../core/ownership.js";
 import { findRepoByGitUrl } from "./catalog.js";
-import { fetchMirror, initMirror, listBranches, mirrorPath, removeWorktree } from "./git.js";
+import { fetchMirror, initMirror, listBranches, mirrorPath, removeWorktree, selectRemoteBranch } from "./git.js";
 import { listTaskReferences, removeTaskReferenceRows } from "../task/references.js";
 
 type DB = Database.Database;
@@ -47,6 +47,7 @@ export async function registerOwnedRepo(env: OwnedRepoEnv, input: OwnedRepoInput
   if (runnerFailure) return runnerFailure;
   const name = String(input.name || "").trim();
   const gitUrl = String(input.git_url || "").trim();
+  const requestedBranch = String(input.default_branch || "").trim();
   if (!name || !gitUrl) return { ok: false, error: "fieldsRequired" };
   const hostId = localHostId(env.db);
   if (hostId == null) return { ok: false, error: "operationFailed", message: "local node is not initialized" };
@@ -62,11 +63,11 @@ export async function registerOwnedRepo(env: OwnedRepoEnv, input: OwnedRepoInput
     dest = existing.mirror_path || mirrorPath(env.runner.dataDir, id, name);
     env.db.prepare(
       "UPDATE repos SET name=?,git_url=?,token=?,default_branch=?,mirror_path=?,status='cloning',error=NULL WHERE id=?",
-    ).run(name, gitUrl, input.token || null, input.default_branch || "main", dest, id);
+    ).run(name, gitUrl, input.token || null, requestedBranch, dest, id);
   } else {
     const info = env.db.prepare(
       "INSERT INTO repos (host_id,name,git_url,token,default_branch,status) VALUES (?,?,?,?,?,?)",
-    ).run(hostId, name, gitUrl, input.token || null, input.default_branch || "main", "cloning");
+    ).run(hostId, name, gitUrl, input.token || null, requestedBranch, "cloning");
     id = Number(info.lastInsertRowid);
     dest = mirrorPath(env.runner.dataDir, id, name);
     env.db.prepare("UPDATE repos SET mirror_path=? WHERE id=?").run(dest, id);
@@ -74,8 +75,9 @@ export async function registerOwnedRepo(env: OwnedRepoEnv, input: OwnedRepoInput
   env.syncRepos();
 
   try {
-    await initMirror(env.runner, gitUrl, input.token || null, dest);
-    env.db.prepare("UPDATE repos SET status='ready',error=NULL WHERE id=?").run(id);
+    const remote = await initMirror(env.runner, gitUrl, input.token || null, dest);
+    const defaultBranch = selectRemoteBranch(remote, requestedBranch);
+    env.db.prepare("UPDATE repos SET default_branch=?,status='ready',error=NULL WHERE id=?").run(defaultBranch, id);
     env.syncRepos();
     return { ok: true, id, existing: !!existing, retrying: !!existing, status: "ready" };
   } catch (error) {

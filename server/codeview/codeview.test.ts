@@ -5,10 +5,13 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import type { Repo, Task } from "../core/db.ts";
+import { initSchema } from "../core/schema.ts";
 import type { ExecOpts, Runner } from "../fleet/runner.ts";
 import {
   MAX_CODE_FILE_BYTES,
+  inspectOwnedCode,
   inspectRepoCode,
   inspectTaskCode,
 } from "./codeview.ts";
@@ -70,6 +73,101 @@ async function fixture() {
   } satisfies Task;
   return { dir, base, repo, task };
 }
+
+async function remoteFixture() {
+  const f = await fixture();
+  const origin = path.join(f.dir, "origin.git");
+  const mirror = path.join(f.dir, "mirror.git");
+  await git(f.dir, "branch", "-m", "master");
+  await git(f.dir, "init", "--bare", "-b", "master", origin);
+  await git(f.dir, "remote", "add", "origin", origin);
+  await git(f.dir, "push", "origin", "master");
+  await git(f.dir, "init", "--bare", mirror);
+  await git(mirror, "remote", "add", "origin", origin);
+  return { ...f, origin, mirror, repo: { ...f.repo, mirror_path: mirror } };
+}
+
+test("repository preview recovers a legacy main default when origin only has master", async () => {
+  const f = await remoteFixture();
+  try {
+    const tree = await inspectRepoCode(runner, f.repo, { operation: "tree" });
+    assert.equal(tree.kind, "tree");
+    if (tree.kind !== "tree") return;
+    assert.ok(tree.files.includes("src/app.ts"));
+    assert.deepEqual(tree.revision, { label: "master", commit: f.base });
+    const file = await inspectRepoCode(runner, f.repo, { operation: "file", path: "src/app.ts" });
+    assert.equal(file.kind, "file");
+    if (file.kind === "file") assert.equal(file.content, "export const answer = 1;\n");
+    assert.equal(await git(f.dir, "branch", "--show-current"), "master", "preview does not switch a worktree branch");
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test("refresh recovers a removed default even when its old tracking commit is cached", async () => {
+  const f = await remoteFixture();
+  const db = new Database(":memory:");
+  initSchema(db, { didMigrate: false, legacyDir: "/legacy", dataDir: f.dir });
+  db.prepare("INSERT INTO hosts (id,name,target,kind) VALUES (1,'local','','local')").run();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,default_branch,mirror_path,status) VALUES (1,1,'demo',?,'main',?,'ready')")
+    .run(f.origin, f.mirror);
+  let syncs = 0;
+  try {
+    await git(f.mirror, "fetch", "origin", "+refs/heads/master:refs/remotes/origin/main");
+    fs.writeFileSync(path.join(f.dir, "src", "app.ts"), "export const answer = 2;\n");
+    await git(f.dir, "add", "src/app.ts");
+    await git(f.dir, "commit", "-m", "advance master");
+    await git(f.dir, "push", "origin", "master");
+    const latest = await git(f.dir, "rev-parse", "HEAD");
+    const tree = await inspectOwnedCode(db, runner, { scope: "repo", id: 1, operation: "tree", refresh: true }, () => { syncs++; });
+    assert.equal(tree.ok, true);
+    if (!tree.ok) return;
+    assert.deepEqual(tree.revision, { label: "master", commit: latest });
+    assert.equal(syncs, 1, "the repaired catalog is persisted to its manifest");
+    assert.deepEqual(db.prepare("SELECT default_branch FROM repos WHERE id=1").get(), { default_branch: "master" });
+    const file = await inspectOwnedCode(db, runner, { scope: "repo", id: 1, operation: "file", path: "src/app.ts" }, () => { syncs++; });
+    assert.equal(file.ok, true);
+    if (!file.ok || file.kind !== "file") return;
+    assert.deepEqual(file.revision, { label: "master", commit: latest });
+    assert.equal(file.content, "export const answer = 2;\n");
+    assert.equal(syncs, 1);
+  } finally { db.close(); fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test("repository preview preserves a valid configured branch different from remote HEAD", async () => {
+  const f = await remoteFixture();
+  try {
+    await git(f.dir, "checkout", "-b", "release/stable");
+    fs.writeFileSync(path.join(f.dir, "src", "app.ts"), "export const answer = 3;\n");
+    await git(f.dir, "add", "src/app.ts");
+    await git(f.dir, "commit", "-m", "release");
+    await git(f.dir, "push", "origin", "release/stable");
+    f.repo.default_branch = "release/stable";
+    const file = await inspectRepoCode(runner, f.repo, { operation: "file", path: "src/app.ts" });
+    assert.equal(file.kind, "file");
+    if (file.kind !== "file") return;
+    assert.equal(file.revision.label, "release/stable");
+    assert.equal(file.content, "export const answer = 3;\n");
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test("cached repository and live task previews do not depend on remote branch discovery", async () => {
+  const f = await fixture();
+  const offline = new TestRunner();
+  offline.exec = async (file, args, opts) => {
+    assert.ok(!["fetch", "ls-remote"].includes(args[0]), "cached and task previews must not access origin");
+    return runner.exec(file, args, opts);
+  };
+  try {
+    assert.equal((await inspectRepoCode(offline, f.repo, { operation: "tree" })).kind, "tree");
+    fs.writeFileSync(path.join(f.dir, "src", "app.ts"), "export const answer = 4;\n");
+    f.repo.default_branch = "missing";
+    assert.equal((await inspectTaskCode(offline, f.task, { operation: "tree" })).kind, "tree");
+    const file = await inspectTaskCode(offline, f.task, { operation: "file", path: "src/app.ts" });
+    assert.equal(file.kind, "file");
+    if (file.kind === "file") assert.equal(file.content, "export const answer = 4;\n");
+    assert.equal((await inspectTaskCode(offline, f.task, { operation: "changes" })).kind, "changes");
+    assert.equal((await inspectTaskCode(offline, f.task, { operation: "diff", path: "src/app.ts" })).kind, "diff");
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
 
 test("repository view lists the committed structure and reads a text blob", async () => {
   const f = await fixture();

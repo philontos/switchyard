@@ -9,7 +9,7 @@ import type Database from "better-sqlite3";
 import { getOwnedRepo, getOwnedTask } from "../core/ownership.js";
 import type { Repo, Task } from "../core/db.js";
 import type { Runner } from "../fleet/runner.js";
-import { fetchBranch } from "../repo/git.js";
+import { fetchBranch, readRemoteBranches, selectRemoteBranch } from "../repo/git.js";
 
 type DB = Database.Database;
 
@@ -168,18 +168,25 @@ async function revParse(runner: Runner, cwd: string, ref: string): Promise<strin
 
 async function repoRevision(runner: Runner, repo: Repo, refresh: boolean): Promise<CodeRevision> {
   if (!repo.mirror_path) throw new CodeViewError("notReady", "Repository mirror is not ready");
-  const tracking = `refs/remotes/origin/${repo.default_branch}`;
-  if (refresh) await fetchBranch(runner, repo.mirror_path, repo.default_branch);
-  let commit = await revParse(runner, repo.mirror_path, tracking);
+  let branch = repo.default_branch;
+  let commit = await revParse(runner, repo.mirror_path, `refs/remotes/origin/${branch}`);
   if (!commit) {
-    commit = await revParse(runner, repo.mirror_path, `refs/heads/${repo.default_branch}`);
+    commit = await revParse(runner, repo.mirror_path, `refs/heads/${branch}`);
   }
-  if (!commit) {
-    await fetchBranch(runner, repo.mirror_path, repo.default_branch);
-    commit = await revParse(runner, repo.mirror_path, tracking);
+  if (refresh || !commit) {
+    const remote = await readRemoteBranches(runner, repo.mirror_path);
+    try {
+      // Older catalog rows assumed "main" even when origin used another
+      // default. Keep any valid configured branch, otherwise use origin HEAD.
+      branch = selectRemoteBranch(remote, branch, true);
+    } catch (error) {
+      throw new CodeViewError("refMissing", (error as Error).message);
+    }
+    await fetchBranch(runner, repo.mirror_path, branch);
+    commit = await revParse(runner, repo.mirror_path, `refs/remotes/origin/${branch}`);
   }
-  if (!commit) throw new CodeViewError("refMissing", `Branch ${repo.default_branch} is not available`);
-  return { label: repo.default_branch, commit };
+  if (!commit) throw new CodeViewError("refMissing", `Branch ${branch} is not available`);
+  return { label: branch, commit };
 }
 
 async function taskHead(runner: Runner, task: Task): Promise<string> {
@@ -486,13 +493,29 @@ export async function codeResult(work: () => Promise<CodePayload>): Promise<Code
   }
 }
 
-/** Resolve an owner-local request by id. Used by the one-shot tdsp verb. */
-export async function inspectOwnedCode(db: DB, runner: Runner, request: CodeInspectRequest): Promise<CodeInspectResult> {
+/** Resolve an owner-local request and retain any recovered catalog default. */
+export async function inspectOwnedCode(
+  db: DB,
+  runner: Runner,
+  request: CodeInspectRequest,
+  syncRepos: () => void = () => {},
+): Promise<CodeInspectResult> {
   if (!isCodeInspectRequest(request)) return { ok: false, error: "invalidRequest", message: "Invalid code inspection request" };
   if (request.scope === "repo") {
     const repo = getOwnedRepo(db, request.id);
     if (!repo) return { ok: false, error: "notFound", message: "Repository not found" };
-    return codeResult(() => inspectRepoCode(runner, repo, request));
+    return codeResult(async () => {
+      const payload = await inspectRepoCode(runner, repo, request);
+      if (payload.revision.label !== repo.default_branch) {
+        // Keep subsequent file reads on the recovered branch, including when
+        // an obsolete tracking ref for the old branch is still cached. Never
+        // overwrite a concurrent catalog edit or change any task's baseline.
+        const updated = db.prepare("UPDATE repos SET default_branch=? WHERE id=? AND default_branch=?")
+          .run(payload.revision.label, repo.id, repo.default_branch);
+        if (updated.changes) syncRepos();
+      }
+      return payload;
+    });
   }
   const task = getOwnedTask(db, request.id);
   if (!task) return { ok: false, error: "notFound", message: "Task not found" };

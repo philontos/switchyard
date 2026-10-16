@@ -257,7 +257,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
     }
     return result;
   },
-  inspectCode: (request) => inspectOwnedCode(db, localRunner, request),
+  inspectCode: (request) => inspectOwnedCode(db, localRunner, request, syncReposManifest),
   transcript: async (request) => {
     const task = getOwnedTask(db, request.taskId);
     if (!task) {

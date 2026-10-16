@@ -9,8 +9,10 @@ import {
   addWorktreeFromBranch,
   fetchBranch,
   fetchMirror,
+  readRemoteBranches,
   REFERENCE_GIT_TIMEOUT_MS,
   removeWorktree,
+  selectRemoteBranch,
 } from "./git.ts";
 import { localRunner } from "../fleet/runner.ts";
 import type { Runner } from "../fleet/runner.ts";
@@ -31,6 +33,30 @@ function fakeRunner(outputFor: (args: string[]) => string = () => "") {
   } as unknown as Runner;
   return { runner, calls };
 }
+
+test("remote branch discovery distinguishes symbolic HEAD from branch refs", async () => {
+  const { runner } = fakeRunner(() => [
+    "ref: refs/heads/release/stable\tHEAD",
+    `${"a".repeat(40)}\tHEAD`,
+    `${"b".repeat(40)}\trefs/heads/develop`,
+    `${"a".repeat(40)}\trefs/heads/release/stable`,
+    `${"c".repeat(40)}\trefs/tags/v1`,
+    "",
+  ].join("\r\n"));
+  const remote = await readRemoteBranches(runner, "/m.git");
+  assert.deepEqual(remote, { branches: ["develop", "release/stable"], defaultBranch: "release/stable" });
+  assert.equal(selectRemoteBranch(remote), "release/stable");
+  assert.equal(selectRemoteBranch(remote, "develop", true), "develop");
+  assert.equal(selectRemoteBranch(remote, "main", true), "release/stable");
+  assert.throws(() => selectRemoteBranch(remote, "main"), /does not exist/);
+});
+
+test("remote default selection handles missing or dangling HEAD without guessing between branches", () => {
+  assert.equal(selectRemoteBranch({ branches: ["master"], defaultBranch: null }), "master");
+  assert.equal(selectRemoteBranch({ branches: ["master"], defaultBranch: "missing" }), "master");
+  assert.throws(() => selectRemoteBranch({ branches: ["master", "develop"], defaultBranch: null }), /specify an existing branch/);
+  assert.throws(() => selectRemoteBranch({ branches: [], defaultBranch: null }), /push an initial commit/);
+});
 
 test("fetchBranch writes the remote-tracking ref, never the checked-out local head", async () => {
   const { runner, calls } = fakeRunner();

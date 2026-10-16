@@ -62,9 +62,7 @@ import { parseNodeJson, runNodeCommand } from "../fleet/nodeclient.js";
 import { insertCheckedProvider, providerSummaries, providersForList } from "../provider/providers.js";
 import {
   codeErrorStatus,
-  codeResult,
-  inspectRepoCode,
-  inspectTaskCode,
+  inspectOwnedCode,
   isCodeInspectRequest,
   type CodeInspectRequest,
 } from "../codeview/codeview.js";
@@ -836,16 +834,7 @@ app.post("/api/code/inspect", async (req, res) => {
       .json({ code: result.error, error: result.message || result.error });
   }
 
-  let result;
-  if (request.scope === "repo") {
-    const repo = getRepo.get(request.id) as Repo | undefined;
-    if (!repo) return res.status(404).json({ error: tr(lang, "notFound") });
-    result = await codeResult(() => inspectRepoCode(localRunner, repo, request));
-  } else {
-    const task = getTask.get(request.id) as Task | undefined;
-    if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
-    result = await codeResult(() => inspectTaskCode(localRunner, task, request));
-  }
+  const result = await inspectOwnedCode(db, localRunner, request, syncReposManifest);
   if (result.ok) return res.json(result);
   return res.status(codeErrorStatus(result.error)).json({ code: result.error, error: result.message });
 });
