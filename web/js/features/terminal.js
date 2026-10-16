@@ -320,6 +320,9 @@ function createPane(id, query, agent) {
   pane.className = "term-pane";
   pane.style.display = "none";
   pane.dataset.task = String(id);
+  // Hide the browser menu without blocking xterm's mouse reporting, so tmux
+  // and terminal applications can still show their own right-click menus.
+  pane.addEventListener("contextmenu", e => e.preventDefault());
   $("term").appendChild(pane);
 
   const term = new Terminal({
