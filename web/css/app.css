@@ -156,6 +156,14 @@
 .cv-lines { position: sticky; left: 0; z-index: 2; min-width: 48px; padding-left: 8px; padding-right: 10px; text-align: right;
   color: var(--faint-2); background: var(--surface); border-right: 1px solid var(--border); user-select: none; }
 .cv-source { min-width: max-content; padding-left: 14px; padding-right: 24px; color: var(--text); }
+.cv-code-scroll.cv-wrap, .cv-diff.cv-wrap { min-width: 0; width: 100%; }
+.cv-code-scroll.cv-wrap .cv-source { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cv-code-scroll.cv-wrap .cv-source-numbered { display: grid; grid-template-columns: auto minmax(0, 1fr);
+  align-content: start; padding-left: 0; padding-right: 0; }
+.cv-source-line { display: contents; }
+.cv-source-line::before { content: attr(data-line); min-width: 48px; padding: 0 10px 0 8px; text-align: right;
+  white-space: pre; color: var(--faint-2); background: var(--surface); border-right: 1px solid var(--border); user-select: none; }
+.cv-source-text { min-width: 0; padding: 0 24px 0 14px; }
 .cv-source.hljs { background: transparent; }
 .cv-source .hljs-comment, .cv-source .hljs-quote { color: var(--code-comment); font-style: italic; }
 .cv-source .hljs-keyword, .cv-source .hljs-selector-tag, .cv-source .hljs-subst,
@@ -189,6 +197,7 @@
 .cv-json-truncated { margin: 3px 0; padding: 3px 6px; color: var(--faint); font-style: italic; }
 .cv-diff { min-width: 100%; width: max-content; padding: 9px 0 18px; font: 12px/1.5 Menlo, Consolas, monospace; tab-size: 2; }
 .cv-diff-line { min-height: 18px; padding: 0 18px; white-space: pre; color: var(--muted); }
+.cv-diff.cv-wrap .cv-diff-line { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cv-diff-line.add { color: color-mix(in srgb, var(--green) 88%, var(--text)); background: color-mix(in srgb, var(--green) 10%, transparent); }
 .cv-diff-line.del { color: var(--red-text); background: color-mix(in srgb, var(--red) 9%, transparent); }
 .cv-diff-line.hunk { margin: 5px 0; color: var(--accent-text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
