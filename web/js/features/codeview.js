@@ -326,21 +326,72 @@ function renderPathBar(text, presentation = null, structured = false) {
   bar.append(switcher);
 }
 
+function wrapSourceLines(source, count) {
+  const fragment = document.createDocumentFragment();
+  const ancestors = [];
+  let lineNumber = 0, target;
+  const startLine = () => {
+    const row = document.createElement("span");
+    row.className = "cv-source-line";
+    row.dataset.line = String(++lineNumber);
+    target = document.createElement("span");
+    target.className = "cv-source-text";
+    row.append(target);
+    fragment.append(row);
+    // Highlighted spans can cross newlines (for example, fenced code). Carry
+    // their styling into each row without highlighting lines independently.
+    for (const ancestor of ancestors) {
+      const clone = ancestor.cloneNode(false);
+      target.append(clone);
+      target = clone;
+    }
+  };
+  const append = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const parts = node.textContent.split("\n");
+      for (let i = 0; i < parts.length; i++) {
+        if (i > 0) {
+          target.append("\n");
+          if (lineNumber < count) startLine();
+        }
+        if (parts[i]) target.append(parts[i]);
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const clone = node.cloneNode(false);
+      target.append(clone);
+      target = clone;
+      ancestors.push(node);
+      node.childNodes.forEach(append);
+      ancestors.pop();
+      target = target.parentNode;
+    }
+  };
+  startLine();
+  source.childNodes.forEach(append);
+  source.replaceChildren(fragment);
+  source.classList.add("cv-source-numbered");
+}
+
 function renderSource(payload, presentation, content) {
+  const wrap = presentation.language === "markdown";
   const scroll = document.createElement("div");
   scroll.className = "cv-code-scroll";
+  scroll.classList.toggle("cv-wrap", wrap);
   const source = document.createElement("pre");
   source.className = "cv-source";
   source.textContent = payload.content;
-  const lines = document.createElement("pre");
-  lines.className = "cv-lines";
   const count = codeLineCount(payload.content);
   // A pathological one-megabyte file can contain nearly one million blank
   // lines. Source still renders safely; omit the decorative gutter before it
   // becomes the expensive part of the preview.
   if (count <= MAX_LINE_NUMBERS) {
-    lines.textContent = Array.from({ length: count }, (_, i) => String(i + 1)).join("\n");
-    scroll.append(lines);
+    if (wrap) wrapSourceLines(source, count);
+    else {
+      const lines = document.createElement("pre");
+      lines.className = "cv-lines";
+      lines.textContent = Array.from({ length: count }, (_, i) => String(i + 1)).join("\n");
+      scroll.append(lines);
+    }
   }
   scroll.append(source);
   content.append(scroll);
@@ -358,6 +409,7 @@ function renderSource(payload, presentation, content) {
     } catch {
       source.textContent = payload.content;
     }
+    if (wrap && count <= MAX_LINE_NUMBERS) wrapSourceLines(source, count);
   });
 }
 
@@ -477,6 +529,7 @@ function renderDiff(payload) {
 
   const pre = document.createElement("div");
   pre.className = "cv-diff";
+  pre.classList.toggle("cv-wrap", classifyCodePath(payload.path).language === "markdown");
   const fragment = document.createDocumentFragment();
   for (const line of renderLines) {
     const row = document.createElement("div");
